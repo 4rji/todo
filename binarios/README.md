@@ -664,7 +664,7 @@ cockpitremove       remueve cock pit
 psss
 pssc
 usuario             Crea un usuario en bash, automatico.
-bannerC             Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubuntu, -star usa banner.txt
+banner              Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubuntu, -star usa banner.txt
 bannerlogin         Modify the banner after login with ssh and also when start computer
 
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
