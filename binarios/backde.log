@@ -1,6 +1,0 @@
-LIST SCAN #1 @ 2026-05-02 16:35:56 (linux) items=5
-  1) NetworkManager [UDP] PID=839 Src=sys User=root Remote=10.0.4.1:67
-  2) codex [TCP] PID=441834 Src=usr User=natasha Remote=104.18.32.47:443
-  3) python [TCP] PID=1539 Src=usr User=natasha Remote=162.159.140.98:443
-  4) sshd-session [TCP] PID=440722 Src=unk User=root Remote=192.168.3.17:52973
-  5) sshd-session [TCP] PID=442623 Src=unk User=root Remote=192.168.3.17:53044
