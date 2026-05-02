@@ -94,6 +94,17 @@
         "short_desc": "Descarga automáticamente todos los archivos de audio desde cualquier página web.",
         "detailed_desc": "Script basado en Puppeteer que abre la página en un navegador headless y captura todas las respuestas HTTP con contenido de audio (por ejemplo .ogg, .mp3, .wav, .m4a, .opus). Guarda cada archivo en un directorio 'downloads'.\n\nUso:\n  node audiodown.js <URL> [--wait 10000]\n\nArgumentos:\n  <URL>        Página web de la cual descargar los audios.\n  --wait ms    Tiempo adicional en milisegundos para mantener la página abierta y permitir que carguen sonidos disparados por animaciones o interacciones.\n\nEjemplo:\n  node audiodown.js https://ejemplo.com --wait 10000\n\nLos audios se guardan automáticamente con nombre único en la carpeta 'downloads'."
     },
+    "auditd-test": {
+        "name": "auditd-test",
+        "short_desc": "Ejecuta pruebas controladas para disparar eventos de auditd y validar reglas/alertas.",
+        "detailed_desc": [
+            "Este script en Bash genera una batería de eventos auditables para comprobar que las reglas de auditd, búsquedas con ausearch y posibles webhooks o integraciones SIEM estén detectando actividad sensible como se espera.",
+            "Antes de iniciar, crea un directorio temporal en /tmp con marca de tiempo y guarda copias de seguridad de /etc/hosts y /etc/ssh/sshd_config. También registra una rutina de limpieza con trap para restaurar esos archivos al salir y eliminar artefactos temporales creados durante las pruebas.",
+            "Las pruebas incluidas cubren varios escenarios: ejecución de binarios desde /tmp, /dev/shm y el home del usuario como root; ejecución de python3 como root para simular comportamiento tipo LoLBIN o priv_esc; creación y borrado de un archivo temporal en /tmp; cambio de permisos de /etc/hosts; cambio de propietario de /etc/hosts; modificación de /etc/ssh/sshd_config; creación y ejecución de un script dropper en /tmp; e intento de cargar un módulo del kernel con modprobe.",
+            "El objetivo es activar claves de auditd como red_exec, priv_esc, delete, perm_change, owner_change, sshd_config y module_load, siempre que existan reglas cargadas para esos eventos. El script no comprueba automáticamente los resultados, sino que al final imprime varios comandos ausearch -k ... para que el usuario valide manualmente qué eventos quedaron registrados.",
+            "Requiere sudo y modifica temporalmente archivos sensibles del sistema, aunque intenta dejarlos en su estado original usando las copias de seguridad. Es útil para validar pipelines de detección o reglas nuevas sin tener que reproducir manualmente cada caso."
+        ]
+    },
     "nmap-full": {
         "name": "nmap_full_scan_report",
         "short_desc": "Performs a full multi-stage network scan and generates a styled HTML report.",
