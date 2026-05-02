@@ -84,10 +84,15 @@
         "short_desc": "Disables dynamic MOTD scripts and sets a custom static message.",
         "detailed_desc": "This script disables all dynamic MOTD components by renaming the scripts in /etc/update-motd.d. It optionally prompts the user to set a static welcome message, including an ASCII banner and custom text, which is written to /etc/motd. Future modifications can be made manually by editing that file."
     },
-    "bannerm": {
-        "name": "bannerm",
-        "short_desc": "Script to set up a login banner warning message.",
-        "detailed_desc": "This script creates a login banner warning message by writing a predefined text to /etc/mctcbanner, setting appropriate permissions, and replacing /etc/issue and /etc/motd with symbolic links to the new file. It also backs up the original /etc/issue and /etc/motd files. This ensures the banner is displayed during both local and remote logins."
+    "bannerC": {
+        "name": "bannerC",
+        "short_desc": "Configures SSH, TTY, and MOTD login warning banners for RHEL-like or Debian-like systems.",
+        "detailed_desc": [
+            "This Bash script applies a standard authorized-use warning banner to SSH pre-login, local TTY login, and /etc/motd.",
+            "It requires either -s for Oracle/RHEL-style systems or -d for Debian/Ubuntu-style systems, then updates /etc/ssh/sshd_config with a Banner directive, writes /etc/ssh/sshd-banner, /etc/issue, and /etc/motd, validates sshd_config when sshd is available, and restarts the appropriate SSH service.",
+            "The optional -star flag uses banner.txt from /opt/4rji/bin, or from the same directory as the script, so commands such as bannerC -s -star or bannerC -d -star install the star-themed banner.",
+            "It also refreshes common getty TTY services when systemd is available and adds convenience aliases for editing the SSH banner, /etc/issue, and /etc/motd."
+        ]
     },
     "audiodown": {
         "name": "audiodown",

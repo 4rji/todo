@@ -664,7 +664,7 @@ cockpitremove       remueve cock pit
 psss
 pssc
 usuario             Crea un usuario en bash, automatico.
-bannerC             Banner for login and ssh
+bannerC             Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubuntu, -star usa banner.txt
 bannerlogin         Modify the banner after login with ssh and also when start computer
 
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
@@ -729,7 +729,6 @@ setnologin         Crea una lista con los usuarios en la home, y hace backup de 
 setnologin2        Hace un nologin a el archivo ~/users-pw, modificarlo primero porque le hace a todos de lista
 
 
-bannerm           Hace un banner para ssh para CCDC, necesita hacerlo dos veces. 
 sshbanerlogin     Mensaje bienvenida de ssh ANTES de conectarse
 sshbanerwelcome   mensaje bienvenida de ssh DESPUES de conectarse (no usar CCDC)
 hardnet           modifica ipv4 y tambien ipv6

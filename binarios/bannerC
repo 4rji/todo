@@ -1,50 +1,263 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BANNER_TEXT='
- AUTHORIZED USE ONLY 
+SSHD_CFG="/etc/ssh/sshd_config"
+SSHD_BANNER="/etc/ssh/sshd-banner"
+ISSUE_FILE="/etc/issue"
+MOTD_FILE="/etc/motd"
 
-This system is the property of the organization and may be accessed only by authorized users. 
-By continuing to use this system, you acknowledge and consent to monitoring, recording, and 
+DEFAULT_BANNER_TEXT="$(cat <<'BANNER'
+AUTHORIZED USE ONLY
+
+This system is the property of the organization and may be accessed only by authorized users.
+By continuing to use this system, you acknowledge and consent to monitoring, recording, and
 review of all activity for security and administrative purposes.
 
-There is no expectation of privacy. Unauthorized access or misuse is strictly prohibited and 
+There is no expectation of privacy. Unauthorized access or misuse is strictly prohibited and
 may result in disciplinary action, civil penalties, and criminal prosecution.
 
 If you are not an authorized user, disconnect immediately.
-'
+BANNER
+)"
 
-# ---------------- SSH PRE-LOGIN BANNER ----------------
-sudo sed -i '/^[[:space:]]*Banner[[:space:]]\+/d' /etc/ssh/sshd_config
+usage() {
+    cat <<'USAGE'
+Uso: bannerC (-s|-d) [-star]
 
-echo "$BANNER_TEXT" | sudo tee /etc/ssh/sshd-banner > /dev/null
-sudo chmod 644 /etc/ssh/sshd-banner
+Flags:
+  -s       Oracle/RHEL: usa sshd.service y ~/.bashrc para aliases.
+  -d       Debian/Ubuntu: prefiere ssh.service y usa aliases de shell.
+  -star    Usa /opt/4rji/bin/banner.txt como texto del banner.
+  -h       Muestra esta ayuda.
 
-echo "Banner /etc/ssh/sshd-banner" | sudo tee -a /etc/ssh/sshd_config > /dev/null
+Ejemplos:
+  bannerC -s
+  bannerC -d -star
+USAGE
+}
 
-# Reinicia el servicio correcto: sshd (Fedora/RHEL/Oracle) o ssh (Ubuntu/Debian)
-if systemctl list-unit-files --no-pager | awk '{print $1}' | grep -qx "sshd.service"; then
-  sudo systemctl restart sshd
-elif systemctl list-unit-files --no-pager | awk '{print $1}' | grep -qx "ssh.service"; then
-  sudo systemctl restart ssh
-else
-  echo "WARN: No encontre sshd.service ni ssh.service (revisa tu setup SSH)."
-fi
+die() {
+    printf 'bannerC: %s\n' "$*" >&2
+    exit 1
+}
 
-# ---------------- TTY CONSOLE PRE-LOGIN BANNER ----------------
-echo "$BANNER_TEXT" | sudo tee /etc/issue > /dev/null
-sudo chmod 644 /etc/issue
+mode=""
+use_star=0
 
-# Refresca consola: reinicia getty en las TTYs que existan
-# (esto hace que /etc/issue se vuelva a leer)
-for i in 1 2 3 4 5 6; do
-  if systemctl list-unit-files --no-pager | awk '{print $1}' | grep -qx "getty@tty${i}.service"; then
-    sudo systemctl restart "getty@tty${i}" || true
-  fi
+set_mode() {
+    local selected="$1"
+
+    if [[ -n "$mode" && "$mode" != "$selected" ]]; then
+        die "usa solo una familia de distro: -s o -d"
+    fi
+
+    mode="$selected"
+}
+
+while (($#)); do
+    case "$1" in
+        -s|--rhel|--oracle)
+            set_mode "rhel"
+            ;;
+        -d|--debian|--ubuntu)
+            set_mode "debian"
+            ;;
+        -star|--star)
+            use_star=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            die "flag desconocida: $1"
+            ;;
+    esac
+    shift
 done
 
-# ---------------- ALIAS ----------------
-grep -q "alias bannere=" ~/.zshrc 2>/dev/null || echo "alias bannere='sudo nano /etc/ssh/sshd-banner'" >> ~/.zshrc
-grep -q "alias issuee=" ~/.zshrc 2>/dev/null || echo "alias issuee='sudo nano /etc/issue'" >> ~/.zshrc
+if [[ -z "$mode" ]]; then
+    usage >&2
+    die "elige -s para Oracle/RHEL o -d para Debian/Ubuntu"
+fi
 
-echo "Listo: banner SSH (pre-login) + banner TTY (pre-login) aplicados."
+SUDO=()
+if [[ "$(id -u)" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || die "sudo no encontrado"
+    SUDO=(sudo)
+fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+find_star_banner() {
+    local source
+    local sources=()
+
+    [[ -n "${BANNERSTAR_FILE:-}" ]] && sources+=("$BANNERSTAR_FILE")
+    sources+=("/opt/4rji/bin/banner.txt" "$script_dir/banner.txt")
+
+    for source in "${sources[@]}"; do
+        if [[ -r "$source" ]]; then
+            printf '%s\n' "$source"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+find_sshd() {
+    if command -v sshd >/dev/null 2>&1; then
+        command -v sshd
+        return 0
+    fi
+
+    if [[ -x /usr/sbin/sshd ]]; then
+        printf '%s\n' /usr/sbin/sshd
+        return 0
+    fi
+
+    if [[ -x /sbin/sshd ]]; then
+        printf '%s\n' /sbin/sshd
+        return 0
+    fi
+
+    return 1
+}
+
+write_banner_file() {
+    local path="$1"
+
+    printf '%s\n' "$banner_text" | "${SUDO[@]}" tee "$path" >/dev/null
+    "${SUDO[@]}" chmod 644 "$path"
+}
+
+unit_exists() {
+    local unit="$1"
+
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl list-unit-files --no-pager --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$unit"
+}
+
+restart_ssh_service() {
+    local unit
+    local units=()
+
+    if [[ "$mode" == "rhel" ]]; then
+        units=("sshd.service")
+    else
+        units=("ssh.service" "sshd.service")
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        for unit in "${units[@]}"; do
+            if unit_exists "$unit"; then
+                "${SUDO[@]}" systemctl restart "${unit%.service}"
+                return 0
+            fi
+        done
+    fi
+
+    if command -v service >/dev/null 2>&1; then
+        if [[ "$mode" == "rhel" ]]; then
+            "${SUDO[@]}" service sshd restart 2>/dev/null && return 0
+        else
+            "${SUDO[@]}" service ssh restart 2>/dev/null && return 0
+            "${SUDO[@]}" service sshd restart 2>/dev/null && return 0
+        fi
+    fi
+
+    printf 'WARN: banner SSH escrito, pero no pude reiniciar el servicio SSH.\n' >&2
+}
+
+restart_getty() {
+    local i
+
+    command -v systemctl >/dev/null 2>&1 || return 0
+
+    for i in 1 2 3 4 5 6; do
+        "${SUDO[@]}" systemctl restart "getty@tty${i}.service" 2>/dev/null || true
+    done
+}
+
+add_aliases() {
+    local target_home="${HOME}"
+    local found_home=""
+    local preferred_rc
+    local rc
+
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        found_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+        [[ -n "$found_home" ]] && target_home="$found_home"
+    fi
+
+    preferred_rc="$target_home/.zshrc"
+    [[ "$mode" == "rhel" ]] && preferred_rc="$target_home/.bashrc"
+
+    touch "$preferred_rc"
+
+    for rc in "$target_home/.bashrc" "$target_home/.zshrc"; do
+        [[ -e "$rc" ]] || continue
+
+        grep -q "^alias bannere=" "$rc" 2>/dev/null || printf "alias bannere='sudo nano %s'\n" "$SSHD_BANNER" >> "$rc"
+        grep -q "^alias issuee=" "$rc" 2>/dev/null || printf "alias issuee='sudo nano %s'\n" "$ISSUE_FILE" >> "$rc"
+        grep -q "^alias motde=" "$rc" 2>/dev/null || printf "alias motde='sudo nano %s'\n" "$MOTD_FILE" >> "$rc"
+
+        if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+            chown "$SUDO_USER:" "$rc" 2>/dev/null || true
+        fi
+    done
+}
+
+if [[ ! -f "$SSHD_CFG" ]]; then
+    die "$SSHD_CFG no existe; instala o revisa openssh-server"
+fi
+
+if (( use_star )); then
+    star_source="$(find_star_banner)" || die "no encontre banner.txt en /opt/4rji/bin ni junto al script"
+    banner_text="$(<"$star_source")"
+else
+    banner_text="$DEFAULT_BANNER_TEXT"
+fi
+
+write_banner_file "$SSHD_BANNER"
+write_banner_file "$ISSUE_FILE"
+write_banner_file "$MOTD_FILE"
+
+backup="${SSHD_CFG}.bak.$(date +%Y%m%d%H%M%S)"
+tmp_cfg="$(mktemp)"
+trap 'rm -f "$tmp_cfg"' EXIT
+
+"${SUDO[@]}" cp -p "$SSHD_CFG" "$backup"
+"${SUDO[@]}" awk -v banner_line="Banner $SSHD_BANNER" '
+    /^[[:space:]]*Banner[[:space:]]+/ { next }
+    /^[[:space:]]*Match[[:space:]]/ && !added {
+        print banner_line
+        added = 1
+    }
+    { print }
+    END {
+        if (!added) {
+            print banner_line
+        }
+    }
+' "$SSHD_CFG" > "$tmp_cfg"
+"${SUDO[@]}" install -m 644 "$tmp_cfg" "$SSHD_CFG"
+
+if sshd_bin="$(find_sshd)"; then
+    if ! "${SUDO[@]}" "$sshd_bin" -t; then
+        "${SUDO[@]}" cp -p "$backup" "$SSHD_CFG"
+        die "sshd_config fallo validacion; restaure $backup"
+    fi
+fi
+
+restart_ssh_service
+restart_getty
+add_aliases
+
+if (( use_star )); then
+    printf 'Listo: banner SSH/TTY/MOTD aplicado en modo %s usando %s.\n' "$mode" "$star_source"
+else
+    printf 'Listo: banner SSH/TTY/MOTD aplicado en modo %s.\n' "$mode"
+fi
