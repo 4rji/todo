@@ -291,8 +291,7 @@ adios               borra toda una carpeta con scrub
 todob               actualiza los binarios, funciones, alias y 2-4rji.sh,   -o para omitir binarios 
 herrabinp           para pacman, existe para yum, y para dnf, y apt es la normal de arriba todob
 herralias           Actualiza los binarios descargando solo alias
-zipsend             Comprime y envia una carpeta por airsend -f
-zipsendm            Comprime y envia una carpeta por airsend -f
+airzip              Comprime y envia una carpeta por airsend -f
 cscp                copiar archivos en scp en lugar de sftp    
 csftp               copia un archivo por sftp hubicado en home, pregunta la IP y usuario y archivo     
 weather             Muestra el clima geolocalizacion usar

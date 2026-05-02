@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -e
+
+sistema="$(uname -s)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$sistema" in
+    Linux)
+        exec "$script_dir/zipsend_amd" "$@"
+        ;;
+    Darwin)
+        exec "$script_dir/zipsendm" "$@"
+        ;;
+    *)
+        echo "Sistema operativo no soportado: $sistema" >&2
+        exit 1
+        ;;
+esac
