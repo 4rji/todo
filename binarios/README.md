@@ -210,9 +210,6 @@ dnssec              Hace pruebas al servidor dns para ver si usa DNSSEC
 dnsdump             Comandos de tcpdump y unbound para capturar trafico dns
 
 
-#starlink
-aprender            Lista de lo que tengo que aprender.
-
 
 ###------hardware stuff
 bateriamonitor      Muestra los watts y el estado de carga en kali
