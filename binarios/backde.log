@@ -1,0 +1,5 @@
+LIST SCAN #1 @ 2026-05-02 16:34:04 (linux) items=4
+  1) NetworkManager [UDP] PID=839 Src=sys User=root Remote=10.0.4.1:67
+  2) codex [TCP] PID=441834 Src=usr User=natasha Remote=104.18.32.47:443
+  3) sshd-session [TCP] PID=440722 Src=unk User=root Remote=192.168.3.17:52973
+  4) sshd-session [TCP] PID=442623 Src=unk User=root Remote=192.168.3.17:53044

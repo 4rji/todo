@@ -670,7 +670,7 @@ bannerlogin         Modify the banner after login with ssh and also when start c
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
 backd-detect        detecta conexiones sospechosas hacia rangos RFC1918 e identifica procesos asociados
 backde              para detectar conexions, es un binario go
-backd               Muestra conexiones actuales con sus datos detallados, binario go 
+backd               Wrapper: usa backd_amd en Linux amd64/x86_64 y backdm en macOS arm64 desde /opt/4rji/bin.
 blockip             Bloquea IPs agregando a un set ipset y aplicando una regla iptables
 services            Encuentra servicios que no son del kernel linux corriendo.
 netevils            aun no se    
