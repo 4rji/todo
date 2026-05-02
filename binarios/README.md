@@ -637,6 +637,7 @@ usua                Copia un usuario a /content/users
 bashcurl            Crea una bash 443 TCP para usar en curl, monta servidor, crea bash, curl localhost/bash | bash
 eyewit              Guarda la pagina con eyewitness, solo pregunta por el directorio, usar $eyeruta export
 pas                 Guarda clipboad en maquina.md
+alis                Make an alias for zshrc quickly
 qwe                 Alias de clipc && pas
 goo                 Abre google chrome con la ip o pagina despues, es una bash function
 listaa              Agrega un nuevo nombre a la lista apache para el servidor apache
