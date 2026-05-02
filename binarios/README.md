@@ -63,7 +63,7 @@ targetip            para poner el target en la waybar ./script Palabra
 ddtest              probar rendimiento de escritura en disco (benchmark de I/O).
 cleandefaulroute    elimina rutas default creadas por interfaces veth* (docker kasm error)
 linux-shortcut      Pasos para crear un shortcut en linux 
-apagarlcd           Apaga la pantalla de la laptop desde grub, para servidores
+apagarlcd           como lid, apaga la pantalla de la laptop desde grub, para servidores
 shm                 Aumenta la memoria de tmp de la /dev/shm, y la limpia con -c
 yazi                Como ranger para ver fotos, esta en comprimidos.
 fire                Abre firefox con distrobox, -g para google, -d duckducl. sin - para los dos
@@ -445,7 +445,7 @@ snifferip           Sniffer paquetes red que captura las cabeceras IP en direcci
 ataquehttp          HTTP DoS Test Tool de goldeneye, descomprime en tmp y de ahi dice como ejecutarlo.
 inundacion          hping3 un ataque de inundacion flood para pruebas de carga, pregunta por dos ataques
 metas               Script que inicia metasploit con base de datos
-ataquepython        (DoS) enviando múltiples solicitudes HTTP a una dirección IP del tipo GET
+ataquepython        (ddos)  enviando múltiples solicitudes HTTP a una dirección IP del tipo GET
 encrypt             Go, para encriptar archivos con pass o key, misma funcion que encryptar
 
 
