@@ -310,6 +310,19 @@
         "short_desc": "Instala Neovim y sus dependencias desde el código fuente.",
         "detailed_desc": "sudo apt install ninja-build gettext libtool libtool-bin autoconf automake cmake g++ pkg-config unzip curl doxygen -y\ngit clone https://github.com/neovim/neovim\ncd neovim\nmake CMAKE_BUILD_TYPE=Release\nsudo make install\ngit clone https://github.com/NvChad/starter ~/.config/nvim"
     },
+    "nanoinst": {
+        "name": "nanoinst",
+        "short_desc": "Installs nano if needed and writes a simple ~/.nanorc editor configuration.",
+        "detailed_desc": [
+            "Checks whether nano is installed and installs it when possible.",
+            "",
+            "Supported package managers: apt, pacman, dnf, and Homebrew.",
+            "Writes configuration to $HOME/.nanorc.",
+            "",
+            "The generated config enables autoindent, mouse support, hidden help, nowrap, and a tab size of 4.",
+            "For nano 5 or newer, it also converts tabs to spaces."
+        ]
+    },
     "ccssh": {
         "name": "ccssh",
         "short_desc": "Establece conexión SSH con verificación de permisos.",

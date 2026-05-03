@@ -139,6 +139,7 @@ lazydockerdinst     Instala lazydocker con go. instala go tambien
 instpowershell      Descarga nishang powershell modules
 openboxinst         Instala openbox que es un escritorio ligero, tambien instala chromium
 nviminst            Instala neovim, nvchad, 
+nanoinst            Installs nano if needed and writes a simple ~/.nanorc editor configuration.
 fkinst              Instala fk para corregir comando en terminal con pip python
 xrdpinst            Instala xrdp, inicia el servicio y copia la configuracion para plasma #vnc
 lxdeinst            Remueve xrpd e instala lxde que usa Lightweight X11 para equipos lentos #vnc

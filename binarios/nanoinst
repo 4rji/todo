@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -e
+
+FILE="$HOME/.nanorc"
+
+# Detect nano
+if ! command -v nano >/dev/null 2>&1; then
+  echo "nano not found. Installing..."
+  if command -v apt >/dev/null 2>&1; then
+    sudo apt update && sudo apt install -y nano
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm nano
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nano
+  elif command -v brew >/dev/null 2>&1; then
+    brew install nano
+  else
+    echo "Package manager not supported. Install nano manually."
+    exit 1
+  fi
+fi
+
+# Get nano version
+VER=$(nano --version | head -n1 | awk '{print $4}')
+MAJOR=$(echo "$VER" | cut -d. -f1)
+
+# Build config depending on version
+if [ "$MAJOR" -ge 5 ]; then
+  CONFIG=$(cat << 'EOF'
+set autoindent
+set tabstospaces
+set tabsize 4
+set mouse
+set nohelp
+set nowrap
+EOF
+)
+else
+  CONFIG=$(cat << 'EOF'
+set autoindent
+set tabsize 4
+set mouse
+set nohelp
+set nowrap
+EOF
+)
+fi
+
+# Write config
+echo "$CONFIG" > "$FILE"
+
+# Output
+echo "Done."
+echo "Modified file: $FILE"
+echo "Tip: Hold SHIFT while using the mouse to select text in the terminal."
