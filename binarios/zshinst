@@ -83,3 +83,12 @@ echo "  exec zsh"
 echo
 echo "Luego:"
 echo "  p10k configure"
+echo
+echo "Ahora:"
+echo "  zshinst2"
+echo "  neofinst"
+echo "  nanoinst"
+echo "  tmuxinst"
+echo "  bashfun"
+echo "  herralias"
+echo "  kittyinst"
