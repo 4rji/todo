@@ -13,6 +13,7 @@ script for snmp netw07t
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloaktools        Post-detection investigation checklist for decloak analysis
 decloak.py          File decloaking tool to identify possible rootkit-based content hiding
+copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
 processdecloak      Busca procesos ocultos en linux
 tlscheck            TLS cert check using SHA256 Useful for detecting TLS interception - MITM.
 ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999

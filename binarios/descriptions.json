@@ -720,5 +720,16 @@
             "",
             "On Ctrl+C, it summarizes elapsed time, sample count, fix count, best fix, max satellites used, and max SNR."
         ]
+    },
+    "copyfail.py": {
+        "name": "copyfail.py",
+        "short_desc": "AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.",
+        "detailed_desc": [
+            "Runs a compact Python proof-of-concept that opens the Linux AF_ALG crypto socket interface.",
+            "",
+            "It targets /usr/bin/su, sends crafted control messages, uses splice-based copying, and then launches su.",
+            "",
+            "Use only in an authorized local lab or defensive validation environment."
+        ]
     }
 }
