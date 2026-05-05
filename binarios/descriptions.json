@@ -768,5 +768,17 @@
             "Can install and configure fzf previews, thefuck aliases, and zoxide for zsh.",
             "Offers a menu option to install everything in one run."
         ]
+    },
+    "clamv": {
+        "name": "clamv",
+        "short_desc": "Installs, configures, updates, and runs ClamAV scans with logs and optional quarantine.",
+        "detailed_desc": [
+            "Detects Linux or macOS, installs ClamAV when missing, and prepares basic ClamAV configuration.",
+            "",
+            "Can add detected ClamAV binary directories to PATH, update signatures with freshclam, and run recursive clamscan jobs.",
+            "",
+            "Supports install-only, scan-only, update-only, path-only, custom scan paths, custom log directory, quarantine control, default filesystem excludes, and dry-run mode.",
+            "Each scan writes timestamped logs and prints an incident-response summary with detected infections and quarantine contents."
+        ]
     }
 }

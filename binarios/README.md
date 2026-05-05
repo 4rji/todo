@@ -21,7 +21,7 @@ ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
 
 
 ###------CCDC
-clamvscan           Escanea y crea logs de clamvscan
+clamv               Installs, configures, updates, and runs ClamAV scans with logs and optional quarantine.
 ipv6b               Bloquea ipv6 en linux. 
 ccdcinst            Instala los scripts en la bash de todob.
 dcusercreate        Crea usuario en el ccdcteam dominio, tener hosts 172.20.240.102 domain.local
@@ -192,7 +192,6 @@ tmuxinst            Archivos para la configuracion de tmux, lo instala. con B
 neofetchinst        Instala y personaliza neofetch para ppg1
 kittyinst           Instala kitty y baja su configuracion
 ovpninst            Instala OpenvpnServer para webadmin, 4rjiDocs
-clamvMacinst        Modifica la configuracion para MAC de clamv
 xrayinst            instala xray. no es mi script.
 xrayinst2           Descarga el archivo de configuracion a b1 
 fx11inst            Instala firefox en docker para acceder remotamente
@@ -685,8 +684,6 @@ sshmoni             Este busca conexiones activas ssh, muestra procesos PID y lu
 iarpon              Arpon para protejer de arp poising. arp sniff 
 iicmp               para protejer de ataques icmp, solo cambia el 0 a 1 este script
 rkhun               Instala rkhunter y chkrootkit, actualiza y ejecuta el scaneo 
-clamvinst           instala antivirus e inicia un scaneo solo ingresando la ruta, y se actualiza tambien 
-clamvpath           Agrega a el path clamv en bashrc y zshrc
 versudo             Inspecciona sudo folder
 
 mapa                Busca un proceso despues del script y lo mata ps aux
