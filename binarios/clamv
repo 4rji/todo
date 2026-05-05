@@ -1,0 +1,1018 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+ORIGINAL_PATH="${PATH:-}"
+
+MODE="auto"
+UPDATE_MODE="auto"
+FORCE_INSTALL=0
+DRY_RUN=0
+USE_DEFAULT_EXCLUDES=1
+QUARANTINE_ENABLED=1
+QUARANTINE_DIR="/quarantine"
+LOG_DIR="/var/log/clamav"
+
+OS_TYPE="unknown"
+OS_NAME="unknown"
+OS_ID=""
+OS_ID_LIKE=""
+CONF_DIR=""
+DB_DIR=""
+
+SCAN_TARGETS=()
+EXCLUDE_DIRS=()
+CLAMSCAN_ARGS=()
+
+usage() {
+  cat <<'EOF'
+ClamAV auto installer and scanner
+
+Usage:
+  clamv [options] [scan_path ...]
+
+Default behavior:
+  Detect the operating system, install ClamAV if missing, add the ClamAV
+  binary directory to PATH when needed, create/fix basic configuration, update
+  signatures only when the database is missing, then run a recursive scan.
+
+Options:
+  -h, --help                 Show this help message.
+  -p, --path PATH            Scan PATH. Can be used instead of a positional path.
+                             If no path is provided, / is scanned.
+  -i, --install-only         Install/configure ClamAV, update signatures, then exit.
+  -s, --scan-only            Only run the scan. Do not install, update, or edit PATH.
+  -u, --update-only          Install if needed, update signatures, then exit.
+      --path-only            Only add detected ClamAV binary directories to PATH.
+      --force-install        Run the installer even when ClamAV is already detected.
+      --update               Always run freshclam before scanning.
+      --no-update            Never run freshclam automatically.
+  -q, --quarantine DIR       Move infected files to DIR. Default: /quarantine.
+      --no-quarantine        Do not move infected files; report only.
+  -l, --log-dir DIR          Write scan logs to DIR. Default: /var/log/clamav.
+  -e, --exclude-dir REGEX    Add a clamscan --exclude-dir regular expression.
+                             Can be repeated.
+      --no-default-excludes  Disable built-in pseudo-filesystem excludes.
+      --dry-run              Print actions without changing the system.
+      --                     Pass all following arguments directly to clamscan.
+
+Examples:
+  clamv
+  clamv /home
+  clamv --update --path /srv/www
+  clamv --scan-only --no-quarantine ~/Downloads
+  clamv --install-only
+
+Exit codes:
+  0  Command completed. Infected files may still have been found; check summary.
+  2  Unsupported platform or missing required tool.
+  >2 clamscan or installer error.
+EOF
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 2
+}
+
+warn() {
+  echo "WARNING: $*" >&2
+}
+
+info() {
+  echo "[*] $*"
+}
+
+print_cmd() {
+  printf '%q ' "$@"
+  printf '\n'
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+run_cmd() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] '
+    print_cmd "$@"
+  else
+    "$@"
+  fi
+}
+
+run_root() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    run_cmd "$@"
+  else
+    need_cmd sudo || die "sudo is required for this action."
+    run_cmd sudo "$@"
+  fi
+}
+
+path_contains() {
+  path_string_contains "${PATH:-}" "$1"
+}
+
+path_string_contains() {
+  local path_list="$1"
+  local dir="$2"
+  case ":$path_list:" in
+    *":$dir:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+detect_os() {
+  local uname_s
+  uname_s="$(uname -s 2>/dev/null || echo unknown)"
+
+  case "$uname_s" in
+    Linux*) OS_TYPE="linux" ;;
+    Darwin*) OS_TYPE="macos" ;;
+    CYGWIN*|MINGW*|MSYS*) OS_TYPE="windows" ;;
+    *) OS_TYPE="unknown" ;;
+  esac
+
+  OS_NAME="$OS_TYPE"
+  if [[ "$OS_TYPE" == "linux" && -r /etc/os-release ]]; then
+    set +u
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    set -u
+    OS_ID="${ID:-}"
+    OS_ID_LIKE="${ID_LIKE:-}"
+    OS_NAME="${PRETTY_NAME:-Linux}"
+  elif [[ "$OS_TYPE" == "macos" ]]; then
+    OS_NAME="macOS"
+  elif [[ "$OS_TYPE" == "windows" ]]; then
+    OS_NAME="Windows"
+  fi
+}
+
+brew_prefix() {
+  need_cmd brew || return 1
+  brew --prefix 2>/dev/null || return 1
+}
+
+append_unique() {
+  local value="$1"
+  shift
+  local existing
+  for existing in "$@"; do
+    [[ "$existing" == "$value" ]] && return 1
+  done
+  return 0
+}
+
+known_bin_dirs() {
+  local dirs=()
+  local prefix
+
+  dirs+=("/usr/local/clamav/bin")
+
+  if prefix="$(brew_prefix 2>/dev/null)"; then
+    dirs+=("$prefix/bin")
+  fi
+
+  dirs+=(
+    "/opt/homebrew/bin"
+    "/usr/local/bin"
+    "/opt/local/bin"
+    "/usr/bin"
+    "/bin"
+  )
+
+  local d unique=()
+  for d in "${dirs[@]}"; do
+    append_unique "$d" "${unique[@]}" && unique+=("$d")
+  done
+
+  printf '%s\n' "${unique[@]}"
+}
+
+find_cmd_path() {
+  local name="$1"
+  local hit d
+
+  if hit="$(command -v "$name" 2>/dev/null)"; then
+    printf '%s\n' "$hit"
+    return 0
+  fi
+
+  while IFS= read -r d; do
+    [[ -x "$d/$name" ]] || continue
+    printf '%s\n' "$d/$name"
+    return 0
+  done < <(known_bin_dirs)
+
+  return 1
+}
+
+refresh_clamav_path() {
+  local d
+  while IFS= read -r d; do
+    [[ -d "$d" ]] || continue
+    [[ -x "$d/clamscan" || -x "$d/freshclam" || -x "$d/clamdscan" ]] || continue
+    path_contains "$d" || PATH="$d:$PATH"
+  done < <(known_bin_dirs)
+  export PATH
+}
+
+is_clamav_installed() {
+  refresh_clamav_path
+  find_cmd_path clamscan >/dev/null 2>&1
+}
+
+install_linux() {
+  if is_clamav_installed && [[ "$FORCE_INSTALL" -eq 0 ]]; then
+    info "ClamAV is already installed."
+    return 0
+  fi
+
+  info "Installing ClamAV on $OS_NAME..."
+
+  if need_cmd apt-get; then
+    run_root apt-get update
+    run_root apt-get install -y clamav clamav-daemon
+  elif need_cmd dnf; then
+    run_root dnf install -y clamav clamd clamav-update || run_root dnf install -y clamav
+  elif need_cmd yum; then
+    run_root yum install -y clamav clamd clamav-update || run_root yum install -y clamav
+  elif need_cmd zypper; then
+    run_root zypper --non-interactive install clamav
+  elif need_cmd pacman; then
+    run_root pacman -Sy --noconfirm clamav
+  elif need_cmd apk; then
+    run_root apk add clamav clamav-libunrar || run_root apk add clamav
+  else
+    die "Unsupported Linux package manager. Install ClamAV manually, then rerun this command."
+  fi
+
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  refresh_clamav_path
+  find_cmd_path clamscan >/dev/null 2>&1 || die "ClamAV install finished, but clamscan was not found."
+}
+
+install_macos() {
+  if is_clamav_installed && [[ "$FORCE_INSTALL" -eq 0 ]]; then
+    info "ClamAV is already installed."
+    return 0
+  fi
+
+  if need_cmd brew; then
+    info "Installing ClamAV with Homebrew..."
+    run_cmd brew install clamav
+  else
+    die "ClamAV is not installed and Homebrew was not found. Install Homebrew or the official package from https://www.clamav.net/downloads, then rerun this command."
+  fi
+
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  refresh_clamav_path
+  find_cmd_path clamscan >/dev/null 2>&1 || die "ClamAV install finished, but clamscan was not found."
+}
+
+install_windows() {
+  die "Windows was detected. Use clamWinst.ps1 from an elevated PowerShell session for Windows installation."
+}
+
+ensure_installed() {
+  case "$OS_TYPE" in
+    linux) install_linux ;;
+    macos) install_macos ;;
+    windows) install_windows ;;
+    *) die "Unsupported platform: $OS_NAME" ;;
+  esac
+}
+
+first_existing_parent() {
+  local path="$1"
+  local parent
+  parent="$path"
+
+  [[ -d "$parent" ]] || parent="$(dirname "$parent")"
+  while [[ ! -d "$parent" && "$parent" != "/" ]]; do
+    parent="$(dirname "$parent")"
+  done
+
+  printf '%s\n' "$parent"
+}
+
+mkdir_maybe_root() {
+  local dir="$1"
+  local parent
+  parent="$(first_existing_parent "$dir")"
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 || -w "$parent" ]]; then
+    run_cmd mkdir -p "$dir"
+  else
+    run_root mkdir -p "$dir"
+  fi
+}
+
+append_line_maybe_root() {
+  local file="$1"
+  local line="$2"
+  local parent
+  parent="$(first_existing_parent "$file")"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    info "[dry-run] Would append to $file: $line"
+    return 0
+  fi
+
+  if [[ -w "$file" || ( ! -e "$file" && -w "$parent" ) ]]; then
+    printf '%s\n' "$line" >> "$file"
+  else
+    printf '%s\n' "$line" | run_root tee -a "$file" >/dev/null
+  fi
+}
+
+touch_maybe_root() {
+  local file="$1"
+  local parent
+  parent="$(first_existing_parent "$file")"
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 || -w "$file" || ( ! -e "$file" && -w "$parent" ) ]]; then
+    run_cmd touch "$file"
+  else
+    run_root touch "$file"
+  fi
+}
+
+cp_maybe_root() {
+  local src="$1"
+  local dest="$2"
+  local parent
+  parent="$(first_existing_parent "$dest")"
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 || -w "$parent" ]]; then
+    run_cmd cp "$src" "$dest"
+  else
+    run_root cp "$src" "$dest"
+  fi
+}
+
+sed_maybe_root() {
+  local file="$1"
+  shift
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 || -w "$file" ]]; then
+    run_cmd sed -i.bak "$@" "$file"
+  else
+    run_root sed -i.bak "$@" "$file"
+  fi
+}
+
+target_home() {
+  local user home
+  user="${SUDO_USER:-${USER:-}}"
+
+  if [[ -z "$user" || "$user" == "root" ]]; then
+    printf '%s\n' "${HOME:-/root}"
+    return 0
+  fi
+
+  if [[ "$OS_TYPE" == "linux" && "$(command -v getent 2>/dev/null || true)" ]]; then
+    home="$(getent passwd "$user" | awk -F: '{print $6}' || true)"
+    [[ -n "$home" ]] && { printf '%s\n' "$home"; return 0; }
+  fi
+
+  if [[ "$OS_TYPE" == "macos" && "$(command -v dscl 2>/dev/null || true)" ]]; then
+    home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)"
+    [[ -n "$home" ]] && { printf '%s\n' "$home"; return 0; }
+  fi
+
+  printf '%s\n' "${HOME:-}"
+}
+
+should_persist_path_dir() {
+  case "$1" in
+    /bin|/usr/bin|/sbin|/usr/sbin) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+detected_clamav_bin_dirs() {
+  local dirs=()
+  local cmd path d
+
+  refresh_clamav_path
+  for cmd in clamscan freshclam clamdscan clamd; do
+    path="$(find_cmd_path "$cmd" 2>/dev/null || true)"
+    [[ -n "$path" ]] || continue
+    d="$(dirname "$path")"
+    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+  done
+
+  while IFS= read -r d; do
+    [[ -d "$d" ]] || continue
+    [[ -x "$d/clamscan" || -x "$d/freshclam" || -x "$d/clamdscan" ]] || continue
+    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+  done < <(known_bin_dirs)
+
+  printf '%s\n' "${dirs[@]}"
+}
+
+ensure_path() {
+  local home rc d line changed=0
+  local dirs=()
+
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    should_persist_path_dir "$d" || continue
+    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+  done < <(detected_clamav_bin_dirs)
+
+  if [[ "${#dirs[@]}" -eq 0 ]]; then
+    info "No non-standard ClamAV binary directory needs PATH setup."
+    return 0
+  fi
+
+  home="$(target_home)"
+  [[ -n "$home" && -d "$home" ]] || { warn "Could not determine a writable home directory for PATH setup."; return 0; }
+
+  for d in "${dirs[@]}"; do
+    if path_string_contains "$ORIGINAL_PATH" "$d"; then
+      info "$d is already in the current PATH."
+      continue
+    fi
+
+    path_contains "$d" || PATH="$d:$PATH"
+    export PATH
+
+    line="export PATH=\"$d:\$PATH\""
+    for rc in "$home/.zshrc" "$home/.bashrc"; do
+      if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "[dry-run] Would ensure PATH line in $rc: $line"
+        changed=1
+        continue
+      fi
+
+      [[ -e "$rc" ]] || touch "$rc"
+      if grep -qxF "$line" "$rc"; then
+        continue
+      fi
+      printf '\n%s\n' "$line" >> "$rc"
+      info "Added $d to $rc."
+      changed=1
+    done
+  done
+
+  [[ "$changed" -eq 1 ]] || info "PATH setup is already complete."
+}
+
+possible_conf_dirs() {
+  local dirs=()
+  local prefix
+
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if prefix="$(brew_prefix 2>/dev/null)"; then
+      dirs+=("$prefix/etc/clamav" "$prefix/etc")
+    fi
+    dirs+=(
+      "/usr/local/clamav/etc"
+      "/opt/homebrew/etc/clamav"
+      "/usr/local/etc/clamav"
+      "/usr/local/etc"
+    )
+  else
+    dirs+=(
+      "/etc/clamav"
+      "/etc"
+      "/usr/local/etc"
+    )
+  fi
+
+  local d unique=()
+  for d in "${dirs[@]}"; do
+    append_unique "$d" "${unique[@]}" && unique+=("$d")
+  done
+
+  printf '%s\n' "${unique[@]}"
+}
+
+default_conf_dir() {
+  local prefix
+
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if [[ -d /usr/local/clamav ]]; then
+      printf '%s\n' "/usr/local/clamav/etc"
+    elif prefix="$(brew_prefix 2>/dev/null)"; then
+      printf '%s\n' "$prefix/etc/clamav"
+    else
+      printf '%s\n' "/usr/local/etc/clamav"
+    fi
+  else
+    printf '%s\n' "/etc/clamav"
+  fi
+}
+
+detect_conf_dir() {
+  local d
+  while IFS= read -r d; do
+    [[ -f "$d/freshclam.conf" || -f "$d/freshclam.conf.sample" || -f "$d/clamd.conf" || -f "$d/clamd.conf.sample" ]] || continue
+    printf '%s\n' "$d"
+    return 0
+  done < <(possible_conf_dirs)
+
+  default_conf_dir
+}
+
+default_db_dir() {
+  local prefix
+
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if [[ -d /usr/local/clamav ]]; then
+      printf '%s\n' "/usr/local/clamav/share/clamav"
+    elif prefix="$(brew_prefix 2>/dev/null)"; then
+      printf '%s\n' "$prefix/var/lib/clamav"
+    else
+      printf '%s\n' "/usr/local/var/lib/clamav"
+    fi
+  else
+    printf '%s\n' "/var/lib/clamav"
+  fi
+}
+
+get_db_dir() {
+  local conf_dir="$1"
+  local file dir
+
+  for file in "$conf_dir/freshclam.conf" "$conf_dir/clamd.conf"; do
+    [[ -r "$file" ]] || continue
+    dir="$(awk '$1=="DatabaseDirectory"{print $2}' "$file" | tail -n1)"
+    [[ -n "$dir" ]] && { printf '%s\n' "$dir"; return 0; }
+  done
+
+  default_db_dir
+}
+
+ensure_config_file() {
+  local conf_dir="$1"
+  local name="$2"
+  local file="$conf_dir/$name"
+  local sample="$conf_dir/$name.sample"
+
+  [[ -f "$file" ]] && return 0
+
+  if [[ -f "$sample" ]]; then
+    cp_maybe_root "$sample" "$file"
+  elif [[ "$name" == "freshclam.conf" ]]; then
+    touch_maybe_root "$file"
+  fi
+}
+
+strip_example_line() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  sed_maybe_root "$file" -E '/^[[:space:]]*Example([[:space:]]+.*)?$/d' || true
+}
+
+ensure_key_value() {
+  local file="$1"
+  local key="$2"
+  local val="$3"
+
+  [[ -f "$file" ]] || return 0
+
+  if grep -qE "^[[:space:]]*$key[[:space:]]+" "$file"; then
+    sed_maybe_root "$file" -E "s|^[[:space:]]*$key[[:space:]]+.*$|$key $val|g"
+  else
+    append_line_maybe_root "$file" "$key $val"
+  fi
+}
+
+ensure_clamav_user_linux() {
+  [[ "$OS_TYPE" == "linux" ]] || return 0
+
+  if id clamav >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "Creating system user/group clamav..."
+  if need_cmd groupadd && need_cmd useradd; then
+    run_root groupadd -f clamav
+    run_root useradd --system --no-create-home --shell /usr/sbin/nologin --gid clamav clamav 2>/dev/null || true
+  elif need_cmd adduser && need_cmd addgroup; then
+    run_root addgroup --system clamav 2>/dev/null || true
+    run_root adduser --system --no-create-home --disabled-login --ingroup clamav clamav 2>/dev/null || true
+  else
+    warn "Could not create clamav user automatically. Continuing with package defaults."
+  fi
+}
+
+prepare_db_dir() {
+  local db_dir="$1"
+  mkdir_maybe_root "$db_dir"
+
+  if [[ "$OS_TYPE" == "linux" ]] && id clamav >/dev/null 2>&1; then
+    run_root chown -R clamav:clamav "$db_dir" 2>/dev/null || true
+  elif [[ "$OS_TYPE" == "macos" && "$db_dir" == /usr/local/clamav/* ]]; then
+    run_root chown -R 82:82 "$db_dir" 2>/dev/null || true
+    run_root chmod 775 "$db_dir" 2>/dev/null || true
+  fi
+}
+
+setup_configs() {
+  CONF_DIR="$(detect_conf_dir)"
+  info "Using ClamAV config directory: $CONF_DIR"
+  mkdir_maybe_root "$CONF_DIR"
+
+  ensure_config_file "$CONF_DIR" "freshclam.conf"
+  ensure_config_file "$CONF_DIR" "clamd.conf"
+
+  strip_example_line "$CONF_DIR/freshclam.conf"
+  strip_example_line "$CONF_DIR/clamd.conf"
+
+  DB_DIR="$(get_db_dir "$CONF_DIR")"
+  ensure_key_value "$CONF_DIR/freshclam.conf" "DatabaseDirectory" "$DB_DIR"
+  ensure_key_value "$CONF_DIR/freshclam.conf" "DatabaseMirror" "database.clamav.net"
+
+  if [[ -f "$CONF_DIR/clamd.conf" ]]; then
+    ensure_key_value "$CONF_DIR/clamd.conf" "DatabaseDirectory" "$DB_DIR"
+  fi
+
+  if [[ "$OS_TYPE" == "linux" ]]; then
+    ensure_clamav_user_linux
+    if id clamav >/dev/null 2>&1; then
+      ensure_key_value "$CONF_DIR/freshclam.conf" "DatabaseOwner" "clamav"
+      [[ -f "$CONF_DIR/clamd.conf" ]] && ensure_key_value "$CONF_DIR/clamd.conf" "User" "clamav"
+    fi
+  fi
+
+  prepare_db_dir "$DB_DIR"
+}
+
+database_exists_in_dir() {
+  local dir="$1"
+  local count=0 file
+
+  [[ -d "$dir" ]] || return 1
+  for file in main.cvd main.cld daily.cvd daily.cld bytecode.cvd bytecode.cld; do
+    [[ -s "$dir/$file" ]] && count=$((count + 1))
+  done
+
+  [[ "$count" -ge 2 ]]
+}
+
+database_exists() {
+  local dirs=()
+  local d prefix
+
+  [[ -n "${DB_DIR:-}" ]] && dirs+=("$DB_DIR")
+  dirs+=("/var/lib/clamav" "/usr/local/share/clamav" "/usr/local/clamav/share/clamav" "/usr/local/var/lib/clamav" "/opt/homebrew/var/lib/clamav")
+  if prefix="$(brew_prefix 2>/dev/null)"; then
+    dirs+=("$prefix/var/lib/clamav")
+  fi
+
+  local unique=()
+  for d in "${dirs[@]}"; do
+    append_unique "$d" "${unique[@]}" && unique+=("$d")
+  done
+
+  for d in "${unique[@]}"; do
+    database_exists_in_dir "$d" && return 0
+  done
+
+  return 1
+}
+
+run_freshclam() {
+  local freshclam cmd_status=0
+
+  refresh_clamav_path
+  freshclam="$(find_cmd_path freshclam 2>/dev/null || true)"
+  if [[ -z "$freshclam" && "$DRY_RUN" -eq 1 ]]; then
+    info "[dry-run] Would run freshclam after installation."
+    return 0
+  fi
+  [[ -n "$freshclam" ]] || die "freshclam was not found."
+
+  setup_configs
+
+  info "Updating ClamAV signatures with freshclam..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    info "[dry-run] Would run freshclam."
+    return 0
+  fi
+
+  if [[ "$OS_TYPE" == "macos" && -w "$DB_DIR" ]]; then
+    "$freshclam" --config-file="$CONF_DIR/freshclam.conf" || "$freshclam" --user=root --config-file="$CONF_DIR/freshclam.conf" || cmd_status=$?
+  else
+    run_root "$freshclam" --config-file="$CONF_DIR/freshclam.conf" || cmd_status=$?
+  fi
+
+  if [[ "$cmd_status" -ne 0 ]]; then
+    if database_exists; then
+      warn "freshclam failed, but an existing signature database was found. Continuing."
+      return 0
+    fi
+    return "$cmd_status"
+  fi
+}
+
+default_excludes() {
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    printf '%s\n' '^/System($|/)' '^/Volumes($|/)' '^/dev($|/)'
+  else
+    printf '%s\n' '^/sys($|/)' '^/proc($|/)' '^/dev($|/)' '^/run($|/)'
+  fi
+}
+
+spinner() {
+  local pid="$1"
+  local spin='-\|/'
+  local i=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(((i + 1) % 4))
+    printf '\r[+] Scan in progress... %c' "${spin:$i:1}"
+    sleep 0.2
+  done
+  printf '\r[+] Scan completed.           \n'
+}
+
+read_log_matches() {
+  local pattern="$1"
+  local log="$2"
+
+  if [[ -r "$log" ]]; then
+    grep -E "$pattern" "$log" 2>/dev/null || true
+  elif need_cmd sudo; then
+    sudo grep -E "$pattern" "$log" 2>/dev/null || true
+  fi
+}
+
+list_path() {
+  local path="$1"
+  if [[ -r "$path" ]]; then
+    ls -lah "$path" 2>/dev/null || true
+  elif need_cmd sudo; then
+    sudo ls -lah "$path" 2>/dev/null || true
+  fi
+}
+
+detect_host() {
+  local name=""
+
+  if need_cmd hostname; then
+    name="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+  elif need_cmd uname; then
+    name="$(uname -n 2>/dev/null || true)"
+  elif [[ -r /etc/hostname ]]; then
+    IFS= read -r name < /etc/hostname || true
+  fi
+
+  printf '%s\n' "${name:-unknown}"
+}
+
+run_scan() {
+  local clamscan ts log host pid status infected_lines infected_count
+  local cmd=()
+  local excludes=()
+  local pattern target
+
+  refresh_clamav_path
+  clamscan="$(find_cmd_path clamscan 2>/dev/null || true)"
+  if [[ -z "$clamscan" && "$DRY_RUN" -eq 1 ]]; then
+    clamscan="clamscan"
+  fi
+  [[ -n "$clamscan" ]] || die "clamscan was not found."
+
+  [[ "${#SCAN_TARGETS[@]}" -gt 0 ]] || SCAN_TARGETS=("/")
+
+  if [[ "$USE_DEFAULT_EXCLUDES" -eq 1 ]]; then
+    while IFS= read -r pattern; do
+      [[ -n "$pattern" ]] && excludes+=("$pattern")
+    done < <(default_excludes)
+  fi
+  excludes+=("${EXCLUDE_DIRS[@]}")
+
+  mkdir_maybe_root "$LOG_DIR"
+  [[ "$QUARANTINE_ENABLED" -eq 0 ]] || mkdir_maybe_root "$QUARANTINE_DIR"
+
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  log="$LOG_DIR/manual_scan_${ts}.log"
+  host="$(detect_host)"
+
+  echo "======================================================"
+  echo "ClamAV Incident Response Scan"
+  echo "Host: $host"
+  echo "Time (UTC): $(date -u)"
+  echo
+  echo "Log directory: $LOG_DIR"
+  echo "Current log file: $log"
+  if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
+    echo "Quarantine directory: $QUARANTINE_DIR"
+  else
+    echo "Quarantine: disabled"
+  fi
+  echo "Scan target(s): ${SCAN_TARGETS[*]}"
+  echo "======================================================"
+  echo
+
+  echo "[*] Existing ClamAV scan logs:"
+  list_path "$LOG_DIR" | grep 'manual_scan_' || echo "No previous scan logs found."
+  echo
+
+  cmd=("$clamscan" -r --infected)
+  for pattern in "${excludes[@]}"; do
+    cmd+=("--exclude-dir=$pattern")
+  done
+  if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
+    cmd+=("--move=$QUARANTINE_DIR")
+  fi
+  cmd+=("--log=$log")
+  cmd+=("${CLAMSCAN_ARGS[@]}")
+  for target in "${SCAN_TARGETS[@]}"; do
+    cmd+=("$target")
+  done
+
+  echo "[*] Starting scan..."
+  echo "[*] This may take a while..."
+  echo
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] '
+    print_cmd "${cmd[@]}"
+    return 0
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    "${cmd[@]}" &
+  else
+    need_cmd sudo || die "sudo is required for the scan."
+    sudo "${cmd[@]}" &
+  fi
+  pid=$!
+  spinner "$pid"
+  wait "$pid" || status=$?
+  status="${status:-0}"
+
+  echo
+  echo "================ IR SUMMARY ================"
+
+  infected_lines="$(read_log_matches ' FOUND$' "$log")"
+  infected_count="$(printf '%s\n' "$infected_lines" | grep -c ' FOUND$' || true)"
+  echo "Total infected files detected: $infected_count"
+  echo
+
+  if [[ "$infected_count" -gt 0 ]]; then
+    echo "Infected files:"
+    printf '%s\n' "$infected_lines"
+  else
+    echo "No infected files detected."
+  fi
+
+  if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
+    echo
+    echo "Quarantine contents:"
+    list_path "$QUARANTINE_DIR"
+  fi
+
+  echo
+  echo "Scan statistics:"
+  read_log_matches 'Scanned files:|Infected files:|Time:|Data scanned:|Data read:' "$log"
+
+  echo "============================================"
+  echo "[*] IR scan finished."
+
+  if [[ "$status" -gt 1 ]]; then
+    return "$status"
+  fi
+  return 0
+}
+
+parse_args() {
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -p|--path)
+        shift
+        [[ "$#" -gt 0 ]] || die "--path requires a value."
+        SCAN_TARGETS=("$1")
+        ;;
+      -i|--install-only)
+        MODE="install"
+        ;;
+      -s|--scan-only)
+        MODE="scan"
+        ;;
+      -u|--update-only)
+        MODE="update"
+        UPDATE_MODE="always"
+        ;;
+      --path-only)
+        MODE="path"
+        ;;
+      --force-install)
+        FORCE_INSTALL=1
+        ;;
+      --update)
+        UPDATE_MODE="always"
+        ;;
+      --no-update)
+        UPDATE_MODE="never"
+        ;;
+      -q|--quarantine)
+        shift
+        [[ "$#" -gt 0 ]] || die "--quarantine requires a value."
+        QUARANTINE_DIR="$1"
+        ;;
+      --no-quarantine)
+        QUARANTINE_ENABLED=0
+        ;;
+      -l|--log-dir)
+        shift
+        [[ "$#" -gt 0 ]] || die "--log-dir requires a value."
+        LOG_DIR="$1"
+        ;;
+      -e|--exclude-dir)
+        shift
+        [[ "$#" -gt 0 ]] || die "--exclude-dir requires a value."
+        EXCLUDE_DIRS+=("$1")
+        ;;
+      --no-default-excludes)
+        USE_DEFAULT_EXCLUDES=0
+        ;;
+      --dry-run)
+        DRY_RUN=1
+        ;;
+      --)
+        shift
+        CLAMSCAN_ARGS+=("$@")
+        break
+        ;;
+      -*)
+        die "Unknown option: $1. Use -h for help."
+        ;;
+      *)
+        SCAN_TARGETS+=("$1")
+        ;;
+    esac
+    shift || true
+  done
+}
+
+main() {
+  parse_args "$@"
+  detect_os
+  refresh_clamav_path
+
+  case "$MODE" in
+    path)
+      is_clamav_installed || die "ClamAV was not found; install it first or run clamv without --path-only."
+      ensure_path
+      ;;
+    scan)
+      if ! is_clamav_installed && [[ "$DRY_RUN" -eq 0 ]]; then
+        die "ClamAV was not found; run clamv without --scan-only to install it."
+      fi
+      run_scan
+      ;;
+    install)
+      ensure_installed
+      ensure_path
+      setup_configs
+      if [[ "$UPDATE_MODE" != "never" ]]; then
+        run_freshclam
+      fi
+      info "Install/configuration completed."
+      ;;
+    update)
+      ensure_installed
+      ensure_path
+      run_freshclam
+      info "Signature update completed."
+      ;;
+    auto)
+      ensure_installed
+      ensure_path
+      if [[ "$UPDATE_MODE" == "always" ]]; then
+        setup_configs
+        run_freshclam
+      elif [[ "$UPDATE_MODE" == "auto" ]]; then
+        if database_exists; then
+          info "ClamAV signature database found. Skipping automatic update."
+        else
+          setup_configs
+          run_freshclam
+        fi
+      else
+        info "Signature update skipped by request."
+      fi
+      run_scan
+      ;;
+    *)
+      die "Invalid mode: $MODE"
+      ;;
+  esac
+}
+
+main "$@"
