@@ -529,6 +529,19 @@
         "short_desc": "Script fork bomb que satura el sistema creando procesos infinitos.",
         "detailed_desc": "Este script define una función recursiva que se ejecuta dos veces en segundo plano cada vez que se llama, generando una explosión exponencial de procesos. Utiliza una combinación de pipes y ejecución en segundo plano para saturar rápidamente los recursos del sistema. Su propósito es demostrar el impacto de los ataques de denegación de servicio a nivel de sistema. Uso: ejecutar el script en un entorno controlado para evitar daños permanentes."
     },
+    "brillo": {
+        "name": "brillo",
+        "short_desc": "Sets the Linux backlight brightness value through /sys/class/backlight.",
+        "detailed_desc": [
+            "Changes screen brightness by writing the provided numeric value to /sys/class/backlight/*/brightness.",
+            "",
+            "Usage: brillo <number>.",
+            "Example: brillo 0 turns the backlight value down.",
+            "Example: brillo 400 sets the backlight value to 400.",
+            "",
+            "The script prints the sudo tee command it is about to run, then executes it."
+        ]
+    },
     "bruto": {
         "name": "bruto",
         "short_desc": "Script multihilo para fuerza bruta de rutas en servidores web HTTP.",

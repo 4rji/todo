@@ -215,6 +215,7 @@ dnsdump             Comandos de tcpdump y unbound para capturar trafico dns
 
 ###------hardware stuff
 bateria             Shows battery status, power draw, AC adapter state, and optional health details.
+brillo              Sets the Linux backlight brightness value through /sys/class/backlight.
 tempe               or tempe -f temperatura de arch linux y -f crea un archivo con los datos  
 
 #Nixos
