@@ -335,11 +335,6 @@
         "short_desc": "Establece conexión SSH con verificación de permisos.",
         "detailed_desc": "ssh -p <puerto> <usuario>@<ip>"
     },
-    "batfzf": {
-        "name": "batfzf",
-        "short_desc": "Configura bat, fzf, thefuck y zoxide con temas personalizados.",
-        "detailed_desc": "Este script automatiza la configuración de varias herramientas de línea de comandos para mejorar la experiencia del usuario en la terminal.\n\nDescarga y aplica un tema personalizado para 'bat', un visualizador de archivos similar a 'cat' pero con resaltado de sintaxis.\n\nConfigura 'fzf', una herramienta de búsqueda interactiva, con opciones avanzadas de previsualización.\n\nTambién instala 'thefuck', que corrige comandos mal escritos, y 'zoxide', un mejorado comando 'cd'.\n\nLas configuraciones se añaden al archivo .zshrc para que se apliquen automáticamente al iniciar una nueva sesión de terminal. \n\nLuego solo escribe fuck o fk para que el comando se corrija automáticamente.  "
-    },
     "qemuconsola": {
         "name": "qemuconsola",
         "short_desc": "Habilita y inicia el servicio de consola serial en QEMU.",
@@ -759,6 +754,19 @@
             "It targets /usr/bin/su, sends crafted control messages, uses splice-based copying, and then launches su.",
             "",
             "Use only in an authorized local lab or defensive validation environment."
+        ]
+    },
+    "batinst": {
+        "name": "batinst",
+        "short_desc": "Interactively installs and configures bat, fzf, thefuck, and zoxide.",
+        "detailed_desc": [
+            "Detects the OS and package manager before installing terminal tools.",
+            "",
+            "Installs bat and configures the tokyonight_night theme.",
+            "Creates bat <-> batcat symlinks when only one command is available.",
+            "",
+            "Can install and configure fzf previews, thefuck aliases, and zoxide for zsh.",
+            "Offers a menu option to install everything in one run."
         ]
     }
 }
