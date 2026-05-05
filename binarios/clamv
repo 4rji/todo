@@ -25,7 +25,7 @@ else
 fi
 
 MODE="auto"
-UPDATE_MODE="auto"
+UPDATE_MODE="never"
 FORCE_INSTALL=0
 DRY_RUN=0
 USE_DEFAULT_EXCLUDES=1
@@ -44,7 +44,6 @@ DB_DIR=""
 
 SCAN_TARGETS=()
 EXCLUDE_DIRS=()
-CLAMSCAN_ARGS=()
 
 usage() {
   printf '%b\n' "${C_BOLD}${C_CYAN}ClamAV auto installer and scanner${C_RESET}
@@ -57,34 +56,29 @@ ${C_BOLD}Default behavior:${C_RESET}
   When run with at least one argument or option (e.g. a scan path or any
   option below) it detects the operating system, installs ClamAV if missing,
   adds the ClamAV binary directory to PATH when needed, creates/fixes basic
-  configuration, updates signatures only when the database is missing, then
-  runs a recursive scan.
+  configuration, then runs a recursive scan. Use -u to update signatures.
 
 ${C_BOLD}Options:${C_RESET}
   ${C_YELLOW}-h${C_RESET}                       Show this help message.
   ${C_YELLOW}-p${C_RESET} PATH                  Scan PATH. Can be used instead of a positional path.
                            If no path is provided, / is scanned.
-  ${C_YELLOW}-in${C_RESET}                      Install/configure ClamAV, update signatures, then exit.
-  ${C_YELLOW}-i${C_RESET}                       Only run the scan. Do not install, update, or edit PATH.
-  ${C_YELLOW}-u${C_RESET}                       Install if needed, update signatures, then exit.
-  ${C_YELLOW}--path-only${C_RESET}              Only add detected ClamAV binary directories to PATH.
+  ${C_YELLOW}-in${C_RESET}                      Install/configure ClamAV, then exit.
+  ${C_YELLOW}-i${C_RESET}                       Only run the scan. Do not install or edit PATH.
+  ${C_YELLOW}-u${C_RESET}                       Run freshclam to update signatures.
   ${C_YELLOW}--force-install${C_RESET}          Run the installer even when ClamAV is already detected.
-  ${C_YELLOW}--update${C_RESET}                 Always run freshclam before scanning.
-  ${C_YELLOW}--no-update${C_RESET}              Never run freshclam automatically.
-  ${C_YELLOW}-q${C_RESET} DIR                   Move infected files to DIR.
-  ${C_YELLOW}--no-quarantine${C_RESET}          Do not move infected files; report only.
+  ${C_YELLOW}-n${C_RESET}                       Do not move infected files; report only.
+  ${C_YELLOW}--no-quarantine${C_RESET}          (alias for -n)
   ${C_YELLOW}-l${C_RESET} DIR                   Write scan logs to DIR.
   ${C_YELLOW}-e${C_RESET} REGEX                 Add a clamscan --exclude-dir regular expression.
                            Can be repeated.
   ${C_YELLOW}--no-default-excludes${C_RESET}    Disable built-in pseudo-filesystem excludes.
   ${C_YELLOW}--dry-run${C_RESET}                Print actions without changing the system.
-  ${C_YELLOW}--${C_RESET}                       Pass all following arguments directly to clamscan.
 
 ${C_BOLD}Examples:${C_RESET}
   ${C_GREEN}clamv${C_RESET}
   ${C_GREEN}clamv /home${C_RESET}
-  ${C_GREEN}clamv --update -p /srv/www${C_RESET}
-  ${C_GREEN}clamv -i --no-quarantine ~/Downloads${C_RESET}
+  ${C_GREEN}clamv -u -p /srv/www${C_RESET}
+  ${C_GREEN}clamv -i -n ~/Downloads${C_RESET}
   ${C_GREEN}clamv -in${C_RESET}
 
 ${C_BOLD}Exit codes:${C_RESET}
@@ -849,7 +843,6 @@ run_scan() {
     cmd+=("--move=$QUARANTINE_DIR")
   fi
   cmd+=("--log=$log")
-  cmd+=(${CLAMSCAN_ARGS[@]+"${CLAMSCAN_ARGS[@]}"})
   for target in "${SCAN_TARGETS[@]}"; do
     cmd+=("$target")
   done
@@ -944,28 +937,12 @@ parse_args() {
         MODE="scan"
         ;;
       -u)
-        MODE="update"
         UPDATE_MODE="always"
-        ;;
-      --path-only)
-        MODE="path"
         ;;
       --force-install)
         FORCE_INSTALL=1
         ;;
-      --update)
-        UPDATE_MODE="always"
-        ;;
-      --no-update)
-        UPDATE_MODE="never"
-        ;;
-      -q)
-        shift
-        [[ "$#" -gt 0 ]] || die "-q requires a value."
-        QUARANTINE_DIR="$1"
-        QUARANTINE_DIR_SET=1
-        ;;
-      --no-quarantine)
+      -n|--no-quarantine)
         QUARANTINE_ENABLED=0
         ;;
       -l)
@@ -984,11 +961,6 @@ parse_args() {
         ;;
       --dry-run)
         DRY_RUN=1
-        ;;
-      --)
-        shift
-        CLAMSCAN_ARGS+=("$@")
-        break
         ;;
       -*)
         die "Unknown option: $1. Use -h for help."
@@ -1025,13 +997,9 @@ main() {
   refresh_clamav_path
 
   case "$MODE" in
-    path)
-      is_clamav_installed || die "ClamAV was not found; install it first or run clamv without --path-only."
-      ensure_path
-      ;;
     scan)
       if ! is_clamav_installed && [[ "$DRY_RUN" -eq 0 ]]; then
-        die "ClamAV was not found; run clamv without --scan-only to install it."
+        die "ClamAV was not found; run clamv without -i to install it."
       fi
       run_scan
       ;;
@@ -1044,27 +1012,12 @@ main() {
       fi
       info "Install/configuration completed."
       ;;
-    update)
-      ensure_installed
-      ensure_path
-      run_freshclam
-      info "Signature update completed."
-      ;;
     auto)
       ensure_installed
       ensure_path
       if [[ "$UPDATE_MODE" == "always" ]]; then
         setup_configs
         run_freshclam
-      elif [[ "$UPDATE_MODE" == "auto" ]]; then
-        if database_exists; then
-          info "ClamAV signature database found. Skipping automatic update."
-        else
-          setup_configs
-          run_freshclam
-        fi
-      else
-        info "Signature update skipped by request."
       fi
       run_scan
       ;;
