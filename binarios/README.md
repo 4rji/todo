@@ -560,7 +560,6 @@ redir               Redirige todo el trafico de la maquina por shadows info pagi
 redira              Version de arch de redir, ahora verifica estado del host
 shadows             Shadowsocks como tor socks tunnel tipo vpn cliente o servidor instala
 shadowsa            Version para arch, de shadows con sslocal, no ss-local
-bashrc-rvshell      reverse shell en la bashrc
 iodine-connect      Script que conecta iodine a mi c2. automatizado
 scanbl              Scanea dispositivos bluetooth
 ataquebl            Envia ping de ataque para bluetooth, solo funciona en equipos viejos
@@ -669,9 +668,7 @@ banner              Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubu
 bannerlogin         Modify the banner after login with ssh and also when start computer
 
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
-backd-detect        detecta conexiones sospechosas hacia rangos RFC1918 e identifica procesos asociados
-backde              para detectar conexions, es un binario go
-backd               Wrapper: usa backd_amd en Linux amd64/x86_64 y backdm en macOS arm64 desde /opt/4rji/bin.
+backd               Wrapper: usa backd_amd en Linux amd64 y backdm en macOS M
 blockip             Bloquea IPs agregando a un set ipset y aplicando una regla iptables
 services            Encuentra servicios que no son del kernel linux corriendo.
 netevils            aun no se    
