@@ -495,8 +495,17 @@
     },
     "bateria": {
         "name": "bateria",
-        "short_desc": "Monitorea el estado de la batería y el adaptador de corriente.",
-        "detailed_desc": "Este script utiliza comandos del sistema para obtener información sobre el estado de la batería y el adaptador de corriente. Ejecuta `upower` para extraer datos como el consumo de energía y el tiempo estimado para carga completa, y `acpi` para verificar si el adaptador de corriente está conectado. Muestra el consumo de energía en vatios y el tiempo estimado para carga completa en minutos, además de la conexión del adaptador de corriente."
+        "short_desc": "Shows battery status, power draw, AC adapter state, and optional health details.",
+        "detailed_desc": [
+            "Displays Linux battery information using /sys/class/power_supply, acpi, and upower.",
+            "",
+            "Shows distro, AC adapter state, battery status, charge percentage, charging or discharging watts, and time remaining or time to full when available.",
+            "",
+            "With -s, re-executes through sudo so Intel RAPL power readings can be accessed on kernels that require root.",
+            "With -i, adds extra battery details such as temperature, cycle count, health, current/design capacity, manufacturer, model, and technology.",
+            "",
+            "It can auto-install required packages such as acpi and upower on common Linux distributions."
+        ]
     },
     "blockicmp": {
         "name": "blockicmp",

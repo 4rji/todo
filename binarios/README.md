@@ -214,7 +214,7 @@ dnsdump             Comandos de tcpdump y unbound para capturar trafico dns
 
 
 ###------hardware stuff
-bateria             new script con bateria en lugar de alias
+bateria             Shows battery status, power draw, AC adapter state, and optional health details.
 tempe               or tempe -f temperatura de arch linux y -f crea un archivo con los datos  
 
 #Nixos
