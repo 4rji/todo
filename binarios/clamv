@@ -320,6 +320,9 @@ first_existing_parent() {
 mkdir_maybe_root() {
   local dir="$1"
   local parent
+
+  [[ -d "$dir" ]] && return 0
+
   parent="$(first_existing_parent "$dir")"
 
   if [[ "${EUID:-$(id -u)}" -eq 0 || -w "$parent" ]]; then
@@ -585,6 +588,7 @@ ensure_config_file() {
 strip_example_line() {
   local file="$1"
   [[ -f "$file" ]] || return 0
+  grep -qE '^[[:space:]]*Example([[:space:]]+.*)?$' "$file" 2>/dev/null || return 0
   sed_maybe_root "$file" -E '/^[[:space:]]*Example([[:space:]]+.*)?$/d' || true
 }
 
@@ -592,8 +596,12 @@ ensure_key_value() {
   local file="$1"
   local key="$2"
   local val="$3"
+  local current=""
 
   [[ -f "$file" ]] || return 0
+
+  current="$(awk -v key="$key" '$1==key {$1=$1; print; found=1} END {if (!found) exit 1}' "$file" 2>/dev/null | tail -n1 || true)"
+  [[ "$current" == "$key $val" ]] && return 0
 
   if grep -qE "^[[:space:]]*$key[[:space:]]+" "$file"; then
     sed_maybe_root "$file" -E "s|^[[:space:]]*$key[[:space:]]+.*$|$key $val|g"
@@ -624,6 +632,8 @@ ensure_clamav_user_linux() {
 prepare_db_dir() {
   local db_dir="$1"
   mkdir_maybe_root "$db_dir"
+
+  [[ -w "$db_dir" ]] && return 0
 
   if [[ "$OS_TYPE" == "linux" ]] && id clamav >/dev/null 2>&1; then
     run_root chown -R clamav:clamav "$db_dir" 2>/dev/null || true
@@ -1016,7 +1026,6 @@ main() {
       ensure_installed
       ensure_path
       if [[ "$UPDATE_MODE" == "always" ]]; then
-        setup_configs
         run_freshclam
       fi
       run_scan
