@@ -147,6 +147,7 @@ lxdeinst            Remueve xrpd e instala lxde que usa Lightweight X11 para equ
 vnckali             (USAR xrdp) x11vnc, si no funciona install Xvfb and posiblemente install full kde. 
 x11inst             Instala x11 u otros desktops kali y sddm por default
 batfzf              Instala el theme night tokio para batcat, tambien fzf 
+batinst             Instalador interactivo: bat+tema tokyonight+fzf+thefuck+zoxide, detecta OS, crea symlinks bat<->batcat
 tiles               Instala la configuracion de tiles sdd manager krohn y da instruciones de descarga
 nvidiapromox        instala nvidia passtrhought 3070, en promox
 nv-agent            binario en comprimidos, el agente de nvidia para gpu monitor
