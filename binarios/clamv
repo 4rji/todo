@@ -769,7 +769,13 @@ stop_scan_process() {
   local signal="${1:-TERM}"
 
   [[ -n "${SCAN_PID:-}" ]] || return 0
-  kill -0 "$SCAN_PID" 2>/dev/null || return 0
+  if ! kill -0 "$SCAN_PID" 2>/dev/null; then
+    if need_cmd sudo && sudo kill -0 "$SCAN_PID" 2>/dev/null; then
+      :
+    else
+      return 0
+    fi
+  fi
 
   if [[ -n "${SCAN_PGID:-}" ]]; then
     kill "-$signal" -- "-$SCAN_PGID" 2>/dev/null || true
@@ -848,6 +854,7 @@ run_scan() {
   local clamscan ts log host pid status infected_lines infected_count
   local use_setsid=0
   local cmd=()
+  local scan_cmd=()
   local excludes=()
   local pattern target
 
@@ -935,38 +942,34 @@ run_scan() {
     done
   fi
 
+  scan_cmd=("${cmd[@]}")
+  if [[ "${EUID:-$(id -u)}" -ne 0 && "$needs_sudo" -eq 1 ]]; then
+    need_cmd sudo || die "sudo is required for the scan."
+    scan_cmd=(sudo "${cmd[@]}")
+  fi
+
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '[dry-run] '
-    if [[ "${EUID:-$(id -u)}" -ne 0 && "$needs_sudo" -eq 1 ]]; then
-      print_cmd sudo "${cmd[@]}"
-    else
-      print_cmd "${cmd[@]}"
-    fi
+    print_cmd "${scan_cmd[@]}"
     return 0
   fi
 
   trap interrupt_scan INT TERM
 
-  if [[ "${EUID:-$(id -u)}" -eq 0 || "$needs_sudo" -eq 0 ]]; then
-    if need_cmd setsid; then
-      setsid "${cmd[@]}" &
-      use_setsid=1
-    else
-      "${cmd[@]}" &
-    fi
-  else
-    need_cmd sudo || die "sudo is required for the scan."
+  if [[ "${scan_cmd[0]}" == "sudo" ]]; then
     if [[ "$LINUX_FULL_SCAN" -eq 1 ]]; then
       info "${C_YELLOW}Linux full scan needs root access. Using sudo.${C_RESET}"
     else
       info "${C_YELLOW}Elevation needed (log dir, quarantine, or unreadable target). Using sudo.${C_RESET}"
     fi
-    if need_cmd setsid; then
-      setsid sudo "${cmd[@]}" &
-      use_setsid=1
-    else
-      sudo "${cmd[@]}" &
-    fi
+    sudo -v || die "sudo authentication failed."
+  fi
+
+  if [[ "${scan_cmd[0]}" != "sudo" ]] && need_cmd setsid; then
+    setsid "${scan_cmd[@]}" &
+    use_setsid=1
+  else
+    "${scan_cmd[@]}" &
   fi
   pid=$!
   SCAN_PID="$pid"
@@ -983,6 +986,11 @@ run_scan() {
   status="${status:-0}"
 
   echo
+  if [[ "$status" -gt 1 || ( "${scan_cmd[0]}" == "sudo" && "$status" -ne 0 && -z "$(read_log_matches 'Scanned files:|Infected files:|Time:|Data scanned:|Data read:' "$log")" ) ]]; then
+    printf '%b\n' "${C_BOLD}${C_RED}ERROR:${C_RESET} Scan command failed before producing a ClamAV summary. Exit status: $status" >&2
+    return "$status"
+  fi
+
   printf '%b\n' "${C_BOLD}${C_CYAN}================ IR SUMMARY ================${C_RESET}"
 
   infected_lines="$(read_log_matches ' FOUND$' "$log")"
