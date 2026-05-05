@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
-# Estado batería + consumo actual de la máquina.
-# Detecta distro e instala dependencias (acpi, upower).
+# Battery status + machine power consumption.
+# Detects distro and installs dependencies (acpi, upower).
+# Usage: bateria [-s] [-i]
+#   -s  re-exec with sudo (needed for RAPL on kernel >= 5.10)
+#   -i  show extra info: temperature, cycle count, health, capacity
 
 set -uo pipefail
+
+SHOW_SUDO=false
+SHOW_EXTRA=false
+while getopts "si" opt 2>/dev/null; do
+    case "$opt" in
+        s) SHOW_SUDO=true ;;
+        i) SHOW_EXTRA=true ;;
+        *) echo "Usage: $(basename "$0") [-s] [-i]"; exit 1 ;;
+    esac
+done
+
+if $SHOW_SUDO && [ "$EUID" -ne 0 ]; then
+    exec sudo "$0" "$@"
+fi
 
 paquetes=("acpi" "upower")
 
@@ -90,7 +107,7 @@ if [ -n "$BAT_PATH" ]; then
     voltage_now_uv=$(read_sys "$BAT_PATH/voltage_now")
     current_now_ua=$(read_sys "$BAT_PATH/current_now")
 
-    # Fallback charge_*: power = current * voltage
+    # Fallback: power = current * voltage (charge_* registers)
     if [ -z "$power_now_uw" ] && [ -n "${current_now_ua:-}" ] && [ -n "${voltage_now_uv:-}" ]; then
         power_now_uw=$(awk -v c="$current_now_ua" -v v="$voltage_now_uv" 'BEGIN{printf "%.0f", (c*v)/1000000}')
     fi
@@ -102,7 +119,7 @@ if [ -n "$BAT_PATH" ]; then
         power_w_signed="${sign}${power_w}"
     fi
 
-    # Cross-check con upower (algunos kernels reportan power_now=0 estando descargando)
+    # Cross-check with upower (some kernels report power_now=0 while discharging)
     if command -v upower &>/dev/null; then
         up_path=$(upower -e 2>/dev/null | grep -i 'BAT' | head -1)
         if [ -n "$up_path" ]; then
@@ -119,24 +136,61 @@ if [ -n "$BAT_PATH" ]; then
     fi
 fi
 
-# --- Potencia CPU vía Intel RAPL (delta 1s sobre energy_uj) ---
+# --- Extra info (-i flag) ---
+temp_c=""
+cycle_count=""
+bat_manufacturer=""
+bat_model=""
+bat_technology=""
+bat_health=""
+energy_full_design_uwh=""
+if $SHOW_EXTRA && [ -n "$BAT_PATH" ]; then
+    temp_raw=$(read_sys "$BAT_PATH/temp")
+    cycle_count=$(read_sys "$BAT_PATH/cycle_count")
+    bat_manufacturer=$(read_sys "$BAT_PATH/manufacturer")
+    bat_model=$(read_sys "$BAT_PATH/model_name")
+    bat_technology=$(read_sys "$BAT_PATH/technology")
+    energy_full_design_uwh=$(read_sys "$BAT_PATH/energy_full_design")
+    if [ -n "$temp_raw" ] && [ "${temp_raw:-0}" -gt 0 ] 2>/dev/null; then
+        temp_c=$(awk -v t="$temp_raw" 'BEGIN{printf "%.1f", t/10}')
+    fi
+    if [ -n "${energy_full_uwh:-}" ] && [ -n "$energy_full_design_uwh" ] && [ "${energy_full_design_uwh:-0}" -gt 0 ] 2>/dev/null; then
+        bat_health=$(awk -v f="$energy_full_uwh" -v d="$energy_full_design_uwh" 'BEGIN{printf "%.1f", (f/d)*100}')
+    fi
+fi
+
+# --- Potencia vía Intel RAPL (delta 1s): psys (plataforma completa) y package-* (solo CPU) ---
 rapl_total_w=""
+rapl_psys_w=""
 RAPL_BASE="/sys/class/powercap"
 if [ -d "$RAPL_BASE" ]; then
     declare -A E1
     pkgs=()
+    psys_path=""
     for d in "$RAPL_BASE"/intel-rapl:*; do
         [ -d "$d" ] || continue
         name=$(read_sys "$d/name")
         case "$name" in
             package-*) pkgs+=("$d") ;;
+            psys)      psys_path="$d" ;;
         esac
     done
-    if [ ${#pkgs[@]} -gt 0 ]; then
-        for d in "${pkgs[@]}"; do
-            E1["$d"]=$(read_sys "$d/energy_uj")
-        done
+    e1_psys=""
+    [ -n "$psys_path" ] && e1_psys=$(read_sys "$psys_path/energy_uj")
+    for d in "${pkgs[@]}"; do
+        E1["$d"]=$(read_sys "$d/energy_uj")
+    done
+    if [ -n "$psys_path" ] || [ ${#pkgs[@]} -gt 0 ]; then
         sleep 1
+        if [ -n "$psys_path" ]; then
+            e2_psys=$(read_sys "$psys_path/energy_uj")
+            if [ -n "$e1_psys" ] && [ -n "$e2_psys" ]; then
+                _w=$(awk -v a="$e1_psys" -v b="$e2_psys" 'BEGIN{
+                    diff=b-a; if(diff<0) diff=0; printf "%.2f", diff/1000000
+                }')
+                awk -v w="$_w" 'BEGIN{exit !(w+0>0.01)}' && rapl_psys_w="$_w"
+            fi
+        fi
         total_w=0
         for d in "${pkgs[@]}"; do
             e2=$(read_sys "$d/energy_uj")
@@ -147,8 +201,18 @@ if [ -d "$RAPL_BASE" ]; then
                 }')
             fi
         done
-        rapl_total_w="$total_w"
+        if [ ${#pkgs[@]} -gt 0 ]; then
+            awk -v w="$total_w" 'BEGIN{exit !(w+0>0.01)}' && rapl_total_w="$total_w"
+        fi
     fi
+fi
+
+# Detectar si RAPL existe pero devuelve 0 (kernel >=5.10 requiere root)
+rapl_no_access=false
+if [ -z "$rapl_total_w" ] && [ -z "$rapl_psys_w" ] && [ -d "$RAPL_BASE" ]; then
+    for d in "$RAPL_BASE"/intel-rapl:*; do
+        [ -r "$d/energy_uj" ] && { rapl_no_access=true; break; }
+    done
 fi
 
 # --- Consumo total estimado de la máquina ---
@@ -156,29 +220,36 @@ total_machine_w=""
 total_note=""
 if [ "${AC_ONLINE:-0}" = "0" ] && [ -n "$power_w" ]; then
     total_machine_w="$power_w"
-    total_note="(descarga real de batería)"
-elif [ "${AC_ONLINE:-0}" = "1" ] && [ -n "$rapl_total_w" ]; then
-    total_machine_w="$rapl_total_w"
-    total_note="(estimado vía RAPL — sólo CPU package)"
+    total_note="(real battery discharge)"
+elif [ "${AC_ONLINE:-0}" = "1" ]; then
+    if [ -n "$rapl_psys_w" ]; then
+        total_machine_w="$rapl_psys_w"
+        total_note="(RAPL psys — full platform power)"
+    elif [ -n "$rapl_total_w" ]; then
+        total_machine_w="$rapl_total_w"
+        total_note="(RAPL — CPU package only, may underestimate)"
+    fi
 fi
 
 # --- Output ---
 echo -e "\e[36m==============================\e[0m"
-echo -e "\e[36m   🔋  INFORMACIÓN BATERÍA\e[0m"
+echo -e "\e[36m   🔋  BATTERY INFO\e[0m"
 echo -e "\e[36m==============================\e[0m"
-echo -e " \e[36mDistro:\e[0m                   \e[33m${OS:-desconocida}\e[0m"
-echo -e " \e[36mAC conectado:\e[0m             \e[33m$([ "$AC_ONLINE" = "1" ] && echo "sí" || echo "no")\e[0m"
+echo -e " \e[2mFlags: \e[0m\e[2m-s\e[0m\e[2m (sudo/RAPL power)   \e[0m\e[2m-i\e[0m\e[2m (extra: temp, cycles, health)\e[0m"
+echo -e "\e[36m------------------------------\e[0m"
+echo -e " \e[36mDistro:\e[0m                   \e[33m${OS:-unknown}\e[0m"
+echo -e " \e[36mAC adapter:\e[0m               \e[33m$([ "$AC_ONLINE" = "1" ] && echo "connected" || echo "disconnected")\e[0m"
 
 if [ -n "$BAT_PATH" ]; then
-    echo -e " \e[36mBatería:\e[0m                  \e[33m$BAT_NAME\e[0m"
-    echo -e " \e[36mEstado:\e[0m                   \e[32m${status:-N/D}\e[0m"
-    echo -e " \e[36mCarga:\e[0m                    \e[32m${capacity:-N/D}%\e[0m"
+    echo -e " \e[36mBattery:\e[0m                  \e[33m$BAT_NAME\e[0m"
+    echo -e " \e[36mStatus:\e[0m                   \e[32m${status:-N/A}\e[0m"
+    echo -e " \e[36mCharge:\e[0m                   \e[32m${capacity:-N/A}%\e[0m"
     if [ -n "$power_w_signed" ]; then
-        label="Flujo batería"
+        label="Battery flow    "
         case "$status" in
-            Discharging) label="Descarga batería" ;;
-            Charging)    label="Carga batería  " ;;
-            Full)        label="Batería llena   " ;;
+            Discharging) label="Discharging     " ;;
+            Charging)    label="Charging        " ;;
+            Full)        label="Battery full    " ;;
         esac
         echo -e " \e[36m${label}:\e[0m         \e[33m${power_w_signed} W\e[0m"
     fi
@@ -186,26 +257,41 @@ if [ -n "$BAT_PATH" ]; then
     if [ -n "${power_now_uw:-}" ] && [ "${power_now_uw:-0}" -gt 0 ] 2>/dev/null; then
         if [ "$status" = "Discharging" ] && [ -n "$energy_now_uwh" ]; then
             mins=$(awk -v e="$energy_now_uwh" -v p="$power_now_uw" 'BEGIN{printf "%.0f", (e/p)*60}')
-            echo -e " \e[36mTiempo restante:\e[0m          \e[32m${mins} min\e[0m"
+            echo -e " \e[36mTime remaining:\e[0m           \e[32m${mins} min\e[0m"
         elif [ "$status" = "Charging" ] && [ -n "$energy_now_uwh" ] && [ -n "$energy_full_uwh" ]; then
             mins=$(awk -v ef="$energy_full_uwh" -v en="$energy_now_uwh" -v p="$power_now_uw" 'BEGIN{printf "%.0f", ((ef-en)/p)*60}')
-            echo -e " \e[36mTiempo a carga completa:\e[0m  \e[32m${mins} min\e[0m"
+            echo -e " \e[36mTime to full:\e[0m             \e[32m${mins} min\e[0m"
         fi
     fi
 else
-    echo -e " \e[31mNo se detectó batería en /sys/class/power_supply/BAT*\e[0m"
+    echo -e " \e[31mNo battery found at /sys/class/power_supply/BAT*\e[0m"
 fi
 
-[ -n "$rapl_total_w" ] && echo -e " \e[36mPotencia CPU (RAPL):\e[0m      \e[33m${rapl_total_w} W\e[0m"
+[ -n "$rapl_psys_w"  ] && echo -e " \e[36mPlatform power (RAPL):\e[0m    \e[33m${rapl_psys_w} W\e[0m"
+[ -n "$rapl_total_w" ] && echo -e " \e[36mCPU pkg power (RAPL):\e[0m     \e[33m${rapl_total_w} W\e[0m"
+$rapl_no_access      && echo -e " \e[33mRAPL needs root (kernel >=5.10):\e[0m \e[1mbateria -s\e[0m"
 
 if [ -n "$total_machine_w" ]; then
-    echo -e " \e[35mConsumo máquina:\e[0m          \e[1;33m${total_machine_w} W\e[0m \e[2m${total_note}\e[0m"
+    echo -e " \e[35mMachine power:\e[0m            \e[1;33m${total_machine_w} W\e[0m \e[2m${total_note}\e[0m"
 fi
 
-echo -e "\n \e[35mAdaptador de corriente:\e[0m"
+echo -e "\n \e[35mAC adapter (acpi):\e[0m"
 command -v acpi &>/dev/null && acpi -a 2>/dev/null | sed "s/^/   \x1b[34m/;s/\$/\x1b[0m/"
 
-echo -e "\n \e[36mResumen acpi -b:\e[0m"
+echo -e "\n \e[36mBattery summary (acpi -b):\e[0m"
 command -v acpi &>/dev/null && acpi -b 2>/dev/null | sed "s/^/   \x1b[31m/;s/\$/\x1b[0m/"
+
+if $SHOW_EXTRA && [ -n "$BAT_PATH" ]; then
+    echo -e "\n \e[36m--- Extra Info ---\e[0m"
+    [ -n "$temp_c" ]                                                          && echo -e " \e[36mTemperature:\e[0m              \e[33m${temp_c} °C\e[0m"
+    [ -n "$cycle_count" ] && [ "${cycle_count:-0}" -gt 0 ] 2>/dev/null       && echo -e " \e[36mCycle count:\e[0m              \e[33m${cycle_count}\e[0m"
+    [ -n "$bat_health" ]                                                       && echo -e " \e[36mHealth:\e[0m                   \e[33m${bat_health}%\e[0m"
+    [ -n "$energy_full_uwh" ]                                                  && echo -e " \e[36mCapacity (current):\e[0m       \e[33m$(awk -v e="$energy_full_uwh" 'BEGIN{printf "%.2f", e/1000000}') Wh\e[0m"
+    [ -n "$energy_full_design_uwh" ] && [ "${energy_full_design_uwh:-0}" -gt 0 ] 2>/dev/null \
+                                                                               && echo -e " \e[36mCapacity (design):\e[0m        \e[33m$(awk -v e="$energy_full_design_uwh" 'BEGIN{printf "%.2f", e/1000000}') Wh\e[0m"
+    [ -n "$bat_manufacturer" ]                                                 && echo -e " \e[36mManufacturer:\e[0m             \e[33m${bat_manufacturer}\e[0m"
+    [ -n "$bat_model" ]                                                        && echo -e " \e[36mModel:\e[0m                    \e[33m${bat_model}\e[0m"
+    [ -n "$bat_technology" ]                                                   && echo -e " \e[36mTechnology:\e[0m               \e[33m${bat_technology}\e[0m"
+fi
 
 echo -e "\e[36m==============================\e[0m"
