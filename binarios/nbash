@@ -1,51 +1,41 @@
 #!/usr/bin/env bash
 
-# Función para manejar Ctrl+C
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+RESET='\033[0m'
+
 function ctrl_c {
-    echo -e "\n\n[!] Saliendo...\n"
-    tput cnorm  # Restaurar el cursor
+    echo -e "\n\n${RED}[!] Exiting...${RESET}\n"
+    tput cnorm
     exit 1
 }
 
-# Capturar señal SIGINT (Ctrl+C)
 trap ctrl_c SIGINT
 
-# Función para obtener el rango de puertos
-function getPortRange {
-    read -p "Ingrese el rango de puertos (por ejemplo, 20-80): " range
-    IFS='-' read -ra PORTS <<< "$range"
-    if [ ${#PORTS[@]} -eq 2 ]; then
-        ports=( $(seq ${PORTS[0]} ${PORTS[1]}) )
-    else
-        echo "Rango de puertos inválido. Usando el rango completo (1-65535)."
-        ports=( $(seq 1 65535) )
-    fi
-}
-
-# Función para verificar el puerto
 function checkPort {
     (exec 3<> /dev/tcp/$1/$2) 2>/dev/null
     if [ $? -eq 0 ]; then
-        echo "[+] Host $1 - Port $2 (OPEN)"
+        echo -e "${GREEN}[+]${RESET} Host ${CYAN}$1${RESET} - Port ${YELLOW}$2${RESET} ${GREEN}(OPEN)${RESET}"
     fi
     exec 3<&-
     exec 3>&-
 }
 
-# Solicitar al usuario que especifique el rango de puertos
-getPortRange
-
-tput civis  # Ocultar el cursor
-
-# Verificar argumento
-if [ "$1" ]; then
-    for port in ${ports[@]}; do
-        checkPort $1 $port
-    done
-else
-    echo -e "\n[!] Uso: $0 <ip-address>\n"
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
+    echo -e "\n${RED}[!] Usage: $0 <ip> <start-port> <end-port>${RESET}"
+    echo -e "    ${YELLOW}Example: $0 192.168.1.1 22 80${RESET}\n"
+    exit 1
 fi
 
-wait
-tput cnorm  # Restaurar el cursor
+ports=( $(seq $2 $3) )
 
+tput civis
+
+for port in ${ports[@]}; do
+    checkPort $1 $port
+done
+
+wait
+tput cnorm
