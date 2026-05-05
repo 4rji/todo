@@ -34,6 +34,9 @@ QUARANTINE_DIR="/quarantine"
 QUARANTINE_DIR_SET=0
 LOG_DIR="/var/log/clamav"
 LOG_DIR_SET=0
+LINUX_FULL_SCAN=0
+SCAN_PID=""
+SCAN_PGID=""
 
 OS_TYPE="unknown"
 OS_NAME="unknown"
@@ -49,26 +52,27 @@ usage() {
   printf '%b\n' "${C_BOLD}${C_CYAN}ClamAV auto installer and scanner${C_RESET}
 
 ${C_BOLD}Usage:${C_RESET}
-  ${C_GREEN}clamv${C_RESET} [options] [scan_path ...]
+  ${C_GREEN}clamv${C_RESET} [options] [target ...]
 
 ${C_BOLD}Default behavior:${C_RESET}
   When run with NO arguments this help is shown.
-  When run with at least one argument or option (e.g. a scan path or any
-  option below) it detects the operating system, installs ClamAV if missing,
-  adds the ClamAV binary directory to PATH when needed, creates/fixes basic
-  configuration, then runs a recursive scan. Use -u to update signatures.
+  When run with a scan target it detects the operating system, installs ClamAV
+  if missing, adds the ClamAV binary directory to the shell environment when
+  needed, creates/fixes basic configuration, then runs a recursive scan. Use -u
+  to update signatures.
 
 ${C_BOLD}Options:${C_RESET}
   ${C_YELLOW}-h${C_RESET}                       Show this help message.
-  ${C_YELLOW}-p${C_RESET} PATH                  Scan PATH. Can be used instead of a positional path.
-                           If no path is provided, / is scanned.
+  ${C_YELLOW}-p${C_RESET} TARGET                Scan TARGET. Can be used instead of a positional target.
   ${C_YELLOW}-in${C_RESET}                      Install/configure ClamAV, then exit.
-  ${C_YELLOW}-i${C_RESET}                       Only run the scan. Do not install or edit PATH.
+  ${C_YELLOW}-i${C_RESET}                       Only scan the provided target. Do not install or configure.
+  ${C_YELLOW}--linux${C_RESET}                  Scan all Linux from / with sudo and safe filesystem excludes.
   ${C_YELLOW}-u${C_RESET}                       Run freshclam to update signatures.
+                           Without a scan target, update only and exit.
   ${C_YELLOW}--force-install${C_RESET}          Run the installer even when ClamAV is already detected.
   ${C_YELLOW}-n${C_RESET}                       Do not move infected files; report only.
   ${C_YELLOW}--no-quarantine${C_RESET}          (alias for -n)
-  ${C_YELLOW}-l${C_RESET} DIR                   Write scan logs to DIR.
+  ${C_YELLOW}-l${C_RESET}, ${C_YELLOW}--log-dir${C_RESET} DIR      Write scan logs to DIR.
   ${C_YELLOW}-e${C_RESET} REGEX                 Add a clamscan --exclude-dir regular expression.
                            Can be repeated.
   ${C_YELLOW}--no-default-excludes${C_RESET}    Disable built-in pseudo-filesystem excludes.
@@ -76,7 +80,9 @@ ${C_BOLD}Options:${C_RESET}
 
 ${C_BOLD}Examples:${C_RESET}
   ${C_GREEN}clamv${C_RESET}
+  ${C_GREEN}clamv -u${C_RESET}
   ${C_GREEN}clamv /home${C_RESET}
+  ${C_GREEN}clamv --linux${C_RESET}
   ${C_GREEN}clamv -u -p /srv/www${C_RESET}
   ${C_GREEN}clamv -i -n ~/Downloads${C_RESET}
   ${C_GREEN}clamv -in${C_RESET}
@@ -749,6 +755,48 @@ default_excludes() {
   fi
 }
 
+linux_full_scan_excludes() {
+  printf '%s\n' \
+    '^/proc' \
+    '^/sys' \
+    '^/dev' \
+    '^/run' \
+    '^/mnt/backup' \
+    '^/home/.*/\.cache'
+}
+
+stop_scan_process() {
+  local signal="${1:-TERM}"
+
+  [[ -n "${SCAN_PID:-}" ]] || return 0
+  kill -0 "$SCAN_PID" 2>/dev/null || return 0
+
+  if [[ -n "${SCAN_PGID:-}" ]]; then
+    kill "-$signal" -- "-$SCAN_PGID" 2>/dev/null || true
+    if need_cmd sudo; then
+      sudo kill "-$signal" -- "-$SCAN_PGID" 2>/dev/null || true
+    fi
+  else
+    kill "-$signal" "$SCAN_PID" 2>/dev/null || true
+    if need_cmd pkill; then
+      pkill "-$signal" -P "$SCAN_PID" 2>/dev/null || true
+    fi
+    if need_cmd sudo; then
+      sudo kill "-$signal" "$SCAN_PID" 2>/dev/null || true
+      need_cmd pkill && sudo pkill "-$signal" -P "$SCAN_PID" 2>/dev/null || true
+    fi
+  fi
+}
+
+interrupt_scan() {
+  echo
+  warn "Scan interrupted; stopping clamscan..."
+  stop_scan_process TERM
+  sleep 1
+  stop_scan_process KILL
+  exit 130
+}
+
 spinner() {
   local pid="$1"
   local spin='-\|/'
@@ -798,6 +846,7 @@ detect_host() {
 
 run_scan() {
   local clamscan ts log host pid status infected_lines infected_count
+  local use_setsid=0
   local cmd=()
   local excludes=()
   local pattern target
@@ -809,12 +858,17 @@ run_scan() {
   fi
   [[ -n "$clamscan" ]] || die "clamscan was not found."
 
-  [[ "${#SCAN_TARGETS[@]}" -gt 0 ]] || SCAN_TARGETS=("/")
+  [[ "${#SCAN_TARGETS[@]}" -gt 0 ]] || die "No scan target provided. Example: clamv -i ~/Downloads"
 
-  if [[ "$USE_DEFAULT_EXCLUDES" -eq 1 ]]; then
+  if [[ "$USE_DEFAULT_EXCLUDES" -eq 1 && "$LINUX_FULL_SCAN" -eq 0 ]]; then
     while IFS= read -r pattern; do
       [[ -n "$pattern" ]] && excludes+=("$pattern")
     done < <(default_excludes)
+  fi
+  if [[ "$LINUX_FULL_SCAN" -eq 1 ]]; then
+    while IFS= read -r pattern; do
+      [[ -n "$pattern" ]] && excludes+=("$pattern")
+    done < <(linux_full_scan_excludes)
   fi
   excludes+=(${EXCLUDE_DIRS[@]+"${EXCLUDE_DIRS[@]}"})
 
@@ -838,6 +892,14 @@ run_scan() {
     printf '%b\n' "${C_BOLD}Quarantine:${C_RESET} ${C_YELLOW}disabled${C_RESET}"
   fi
   printf '%b\n' "${C_BOLD}Scan target(s):${C_RESET} ${C_GREEN}${SCAN_TARGETS[*]}${C_RESET}"
+  if [[ "${#excludes[@]}" -gt 0 ]]; then
+    printf '%b\n' "${C_BOLD}Excluded path regex:${C_RESET}"
+    for pattern in "${excludes[@]}"; do
+      printf '%b\n' "  ${C_YELLOW}$pattern${C_RESET}"
+    done
+  else
+    printf '%b\n' "${C_BOLD}Excluded path regex:${C_RESET} ${C_YELLOW}none${C_RESET}"
+  fi
   printf '%b\n' "${C_BOLD}${C_CYAN}======================================================${C_RESET}"
   echo
 
@@ -861,14 +923,9 @@ run_scan() {
   info "This may take a while..."
   echo
 
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] '
-    print_cmd "${cmd[@]}"
-    return 0
-  fi
-
   local needs_sudo=0
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    [[ "$LINUX_FULL_SCAN" -eq 0 ]] || needs_sudo=1
     [[ -w "$LOG_DIR" ]] || needs_sudo=1
     if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
       [[ -w "$QUARANTINE_DIR" ]] || needs_sudo=1
@@ -878,16 +935,51 @@ run_scan() {
     done
   fi
 
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] '
+    if [[ "${EUID:-$(id -u)}" -ne 0 && "$needs_sudo" -eq 1 ]]; then
+      print_cmd sudo "${cmd[@]}"
+    else
+      print_cmd "${cmd[@]}"
+    fi
+    return 0
+  fi
+
+  trap interrupt_scan INT TERM
+
   if [[ "${EUID:-$(id -u)}" -eq 0 || "$needs_sudo" -eq 0 ]]; then
-    "${cmd[@]}" &
+    if need_cmd setsid; then
+      setsid "${cmd[@]}" &
+      use_setsid=1
+    else
+      "${cmd[@]}" &
+    fi
   else
     need_cmd sudo || die "sudo is required for the scan."
-    info "${C_YELLOW}Elevation needed (log dir, quarantine, or unreadable target). Using sudo.${C_RESET}"
-    sudo "${cmd[@]}" &
+    if [[ "$LINUX_FULL_SCAN" -eq 1 ]]; then
+      info "${C_YELLOW}Linux full scan needs root access. Using sudo.${C_RESET}"
+    else
+      info "${C_YELLOW}Elevation needed (log dir, quarantine, or unreadable target). Using sudo.${C_RESET}"
+    fi
+    if need_cmd setsid; then
+      setsid sudo "${cmd[@]}" &
+      use_setsid=1
+    else
+      sudo "${cmd[@]}" &
+    fi
   fi
   pid=$!
+  SCAN_PID="$pid"
+  if [[ "$use_setsid" -eq 1 ]]; then
+    SCAN_PGID="$pid"
+  else
+    SCAN_PGID=""
+  fi
   spinner "$pid"
   wait "$pid" || status=$?
+  SCAN_PID=""
+  SCAN_PGID=""
+  trap - INT TERM
   status="${status:-0}"
 
   echo
@@ -929,6 +1021,8 @@ run_scan() {
 }
 
 parse_args() {
+  local opt
+
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
       -h)
@@ -946,6 +1040,10 @@ parse_args() {
       -i)
         MODE="scan"
         ;;
+      --linux)
+        LINUX_FULL_SCAN=1
+        SCAN_TARGETS=("/")
+        ;;
       -u)
         UPDATE_MODE="always"
         ;;
@@ -955,9 +1053,10 @@ parse_args() {
       -n|--no-quarantine)
         QUARANTINE_ENABLED=0
         ;;
-      -l)
+      -l|--log-dir)
+        opt="$1"
         shift
-        [[ "$#" -gt 0 ]] || die "-l requires a value."
+        [[ "$#" -gt 0 ]] || die "$opt requires a value."
         LOG_DIR="$1"
         LOG_DIR_SET=1
         ;;
@@ -1002,14 +1101,20 @@ main() {
     exit 0
   fi
   parse_args "$@"
+  if [[ "$MODE" != "install" && "$UPDATE_MODE" != "always" && "${#SCAN_TARGETS[@]}" -eq 0 ]]; then
+    die "No scan target provided. Example: clamv -i ~/Downloads"
+  fi
   detect_os
+  if [[ "$LINUX_FULL_SCAN" -eq 1 && "$OS_TYPE" != "linux" ]]; then
+    die "--linux full scan is only supported on Linux."
+  fi
   apply_platform_defaults
   refresh_clamav_path
 
   case "$MODE" in
     scan)
       if ! is_clamav_installed && [[ "$DRY_RUN" -eq 0 ]]; then
-        die "ClamAV was not found; run clamv without -i to install it."
+        die "ClamAV was not found; run clamv -in to install it."
       fi
       run_scan
       ;;
@@ -1027,6 +1132,10 @@ main() {
       ensure_path
       if [[ "$UPDATE_MODE" == "always" ]]; then
         run_freshclam
+      fi
+      if [[ "${#SCAN_TARGETS[@]}" -eq 0 ]]; then
+        info "Signature update completed."
+        exit 0
       fi
       run_scan
       ;;
