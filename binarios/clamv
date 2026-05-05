@@ -4,6 +4,26 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 ORIGINAL_PATH="${PATH:-}"
 
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'
+  C_MAGENTA=$'\033[35m'
+  C_CYAN=$'\033[36m'
+else
+  C_RESET=""
+  C_BOLD=""
+  C_RED=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_BLUE=""
+  C_MAGENTA=""
+  C_CYAN=""
+fi
+
 MODE="auto"
 UPDATE_MODE="auto"
 FORCE_INSTALL=0
@@ -11,7 +31,9 @@ DRY_RUN=0
 USE_DEFAULT_EXCLUDES=1
 QUARANTINE_ENABLED=1
 QUARANTINE_DIR="/quarantine"
+QUARANTINE_DIR_SET=0
 LOG_DIR="/var/log/clamav"
+LOG_DIR_SET=0
 
 OS_TYPE="unknown"
 OS_NAME="unknown"
@@ -25,62 +47,63 @@ EXCLUDE_DIRS=()
 CLAMSCAN_ARGS=()
 
 usage() {
-  cat <<'EOF'
-ClamAV auto installer and scanner
+  printf '%b\n' "${C_BOLD}${C_CYAN}ClamAV auto installer and scanner${C_RESET}
 
-Usage:
-  clamv [options] [scan_path ...]
+${C_BOLD}Usage:${C_RESET}
+  ${C_GREEN}clamv${C_RESET} [options] [scan_path ...]
 
-Default behavior:
-  Detect the operating system, install ClamAV if missing, add the ClamAV
-  binary directory to PATH when needed, create/fix basic configuration, update
-  signatures only when the database is missing, then run a recursive scan.
+${C_BOLD}Default behavior:${C_RESET}
+  When run with NO arguments this help is shown.
+  When run with at least one argument or option (e.g. a scan path or any
+  option below) it detects the operating system, installs ClamAV if missing,
+  adds the ClamAV binary directory to PATH when needed, creates/fixes basic
+  configuration, updates signatures only when the database is missing, then
+  runs a recursive scan.
 
-Options:
-  -h, --help                 Show this help message.
-  -p, --path PATH            Scan PATH. Can be used instead of a positional path.
-                             If no path is provided, / is scanned.
-  -i, --install-only         Install/configure ClamAV, update signatures, then exit.
-  -s, --scan-only            Only run the scan. Do not install, update, or edit PATH.
-  -u, --update-only          Install if needed, update signatures, then exit.
-      --path-only            Only add detected ClamAV binary directories to PATH.
-      --force-install        Run the installer even when ClamAV is already detected.
-      --update               Always run freshclam before scanning.
-      --no-update            Never run freshclam automatically.
-  -q, --quarantine DIR       Move infected files to DIR. Default: /quarantine.
-      --no-quarantine        Do not move infected files; report only.
-  -l, --log-dir DIR          Write scan logs to DIR. Default: /var/log/clamav.
-  -e, --exclude-dir REGEX    Add a clamscan --exclude-dir regular expression.
-                             Can be repeated.
-      --no-default-excludes  Disable built-in pseudo-filesystem excludes.
-      --dry-run              Print actions without changing the system.
-      --                     Pass all following arguments directly to clamscan.
+${C_BOLD}Options:${C_RESET}
+  ${C_YELLOW}-h${C_RESET}                       Show this help message.
+  ${C_YELLOW}-p${C_RESET} PATH                  Scan PATH. Can be used instead of a positional path.
+                           If no path is provided, / is scanned.
+  ${C_YELLOW}-in${C_RESET}                      Install/configure ClamAV, update signatures, then exit.
+  ${C_YELLOW}-i${C_RESET}                       Only run the scan. Do not install, update, or edit PATH.
+  ${C_YELLOW}-u${C_RESET}                       Install if needed, update signatures, then exit.
+  ${C_YELLOW}--path-only${C_RESET}              Only add detected ClamAV binary directories to PATH.
+  ${C_YELLOW}--force-install${C_RESET}          Run the installer even when ClamAV is already detected.
+  ${C_YELLOW}--update${C_RESET}                 Always run freshclam before scanning.
+  ${C_YELLOW}--no-update${C_RESET}              Never run freshclam automatically.
+  ${C_YELLOW}-q${C_RESET} DIR                   Move infected files to DIR.
+  ${C_YELLOW}--no-quarantine${C_RESET}          Do not move infected files; report only.
+  ${C_YELLOW}-l${C_RESET} DIR                   Write scan logs to DIR.
+  ${C_YELLOW}-e${C_RESET} REGEX                 Add a clamscan --exclude-dir regular expression.
+                           Can be repeated.
+  ${C_YELLOW}--no-default-excludes${C_RESET}    Disable built-in pseudo-filesystem excludes.
+  ${C_YELLOW}--dry-run${C_RESET}                Print actions without changing the system.
+  ${C_YELLOW}--${C_RESET}                       Pass all following arguments directly to clamscan.
 
-Examples:
-  clamv
-  clamv /home
-  clamv --update --path /srv/www
-  clamv --scan-only --no-quarantine ~/Downloads
-  clamv --install-only
+${C_BOLD}Examples:${C_RESET}
+  ${C_GREEN}clamv${C_RESET}
+  ${C_GREEN}clamv /home${C_RESET}
+  ${C_GREEN}clamv --update -p /srv/www${C_RESET}
+  ${C_GREEN}clamv -i --no-quarantine ~/Downloads${C_RESET}
+  ${C_GREEN}clamv -in${C_RESET}
 
-Exit codes:
-  0  Command completed. Infected files may still have been found; check summary.
-  2  Unsupported platform or missing required tool.
-  >2 clamscan or installer error.
-EOF
+${C_BOLD}Exit codes:${C_RESET}
+  ${C_GREEN}0${C_RESET}  Command completed. Infected files may still have been found; check summary.
+  ${C_YELLOW}2${C_RESET}  Unsupported platform or missing required tool.
+  ${C_RED}>2${C_RESET} clamscan or installer error."
 }
 
 die() {
-  echo "ERROR: $*" >&2
+  printf '%b\n' "${C_BOLD}${C_RED}ERROR:${C_RESET} $*" >&2
   exit 2
 }
 
 warn() {
-  echo "WARNING: $*" >&2
+  printf '%b\n' "${C_BOLD}${C_YELLOW}WARNING:${C_RESET} $*" >&2
 }
 
 info() {
-  echo "[*] $*"
+  printf '%b\n' "${C_BLUE}[*]${C_RESET} $*"
 }
 
 print_cmd() {
@@ -185,7 +208,7 @@ known_bin_dirs() {
 
   local d unique=()
   for d in "${dirs[@]}"; do
-    append_unique "$d" "${unique[@]}" && unique+=("$d")
+    append_unique "$d" ${unique[@]+"${unique[@]}"} && unique+=("$d")
   done
 
   printf '%s\n' "${unique[@]}"
@@ -404,16 +427,16 @@ detected_clamav_bin_dirs() {
     path="$(find_cmd_path "$cmd" 2>/dev/null || true)"
     [[ -n "$path" ]] || continue
     d="$(dirname "$path")"
-    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+    append_unique "$d" ${dirs[@]+"${dirs[@]}"} && dirs+=("$d")
   done
 
   while IFS= read -r d; do
     [[ -d "$d" ]] || continue
     [[ -x "$d/clamscan" || -x "$d/freshclam" || -x "$d/clamdscan" ]] || continue
-    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+    append_unique "$d" ${dirs[@]+"${dirs[@]}"} && dirs+=("$d")
   done < <(known_bin_dirs)
 
-  printf '%s\n' "${dirs[@]}"
+  printf '%s\n' ${dirs[@]+"${dirs[@]}"}
 }
 
 ensure_path() {
@@ -423,7 +446,7 @@ ensure_path() {
   while IFS= read -r d; do
     [[ -n "$d" ]] || continue
     should_persist_path_dir "$d" || continue
-    append_unique "$d" "${dirs[@]}" && dirs+=("$d")
+    append_unique "$d" ${dirs[@]+"${dirs[@]}"} && dirs+=("$d")
   done < <(detected_clamav_bin_dirs)
 
   if [[ "${#dirs[@]}" -eq 0 ]]; then
@@ -488,7 +511,7 @@ possible_conf_dirs() {
 
   local d unique=()
   for d in "${dirs[@]}"; do
-    append_unique "$d" "${unique[@]}" && unique+=("$d")
+    append_unique "$d" ${unique[@]+"${unique[@]}"} && unique+=("$d")
   done
 
   printf '%s\n' "${unique[@]}"
@@ -670,7 +693,7 @@ database_exists() {
 
   local unique=()
   for d in "${dirs[@]}"; do
-    append_unique "$d" "${unique[@]}" && unique+=("$d")
+    append_unique "$d" ${unique[@]+"${unique[@]}"} && unique+=("$d")
   done
 
   for d in "${unique[@]}"; do
@@ -729,10 +752,10 @@ spinner() {
 
   while kill -0 "$pid" 2>/dev/null; do
     i=$(((i + 1) % 4))
-    printf '\r[+] Scan in progress... %c' "${spin:$i:1}"
+    printf '\r%b[+]%b Scan in progress... %b%c%b' "$C_BLUE" "$C_RESET" "$C_YELLOW" "${spin:$i:1}" "$C_RESET"
     sleep 0.2
   done
-  printf '\r[+] Scan completed.           \n'
+  printf '\r%b[+]%b %bScan completed.%b           \n' "$C_BLUE" "$C_RESET" "$C_GREEN" "$C_RESET"
 }
 
 read_log_matches() {
@@ -789,7 +812,7 @@ run_scan() {
       [[ -n "$pattern" ]] && excludes+=("$pattern")
     done < <(default_excludes)
   fi
-  excludes+=("${EXCLUDE_DIRS[@]}")
+  excludes+=(${EXCLUDE_DIRS[@]+"${EXCLUDE_DIRS[@]}"})
 
   mkdir_maybe_root "$LOG_DIR"
   [[ "$QUARANTINE_ENABLED" -eq 0 ]] || mkdir_maybe_root "$QUARANTINE_DIR"
@@ -798,41 +821,41 @@ run_scan() {
   log="$LOG_DIR/manual_scan_${ts}.log"
   host="$(detect_host)"
 
-  echo "======================================================"
-  echo "ClamAV Incident Response Scan"
-  echo "Host: $host"
-  echo "Time (UTC): $(date -u)"
+  printf '%b\n' "${C_BOLD}${C_CYAN}======================================================${C_RESET}"
+  printf '%b\n' "${C_BOLD}${C_CYAN}ClamAV Incident Response Scan${C_RESET}"
+  printf '%b\n' "${C_BOLD}Host:${C_RESET} ${C_GREEN}$host${C_RESET}"
+  printf '%b\n' "${C_BOLD}Time (UTC):${C_RESET} $(date -u)"
   echo
-  echo "Log directory: $LOG_DIR"
-  echo "Current log file: $log"
+  printf '%b\n' "${C_BOLD}Log directory:${C_RESET} ${C_CYAN}$LOG_DIR${C_RESET}"
+  printf '%b\n' "${C_BOLD}Current log file:${C_RESET} ${C_CYAN}$log${C_RESET}"
   if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
-    echo "Quarantine directory: $QUARANTINE_DIR"
+    printf '%b\n' "${C_BOLD}Quarantine directory:${C_RESET} ${C_CYAN}$QUARANTINE_DIR${C_RESET}"
   else
-    echo "Quarantine: disabled"
+    printf '%b\n' "${C_BOLD}Quarantine:${C_RESET} ${C_YELLOW}disabled${C_RESET}"
   fi
-  echo "Scan target(s): ${SCAN_TARGETS[*]}"
-  echo "======================================================"
+  printf '%b\n' "${C_BOLD}Scan target(s):${C_RESET} ${C_GREEN}${SCAN_TARGETS[*]}${C_RESET}"
+  printf '%b\n' "${C_BOLD}${C_CYAN}======================================================${C_RESET}"
   echo
 
-  echo "[*] Existing ClamAV scan logs:"
-  list_path "$LOG_DIR" | grep 'manual_scan_' || echo "No previous scan logs found."
+  info "Existing ClamAV scan logs:"
+  list_path "$LOG_DIR" | grep 'manual_scan_' || printf '%b\n' "${C_YELLOW}No previous scan logs found.${C_RESET}"
   echo
 
   cmd=("$clamscan" -r --infected)
-  for pattern in "${excludes[@]}"; do
+  for pattern in ${excludes[@]+"${excludes[@]}"}; do
     cmd+=("--exclude-dir=$pattern")
   done
   if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
     cmd+=("--move=$QUARANTINE_DIR")
   fi
   cmd+=("--log=$log")
-  cmd+=("${CLAMSCAN_ARGS[@]}")
+  cmd+=(${CLAMSCAN_ARGS[@]+"${CLAMSCAN_ARGS[@]}"})
   for target in "${SCAN_TARGETS[@]}"; do
     cmd+=("$target")
   done
 
-  echo "[*] Starting scan..."
-  echo "[*] This may take a while..."
+  info "Starting scan..."
+  info "This may take a while..."
   echo
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -841,10 +864,22 @@ run_scan() {
     return 0
   fi
 
-  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  local needs_sudo=0
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    [[ -w "$LOG_DIR" ]] || needs_sudo=1
+    if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
+      [[ -w "$QUARANTINE_DIR" ]] || needs_sudo=1
+    fi
+    for target in "${SCAN_TARGETS[@]}"; do
+      [[ -r "$target" ]] || { needs_sudo=1; break; }
+    done
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 || "$needs_sudo" -eq 0 ]]; then
     "${cmd[@]}" &
   else
     need_cmd sudo || die "sudo is required for the scan."
+    info "${C_YELLOW}Elevation needed (log dir, quarantine, or unreadable target). Using sudo.${C_RESET}"
     sudo "${cmd[@]}" &
   fi
   pid=$!
@@ -853,32 +888,36 @@ run_scan() {
   status="${status:-0}"
 
   echo
-  echo "================ IR SUMMARY ================"
+  printf '%b\n' "${C_BOLD}${C_CYAN}================ IR SUMMARY ================${C_RESET}"
 
   infected_lines="$(read_log_matches ' FOUND$' "$log")"
   infected_count="$(printf '%s\n' "$infected_lines" | grep -c ' FOUND$' || true)"
-  echo "Total infected files detected: $infected_count"
+  if [[ "$infected_count" -gt 0 ]]; then
+    printf '%b\n' "${C_BOLD}Total infected files detected:${C_RESET} ${C_RED}${C_BOLD}$infected_count${C_RESET}"
+  else
+    printf '%b\n' "${C_BOLD}Total infected files detected:${C_RESET} ${C_GREEN}$infected_count${C_RESET}"
+  fi
   echo
 
   if [[ "$infected_count" -gt 0 ]]; then
-    echo "Infected files:"
-    printf '%s\n' "$infected_lines"
+    printf '%b\n' "${C_BOLD}${C_RED}Infected files:${C_RESET}"
+    printf '%b\n' "${C_RED}$infected_lines${C_RESET}"
   else
-    echo "No infected files detected."
+    printf '%b\n' "${C_GREEN}No infected files detected.${C_RESET}"
   fi
 
   if [[ "$QUARANTINE_ENABLED" -eq 1 ]]; then
     echo
-    echo "Quarantine contents:"
+    printf '%b\n' "${C_BOLD}Quarantine contents:${C_RESET}"
     list_path "$QUARANTINE_DIR"
   fi
 
   echo
-  echo "Scan statistics:"
+  printf '%b\n' "${C_BOLD}Scan statistics:${C_RESET}"
   read_log_matches 'Scanned files:|Infected files:|Time:|Data scanned:|Data read:' "$log"
 
-  echo "============================================"
-  echo "[*] IR scan finished."
+  printf '%b\n' "${C_BOLD}${C_CYAN}============================================${C_RESET}"
+  info "${C_GREEN}IR scan finished.${C_RESET}"
 
   if [[ "$status" -gt 1 ]]; then
     return "$status"
@@ -889,22 +928,22 @@ run_scan() {
 parse_args() {
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
-      -h|--help)
+      -h)
         usage
         exit 0
         ;;
-      -p|--path)
+      -p)
         shift
-        [[ "$#" -gt 0 ]] || die "--path requires a value."
+        [[ "$#" -gt 0 ]] || die "-p requires a value."
         SCAN_TARGETS=("$1")
         ;;
-      -i|--install-only)
+      -in)
         MODE="install"
         ;;
-      -s|--scan-only)
+      -i)
         MODE="scan"
         ;;
-      -u|--update-only)
+      -u)
         MODE="update"
         UPDATE_MODE="always"
         ;;
@@ -920,22 +959,24 @@ parse_args() {
       --no-update)
         UPDATE_MODE="never"
         ;;
-      -q|--quarantine)
+      -q)
         shift
-        [[ "$#" -gt 0 ]] || die "--quarantine requires a value."
+        [[ "$#" -gt 0 ]] || die "-q requires a value."
         QUARANTINE_DIR="$1"
+        QUARANTINE_DIR_SET=1
         ;;
       --no-quarantine)
         QUARANTINE_ENABLED=0
         ;;
-      -l|--log-dir)
+      -l)
         shift
-        [[ "$#" -gt 0 ]] || die "--log-dir requires a value."
+        [[ "$#" -gt 0 ]] || die "-l requires a value."
         LOG_DIR="$1"
+        LOG_DIR_SET=1
         ;;
-      -e|--exclude-dir)
+      -e)
         shift
-        [[ "$#" -gt 0 ]] || die "--exclude-dir requires a value."
+        [[ "$#" -gt 0 ]] || die "-e requires a value."
         EXCLUDE_DIRS+=("$1")
         ;;
       --no-default-excludes)
@@ -960,9 +1001,27 @@ parse_args() {
   done
 }
 
+apply_platform_defaults() {
+  local base=""
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if [[ -d /usr/local && -w /usr/local ]] || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      base="/usr/local/var/clamav"
+    else
+      base="${HOME%/}/clamav"
+    fi
+    [[ "$QUARANTINE_DIR_SET" -eq 0 ]] && QUARANTINE_DIR="$base/quarantine"
+    [[ "$LOG_DIR_SET" -eq 0 ]] && LOG_DIR="$base/log"
+  fi
+}
+
 main() {
+  if [[ "$#" -eq 0 ]]; then
+    usage
+    exit 0
+  fi
   parse_args "$@"
   detect_os
+  apply_platform_defaults
   refresh_clamav_path
 
   case "$MODE" in
