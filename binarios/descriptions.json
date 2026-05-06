@@ -780,5 +780,17 @@
             "Supports install-only, scan-only, update-only, path-only, custom scan paths, custom log directory, quarantine control, default filesystem excludes, and dry-run mode.",
             "Each scan writes timestamped logs and prints an incident-response summary with detected infections and quarantine contents."
         ]
+    },
+    "cloudt": {
+        "name": "cloudt",
+        "short_desc": "Starts, stops, checks, and installs a Cloudflare Tunnel menu.",
+        "detailed_desc": [
+            "Provides an interactive menu for managing cloudflared tunnels.",
+            "",
+            "Can start a detached tunnel with $cloudtoken, stop a running cloudflared process, and show process, log, and local backend status.",
+            "",
+            "Includes install helpers for wget downloads, Debian/Ubuntu, macOS Homebrew, Windows, and Docker.",
+            "Shows configured 4rji tunnel routes and checks local service ports before reporting status."
+        ]
     }
 }
