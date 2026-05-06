@@ -127,7 +127,6 @@ llainst             Cargo tool para ver ls con tablas, mejor formato
 webcheck            Para examinar website, funciona en docker, cool info de websites
 hyplinst            instala hyprland y descarga los dotfiles
 lab                 Ejecuta el servidor http 8000 en python para labs, creado ahora htb
-cloudfinst          Para instalar cloudflare para el tunel
 dropinst            sftp cliente para guardar archivos, transferir o extraer
 nodeinst            Instala node en linux debian using nvm with npm
 elast-fileb-inst    Instala y configura elasticsearch, filebeat y envio suricata logs
@@ -568,7 +567,7 @@ ncarchivos          Muestra comandos para nc para enviar archivos o enviar coman
 socat1              Bajado de https://github.com/aledbf/socat-static-binary/releases/download/v0.0.1/socat-linux-amd64
 linpi               Baja comprimidos, que contiene linpi, enum, chisel, pspy64, etc.
 
-cloudtunnel         Inicia cloudflare tunnel en la xps con servicios ya configurados.
+cloudf              Cloudflare tunnel: start/stop/status + install (wget o OS package manager).
 busq                alias busq='/opt/4rji/BreachCompilation/query.sh'
 pixeltrack          Instala servidor apache con un track pixel para email pixel track location
 consola             Obtener una consola interactiva tty.
