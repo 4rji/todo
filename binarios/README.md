@@ -367,6 +367,7 @@ nessusinst          instalar nessus
 
 
 ###------fail2ban
+f2b                 Bans a prompted IP address in the Fail2Ban SSH jail.
 f2binst             instala debian fail2ban f2b
 f2c                 fail2ban comandos 
 

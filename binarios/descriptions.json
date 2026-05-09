@@ -289,6 +289,16 @@
         "short_desc": "Instala y configura fail2ban y dependencias.",
         "detailed_desc": "sudo apt-get install -y iptables\nsudo apt-get install -y rsyslog\nsudo apt-get install -y fail2ban"
     },
+    "f2b": {
+        "name": "f2b",
+        "short_desc": "Bans a prompted IP address in the Fail2Ban SSH jail.",
+        "detailed_desc": [
+            "Prompts for an IP address to block.",
+            "",
+            "Runs fail2ban-client with sudo to ban that IP in the sshd jail.",
+            "Command used: sudo fail2ban-client set sshd banip <ip>."
+        ]
+    },
     "artilleria": {
         "name": "artilleria",
         "short_desc": "Instala iptables en diferentes distribuciones Linux.",
