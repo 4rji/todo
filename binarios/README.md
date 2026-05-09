@@ -271,7 +271,7 @@ colores             Colores en hexadecimal
 grepfind            incorpora grep y find en un script para buscar palabras en archivos
 todos               Hace un fzf a el directorio 4rj, con cat -l rb, para abrir usar nvim $(todos)
 ayudah              Aplica -h mensaje para mostrar al inicio de un script
-comandos            Muestra varios comandos en lista. util
+man                 usa fzf para mostrar varios comandos en lista. util
 bashfun             Agrega las funciones function a las bash zsh, en zshrc bashrc mktem
 whx                 hace un xargs cat a un binario y pregunta si deseo editarlo #ejemplo whx mired     
 whr                 hace un nano a un binario    
@@ -645,7 +645,6 @@ pas                 Guarda clipboad en maquina.md
 alis                Make an alias for zshrc quickly
 qwe                 Alias de clipc && pas
 goo                 Abre google chrome con la ip o pagina despues, es una bash function
-listaa              Agrega un nuevo nombre a la lista apache para el servidor apache
 hosthtb             Agrega el host para paginas, toma la $ip de zsh y solo pide el host.htb por ejemplo
 galletas            Recibe cookies de session, php js xss html injection phpsessid
 ngrok               Instala ngrok para dockers, toma token de ngroktk script, conecta ssh y http. 
@@ -777,7 +776,6 @@ nixclean            Arregla la shell de nixos para los scripts 4rji
 ssa                 Busca un host en ssh
 dhclientcomm        Comandos para dhclient y para dar de alta un ip en debian
 mac-route           Prioritizar wifi sobre ethernet en mac (discontinued)
-codexx              Muestra los modelos disponibles de codex (discondinued)
 servidores          Inicia el programa servidores que es la webapp de flash para proxmox
 servidoresprogram   El codigo de servidores para proxmox servidores
 loopp               While true; function and script, loop is the function.
