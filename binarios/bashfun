@@ -29,20 +29,32 @@ nv() {
   nix-shell -p neovim --run "nvim $1"
 }
 
-#para mac
-function mktemm() {
-    ramdisk_path="/Volumes/RAMDisk"
+mktem() {
+    case "$(uname -s)" in
+        Darwin)
+            ramdisk_path="/Volumes/RAMDisk"
 
-    # Crear RAM disk si no existe
-    if [ ! -d "$ramdisk_path" ]; then
-        echo "Montando RAMDisk..."
-        diskutil erasevolume HFS+ RAMDisk $(hdiutil attach -nomount ram://$((4 * 1024 * 1024 * 1024 / 512))) >/dev/null
-    fi
+            if [ ! -d "$ramdisk_path" ]; then
+                echo "Montando RAMDisk..."
+                diskutil erasevolume HFS+ RAMDisk \
+                    "$(hdiutil attach -nomount ram://$((4 * 1024 * 1024 * 1024 / 512)))" > /dev/null
+            fi
+
+            base="$ramdisk_path"
+            ;;
+        Linux)
+            base="/dev/shm"
+            ;;
+        *)
+            echo "Sistema no soportado: $(uname -s)" >&2
+            return 1
+            ;;
+    esac
 
     if [ -n "$1" ]; then
-        new_dir=$(mktemp -d "$ramdisk_path/tmp.$1.XXXXXX")
+        new_dir=$(mktemp -d "$base/tmp.$1.XXXXXX")
     else
-        new_dir=$(mktemp -d "$ramdisk_path/tmp.XXXXXX")
+        new_dir=$(mktemp -d "$base/tmp.XXXXXX")
     fi
 
     echo "Directorio creado en: $new_dir"
@@ -113,28 +125,6 @@ zle -N todo_todo
 bindkey '^T' todo_todo
 
 
-
-function mktem() {
-    if [ -n "$1" ]; then
-        new_dir=$(mktemp -d /dev/shm/tmp."$1".XXXXXX)
-    else
-        new_dir=$(mktemp -d /dev/shm/tmp.XXXXXX)
-    fi
-    echo "Directorio creado en: $new_dir"
-    cd "$new_dir" || return
-    echo "Cambiado al directorio: $PWD"
-}
-
-function mktem2() {
-    if [ -n "$1" ]; then
-        new_dir=$(mktemp -d /tmp/tmp."$1".XXXXXX)
-    else
-        new_dir=$(mktemp -d /tmp/tmp.XXXXXX)
-    fi
-    echo "Directorio creado en: $new_dir"
-    cd "$new_dir" || return
-    echo "Cambiado al directorio: $PWD"
-}
 
 function __fzf_history_search() {
   local selected

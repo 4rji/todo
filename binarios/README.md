@@ -224,6 +224,7 @@ nixbus              Para buscar programas en linea de comando y tambien corregir
 
 ###------utilidades 
 gitc                Menu rapido de github para gh
+gcom                Interactive Git menu for committing, pushing, fetching, pulling, and status checks.
 videocapture        Captures HTTP traffic from an IPCam, extracts frames from the pcap, and reconstructs into video
 zipcomm             Comandos basicos de zip
 vmdig               Para manejar Digital ocean API
@@ -634,6 +635,7 @@ enum                guarda whichsys, nmap, se ejecuta desde nmap folder
 contra              Copia una contrasena del portapapales a content/passwords
 usua                Copia un usuario a /content/users
 bashcurl            Crea una bash 443 TCP para usar en curl, monta servidor, crea bash, curl localhost/bash | bash
+index.html1          Minimal Bash TCP reverse-shell payload for lab use.
 eyewit              Guarda la pagina con eyewitness, solo pregunta por el directorio, usar $eyeruta export
 pas                 Guarda clipboad en maquina.md
 alis                Make an alias for zshrc quickly
