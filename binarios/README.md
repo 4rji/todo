@@ -185,7 +185,6 @@ instgithub          Instala github desktop en kali
 pythonscritps       instala requerimientos y baje scritps del curso de python
 obsidianinst        Instala obsidian en deb, baja paquete e instala notas 
 zeroinst            Script para zero raspberry
-zshinstc            Instala y compila zsh 5.9, para centos 7
 zshinst             instala zsh con todo, ya no necesita c1-5, instala functions
 zshinst1            antes zshinst, Instala la zsh h-my-zsh powerlevel10k
 zshinst2            Instala la configuracion de barra terminal .p10k.zsh, 
@@ -718,7 +717,6 @@ firewall-ipt        un firewall manual que usa iptables
 ipredir             redirecciona una IP por otra, util para mandar o cambiar trafico
 finddb              Busca una database corriendo ya sea sqlite mariadb
 python9inst         instala python 3.9 compila para yum 
-zshupdate           actualiza descargando compidor a 5.9
 passl               version SIN batcat
 pasw                version de passwd con batcat
 curlfix             Se supone arregla curl, no probado.
@@ -780,7 +778,6 @@ ssa                 Busca un host en ssh
 dhclientcomm        Comandos para dhclient y para dar de alta un ip en debian
 mac-route           Prioritizar wifi sobre ethernet en mac (discontinued)
 codexx              Muestra los modelos disponibles de codex (discondinued)
-zshconf             Configuraciones de la zsh, aun no en script, para copiar y pegar (discontinued)
 servidores          Inicia el programa servidores que es la webapp de flash para proxmox
 servidoresprogram   El codigo de servidores para proxmox servidores
 loopp               While true; function and script, loop is the function.
