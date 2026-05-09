@@ -378,7 +378,6 @@ f2c                 fail2ban comandos
 ###------para bspwx
 target1             cambia el estatus de la bateria por cualquier otra cosa que se quiera poner ahi    
 asd                 copia el contenido de target1 a el portapapeles                                    
-fixethernet         Arregla la red del script ethernet_status para bspwx escritorio
 
 
 ###------artilleria
