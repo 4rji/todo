@@ -345,7 +345,9 @@ nsweep_{192.168.1}  hace un nmap -sn en la red para buscar maquinas activas.
 nsweep2             Otro que hace un nmap -sn                        
 
 expo                Hace un scaneo con o sin Pn, y lo genera en carpeta tmp, hace expo1, expo2, expo3
-expos               Version mejorada de expo, usar este. ./script IP
+expo1               Full nmap -p- a IP (con o sin -Pn), escribe ./allPorts (oG)
+expo2               Lee ./allPorts, extrae puertos open, copia al clipboard (pbcopy/xclip/wl-copy), llama expo3
+expo3               Lee ./allPorts para IP, pide puertos y corre nmap -sCV detallado, salida ./nmap_results
 expo4               crea un archibo clip1 del portapapeles para expo5                                  
 expo5               limpia el archivo targeted y muestra solo los servicios, crea resumen 
 sweepall            hace nmap xml para abrir con firefox, USA sweep, ips y puertos o puertos2
