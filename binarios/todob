@@ -149,6 +149,26 @@ if [[ $mostrarBina == true || $borrarBinarios == true || ( $mostrarBina == false
     descargar_bina
 fi
 
+# Tras -c y descarga de bina, ofrecer ejecutar binariosgo
+if [[ $borrarBinarios == true ]]; then
+    echo ""
+    read -p "$(echo -e ${verde}'Download binaries? [Y/n]: '${reset})" -n 1 -r respuesta_go
+    echo ""
+    respuesta_go=${respuesta_go:-y}
+    respuesta_go=$(echo "$respuesta_go" | tr '[:upper:]' '[:lower:]')
+    if [[ "$respuesta_go" == "y" ]]; then
+        if [[ -x "${bin_dir}/binariosgo" ]]; then
+            "${bin_dir}/binariosgo"
+        elif command -v binariosgo >/dev/null 2>&1; then
+            binariosgo
+        else
+            echo "binariosgo not found in ${bin_dir} or PATH." >&2
+        fi
+    else
+        echo "Skipped binariosgo."
+    fi
+fi
+
 # Ejecutar preguntas si corresponde
 if [[ $mostrarPreguntas == true || $mostrarBina == true ]]; then
     echo ""
