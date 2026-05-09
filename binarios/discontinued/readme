@@ -7,3 +7,5 @@ copycar	            Copia una carpeta folder por medio de ssh scp
 pings               Hace un ping a todos los hosts dentro de archivo ssh/config
 pingsm              Version para mac
 pssh1               Hace un ping a un servidor y luego se conecta
+fixme               corre fix-4rji para solucionar repositorios despuies de la instalacion             
+

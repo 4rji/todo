@@ -18,6 +18,19 @@
         "short_desc": "Netcat replacement written in Python.",
         "detailed_desc": "Implements client and server functionalities similar to Netcat. Supports remote command shell (-c), file upload (-u), and command execution (-e) over TCP connections. Can operate in listen mode to accept incoming connections or act as a client to send data. Includes multi-threaded connection handling for concurrent sessions."
     },
+    "galletapython": {
+        "name": "galletapython",
+        "short_desc": "Serves galleta.js and logs base64 cookie callbacks for lab testing.",
+        "detailed_desc": [
+            "Starts a simple HTTP server on 0.0.0.0:80 for lab callbacks.",
+            "",
+            "When /galleta.js is requested, it serves the local galleta.js file as JavaScript.",
+            "For other GET requests, it returns a basic success response.",
+            "",
+            "If a request includes ?b64=, the value is appended to cookies.txt in the current directory.",
+            "Because it binds to port 80, running it may require elevated privileges."
+        ]
+    },
     "virust": {
         "name": "virust",
         "short_desc": "Consulta IPs contra VirusTotal e incluye geolocalización.",

@@ -14,6 +14,7 @@ tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloaktools        Post-detection investigation checklist for decloak analysis
 decloak.py          File decloaking tool to identify possible rootkit-based content hiding
 copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
+galletapython       Serves galleta.js and logs base64 cookie callbacks for lab testing.
 processdecloak      Busca procesos ocultos en linux
 tlscheck            TLS cert check using SHA256 Useful for detecting TLS interception - MITM.
 ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
@@ -319,7 +320,6 @@ picoduckytool       Para formatear raspberri pico, se necesito el github en el m
 dor                 Disables automatic lock, screensaver, and sleep, then restores the previous state on demand
 
 ###------Repositorios
-fixme               corre fix-4rji para solucionar repositorios despuies de la instalacion             
 repos               vuelve a instalar por defaul los repos de kali cuando no funcionan.                
 fixkalirepos	    Borra todo los archivos en /etc/apt/ y luego reinstala y descarga pgp
 contenedor          Instala paquetes basicos, util en contenedores docker
