@@ -404,8 +404,7 @@ ssh-getpublic       Descarga la llave publica a la maquina.
 ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
 sshc                copia directorio o archivo por ssh, lo comprime y descomprime
 sshp                ssh proxy D 1080 en background, completo, bashfun bash function
-pingt               Hace traceroute con ping
-pingz               misma que pings pero usa nc para ver status del puerto ssh en el .config
+
 sshsync             Sincroniza el archivo ssh con los nuevos de github. no borra nada
 sshdown             Descarga .ssh/config y crea copia
 sshk                kitty +kitten ssh 
@@ -793,16 +792,10 @@ limpiar             NO USAR  Limpia el home con shred y scrub (solo home del usu
 limpiartest         Genera archivos de varios tamanos para probar
 cortes              Muestra cortes archivos con awk cut (no grep or find)
 ddf                 hace un diff archivo vs archivo.backup                                             
-copyrrs             Copia archivo por rsync preguntado hosts y puerto
-copyrs              Copia archivo o carpeta por rsync usando sshconf
-copyrs-old          Copia archivo por rsync usando sshconf 
-copyrsr             Recibe un archivo por medio de rsync
-copyrsyn            Usa hosts ansible y copia un archivo con rsync y clave privada
-copycar	            Copia una carpeta folder por medio de ssh scp
 limpiarf            Limpiar un archivo buscando, awk grep palabra.
-pings               Hace un ping a todos los hosts dentro de archivo ssh/config
-pingsm              Version para mac
-pssh1               Hace un ping a un servidor y luego se conecta
+
+
+
 fixhost             Arregla know_hosts para ssh duplicados
 sshhostt            Lista los hosts del archivo sshconf, para conectarse
 sshhost             Lista igual pero en go. binario. 

@@ -390,16 +390,6 @@
         "short_desc": "Configura Firefox con perfiles efímeros y soporte multilingüe.",
         "detailed_desc": "mkdir -p /tmp/fx-profile\necho \"user_pref('intl.accept_languages', '<lang_code>,en');\nuser_pref('general.useragent.locale', '<lang_code>');\nuser_pref('intl.locale.requested', '<lang_code>');\" > /tmp/fx-profile/user.js"
     },
-    "s1pinst": {
-        "name": "s1pinst",
-        "short_desc": "Instala Docker y verifica la instalación.",
-        "detailed_desc": "sudo apt-get install -y docker.io\nsudo yum install -y docker\nsudo dnf install -y docker\nsudo pacman -S docker"
-    },
-    "pings": {
-        "name": "pings",
-        "short_desc": "Monitorea el estado de hosts definidos en el archivo de configuración SSH.",
-        "detailed_desc": "ping -c 1 <host>"
-    },
     "aaron": {
         "name": "aaron",
         "short_desc": "Script para compilar y ejecutar un exploit de escalada de privilegios basado en Dirty Pipe.",
