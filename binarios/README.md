@@ -344,7 +344,7 @@ sweepold            solo hace el sweep normal de las ips
 nsweep_{192.168.1}  hace un nmap -sn en la red para buscar maquinas activas.   
 nsweep2             Otro que hace un nmap -sn                        
 
-expo                Hace un scaneo con o sin Pn, y lo genera en carpeta tmp, hace expo1, expo2, expo3
+expo                Cadena ping+whichsys+expo1+expo2(+expo3). Flag -u agrega UDP top-100 al final
 expo1               Full nmap -p- a IP (con o sin -Pn), escribe ./allPorts (oG)
 expo2               Lee ./allPorts, extrae puertos open, copia al clipboard (pbcopy/xclip/wl-copy), llama expo3
 expo3               Lee ./allPorts para IP, pide puertos y corre nmap -sCV detallado, salida ./nmap_results
