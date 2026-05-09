@@ -124,6 +124,17 @@ todo_todo() {
 zle -N todo_todo 
 bindkey '^T' todo_todo
 
+#mann
+mann_mann() {
+        if [[ -n "$BUFFER" ]]; then
+                zle accept-line
+                return
+        fi
+        /opt/4rji/bin/mann </dev/tty >/dev/tty 2>&1
+}
+zle -N mann_mann
+bindkey '^[m' mann_mann
+
 
 
 function __fzf_history_search() {
