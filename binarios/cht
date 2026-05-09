@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 usage() {
     echo "Uso: $0 [-i] archivo"
-    echo "  Sin flags: agrega chattr +i al archivo en /opt/4rji/bin"
-    echo "  -i       : quita chattr -i al archivo en /opt/4rji/bin"
+    echo "  Sin flags: marca archivo como inmutable en /opt/4rji/bin"
+    echo "  -i       : quita inmutabilidad"
+    echo "Detecta OS: Linux usa chattr, macOS usa chflags."
     exit 1
 }
 
@@ -26,8 +27,16 @@ if [ ! -e "$archivo" ]; then
     exit 1
 fi
 
-if $remove; then
-    sudo chattr -i "$archivo"
+if [[ "$(uname)" == "Darwin" ]]; then
+    if $remove; then
+        sudo chflags nouchg "$archivo"
+    else
+        sudo chflags uchg "$archivo"
+    fi
 else
-    sudo chattr +i "$archivo"
+    if $remove; then
+        sudo chattr -i "$archivo"
+    else
+        sudo chattr +i "$archivo"
+    fi
 fi

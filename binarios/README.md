@@ -748,9 +748,7 @@ redhavi-check       Checa las malconfiguraciones
 
 ###------ otros
 redhavi-check       Checa las malconfiguraciones
-cht                 chattr +i a los binarios de opt. Con -i quita el flag (reemplaza chtt)
-chtm                Pone chattr +i a los binarios de opt/ MAC
-chttm               Pone chattr -i a los binarios de opt para MAC- QUITA
+cht                 Marca binarios de /opt/4rji/bin como inmutables. Con -i quita. Detecta Linux/Mac (chattr/chflags)
 dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
 wifi-radar          En comprimidos, muestra la calidad de la senal wifi en un webserver, necesitas wifi
 wifi-radar-finder   en comprimidos, muestra las redes wifi con su intensidad para buscarlas
