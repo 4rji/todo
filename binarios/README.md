@@ -399,6 +399,7 @@ findbin             Para buscar binarios como zeek
 
 
 ###------ssh
+pingz               pingzm en macOS y pingz_amd en Linux. Chequea SSH hosts del config.
 ssh-getkey          se descarga la llave para el script ssh-getpublic
 ssh-getpublic       Descarga la llave publica a la maquina.
 ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
