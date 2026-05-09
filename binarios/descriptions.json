@@ -299,6 +299,26 @@
             "Command used: sudo fail2ban-client set sshd banip <ip>."
         ]
     },
+    "f2u": {
+        "name": "f2u",
+        "short_desc": "Unbans a prompted IP address from the Fail2Ban SSH jail.",
+        "detailed_desc": [
+            "Prompts for an IP address to remove from the jail.",
+            "",
+            "Runs fail2ban-client with sudo to unban that IP from the sshd jail.",
+            "Command used: sudo fail2ban-client set sshd unbanip <ip>."
+        ]
+    },
+    "f2j": {
+        "name": "f2j",
+        "short_desc": "Shows recent Fail2Ban logs and the SSH jail status.",
+        "detailed_desc": [
+            "Prints the last three lines from /var/log/fail2ban.log.",
+            "",
+            "Then shows the current Fail2Ban status for the sshd jail.",
+            "Commands used: sudo tail -3 /var/log/fail2ban.log and sudo fail2ban-client status sshd."
+        ]
+    },
     "artilleria": {
         "name": "artilleria",
         "short_desc": "Instala iptables en diferentes distribuciones Linux.",
@@ -646,6 +666,19 @@
         "name": "fastconf",
         "short_desc": "Configuración de fastfetch para mostrar información del sistema.",
         "detailed_desc": "Pregunta por un mensaje a mostrar y genera un arhcivo .jsonc para fastfetch."
+    },
+    "fastconfmac": {
+        "name": "fastconfmac",
+        "short_desc": "Writes a styled Fastfetch config with a custom message and logo.",
+        "detailed_desc": [
+            "Prompts for a custom message to show at the top of Fastfetch.",
+            "",
+            "Installs fastfetch when missing on Arch or Debian-based systems.",
+            "Writes the config to ~/.config/fastfetch/config.jsonc.",
+            "",
+            "Uses $HOME/Imágenes/logo.png as the logo source.",
+            "The generated layout groups hardware, software, local IP, and color modules."
+        ]
     },
     "portspoofinst": {
         "name": "portspoofinst",

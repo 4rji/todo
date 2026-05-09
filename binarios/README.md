@@ -135,6 +135,7 @@ zeekinst            Zeek para debian 12 y 13
 zeekclone           git clone para arch, sin usar yay. make and makefile
 oniuxinst           Instala cargo, oniux y curl ip
 fastinst            Instala fastfetch, fastconf y fastconfmac para solo el archivo conf.
+fastconfmac         Writes a styled Fastfetch config with a custom message and logo.
 searchinst          Instala searxng que es como google pero privado.
 lazydockerdinst     Instala lazydocker con go. instala go tambien
 instpowershell      Descarga nishang powershell modules
@@ -368,6 +369,8 @@ nessusinst          instalar nessus
 
 ###------fail2ban
 f2b                 Bans a prompted IP address in the Fail2Ban SSH jail.
+f2u                 Unbans a prompted IP address from the Fail2Ban SSH jail.
+f2j                 Shows recent Fail2Ban logs and the SSH jail status.
 f2binst             instala debian fail2ban f2b
 f2c                 fail2ban comandos 
 
