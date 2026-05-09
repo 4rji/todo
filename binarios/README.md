@@ -748,8 +748,7 @@ redhavi-check       Checa las malconfiguraciones
 
 ###------ otros
 redhavi-check       Checa las malconfiguraciones
-cht                 Pone chattr +i a los binarios de opt
-chtt                chattr -i, quita a los binarios de opt 
+cht                 chattr +i a los binarios de opt. Con -i quita el flag (reemplaza chtt)
 chtm                Pone chattr +i a los binarios de opt/ MAC
 chttm               Pone chattr -i a los binarios de opt para MAC- QUITA
 dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
