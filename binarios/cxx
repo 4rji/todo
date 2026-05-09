@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
 if [ -z "$1" ]; then
-    echo "Uso: $0 <archivo>"
+    echo "Proporcione un archivo."
     exit 1
 fi
 
 archivo="$1"
-chmod +x "$archivo" 
 
-./"$archivo"
+if [ ! -f "$archivo" ]; then
+    echo "Archivo no existe: $archivo"
+    exit 2
+fi
+
+chmod +x "$archivo"
+exec "./$archivo"
