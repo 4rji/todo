@@ -19,12 +19,14 @@ INTERFACE=$1
 CONFIG_FILE="/etc/wireguard/$INTERFACE.conf"
 
 
-if ! systemctl is-active --quiet systemd-resolved; then
-  echo -e "${YELLOW}[?] systemd-resolved is not active. Activate it? (y/n)${RESET}"
-  read -n1 activate_resolved
-  echo ""
-  if [ "$activate_resolved" = "y" ]; then
-    sudo systemctl start systemd-resolved
+if [[ "$(uname -s)" == "Linux" ]] && grep -q '^DNS' "$CONFIG_FILE" 2>/dev/null; then
+  if ! systemctl is-active --quiet systemd-resolved; then
+    echo -e "${YELLOW}[?] systemd-resolved is not active. Activate it? (y/n)${RESET}"
+    read -n1 activate_resolved
+    echo ""
+    if [ "$activate_resolved" = "y" ]; then
+      sudo systemctl start systemd-resolved
+    fi
   fi
 fi
 
