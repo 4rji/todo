@@ -603,8 +603,6 @@ simbo               Es el CTL Trabaja con sheldono, y nala para esconderme sheld
 simboc              En lugar de correr script corre la revershell bash, mas escondida
 nala                El mismo que nala, funciona mejor, usar simbo para esconder
 ezuri               en binarios_go, para cambiar el nombre del proceso. git clone solamente
-psss                Escanea por conexiones lsof netstat, mi bebe mibebe
-pssc                Mismo que psss pero este las cierra en 12 segundos automaticamente mibebe
 mapa                Busca un proceso despues del script y lo mata ps aux
 ippsec              Script de ippsec de ssh, aun no lo pruebo
 pythonroot          Usa getcap para tener una consola interactiva en python
@@ -666,8 +664,6 @@ splunktestport      ejecuta un tcpdump para ver si recibe datos el puerto 998
 ###------ CCDC
 chronservinst       Instala servidor chrony con flags 
 cockpitremove       remueve cock pit 
-psss
-pssc
 usuario             Crea un usuario en bash, automatico.
 banner              Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubuntu, -star usa banner.txt
 bannerlogin         Modify the banner after login with ssh and also when start computer
@@ -683,8 +679,7 @@ findinst            Busca si un programa esta instalado, en dpkg - apt - systemc
 findpak             Busca paquetes y servicios que esten instalados en varias distros
 
 sshmoni             sshmoni loop para correr el sshmoni while loop detecta conexiones
-mibebe              escanea las dos sshmoni lsofmoni
-mibebemata          Mi bebe mata solo. lol
+mibebe              monitor de conexiones SSH/lsof con killer interactivo: -w watch, -K deadman, -j JSON, fzf, PUB/PRIV
 sshmoni             Este busca conexiones activas ssh, muestra procesos PID y luego ejecuta killsshmanual
 iarpon              Arpon para protejer de arp poising. arp sniff 
 iicmp               para protejer de ataques icmp, solo cambia el 0 a 1 este script
@@ -708,9 +703,6 @@ newprocess          Nuevos procesos en linux
 snoop               Hace un awk a los logs de snoopy
 snoopinst           Instala snoopy
 ppt
-mibebemata
-psss                Escanea por conexiones lsof netstat, mi bebe mibebe
-pssc                Mismo que psss pero este las cierra en 12 segundos automaticamente mibebe
 sshmoni
 fwcom               firewall-cmd commands, comandos para manejar el firewall
 firewall-ipt        un firewall manual que usa iptables 
