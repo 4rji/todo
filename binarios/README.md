@@ -292,7 +292,7 @@ todob               actualiza los binarios, funciones, alias y 2-4rji.sh,   -o p
 herrabinp           para pacman, existe para yum, y para dnf, y apt es la normal de arriba todob
 herralias           Actualiza los binarios descargando solo alias
 airzip              Comprime y envia una carpeta por airsend -f
-cscp                copiar archivos en scp en lugar de sftp    
+ 
 csftp               copia un archivo por sftp hubicado en home, pregunta la IP y usuario y archivo     
 weather             Muestra el clima geolocalizacion usar
 mdcolors            Genera colores para archivos md 

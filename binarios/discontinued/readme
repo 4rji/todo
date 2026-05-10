@@ -1,3 +1,4 @@
+cscp                copiar archivos en scp en lugar de sftp   
 zshinstc            Instala y compila zsh 5.9, para centos 7
 copyrsyn            Usa hosts ansible y copia un archivo con rsync y clave privada
 pingz               misma que pings pero usa nc para ver status del puerto ssh en el .config
