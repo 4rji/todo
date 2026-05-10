@@ -11,7 +11,14 @@ IGNORE_RE="${NEWPROCESS_IGNORE_RE-(^|[[:space:]])diff([[:space:]]|$)|kworker}"
 RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+DIM='\033[2m'
 RESET='\033[0m'
+
+detect_cols() {
+    COLS=$(tput cols 2>/dev/null || echo 120)
+}
+detect_cols
 
 usage() {
     cat <<'EOF'
@@ -51,29 +58,35 @@ snapshot() {
 
     awk -v self="$$" -v ignore_re="$IGNORE_RE" -v has_lstart="$has_lstart" '
         {
-            line = $0
             pid = $1
             ppid = $2
             user = $3
 
             if (has_lstart == 1) {
                 start = $4 " " $5 " " $6 " " $7 " " $8
+                cmd_start = 9
                 key = pid "|" start
-                cmd = line
-                sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]*/, "", cmd)
-                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tSTART=" start "\tCMD=" cmd
             } else {
                 start = ""
+                cmd_start = 4
                 key = pid
-                cmd = line
-                sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]*/, "", cmd)
-                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tCMD=" cmd
+            }
+
+            cmd = ""
+            for (i = cmd_start; i <= NF; i++) {
+                cmd = (cmd == "" ? $i : cmd " " $i)
             }
 
             if (pid == self) next
             if (ppid == self) next
             if (cmd ~ /(^|\/)ps[[:space:]].*-eo[[:space:]]/) next
             if (ignore_re != "" && cmd ~ ignore_re) next
+
+            if (has_lstart == 1) {
+                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tSTART=" start "\tCMD=" cmd
+            } else {
+                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tCMD=" cmd
+            }
 
             printf "%s\t%s\n", key, display
         }
@@ -101,6 +114,54 @@ print_matches() {
     ' "$1" "$2"
 }
 
+colorize() {
+    local prefix="$1" prefix_color="$2"
+    awk -v prefix="$prefix" \
+        -v pcol="$prefix_color" \
+        -v reset="$RESET" \
+        -v cyan="$CYAN" \
+        -v red="$RED" \
+        -v green="$GREEN" \
+        -v dim="$DIM" \
+        -v cols="$COLS" '
+    {
+        n = split($0, parts, "\t")
+        out = "  " pcol prefix reset
+        used = 4
+        cmd_field = ""
+        for (i = 1; i <= n; i++) {
+            kv = parts[i]
+            eq = index(kv, "=")
+            if (eq == 0) continue
+            k = substr(kv, 1, eq - 1)
+            v = substr(kv, eq + 1)
+
+            if (k == "CMD") { cmd_field = v; continue }
+
+            if (k == "USER") {
+                col = (v == "root") ? red : green
+                seg = dim k "=" reset col v reset
+            } else if (k == "PID" || k == "PPID") {
+                seg = dim k "=" reset cyan v reset
+            } else {
+                seg = dim k "=" reset v
+            }
+            out = out seg " "
+            used += length(k) + 1 + length(v) + 1
+        }
+
+        if (cmd_field != "") {
+            avail = cols - used - 5
+            if (avail < 20) avail = 20
+            if (length(cmd_field) > avail) {
+                cmd_field = substr(cmd_field, 1, avail - 1) "\xe2\x80\xa6"
+            }
+            out = out dim "CMD=" reset cmd_field
+        }
+        print out
+    }'
+}
+
 old_process=$(make_tmp) || exit 1
 new_process=$(make_tmp) || exit 1
 old_keys=$(make_tmp) || exit 1
@@ -114,6 +175,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
+trap detect_cols WINCH
 
 if ! snapshot >"$old_process"; then
     printf "%bError:%b could not run ps with the expected format.\n" "$RED" "$RESET" >&2
@@ -142,12 +205,12 @@ while true; do
 
         if [ -s "$started_process" ]; then
             printf "%bStarted:%b\n" "$GREEN" "$RESET"
-            print_matches "$started_process" "$new_process" | sed 's/^/  + /'
+            print_matches "$started_process" "$new_process" | colorize "+ " "$GREEN"
         fi
 
         if [ "$SHOW_ENDED" != "0" ] && [ -s "$ended_process" ]; then
             printf "%bEnded:%b\n" "$YELLOW" "$RESET"
-            print_matches "$ended_process" "$old_process" | sed 's/^/  - /'
+            print_matches "$ended_process" "$old_process" | colorize "- " "$YELLOW"
         fi
     fi
 
