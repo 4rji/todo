@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONNECTIONS=8
+DOWNLOADER="aria2c"
+
+usage() {
+  cat <<EOF
+Uso:
+  $0 URL
+  $0 -a URL
+  $0 -n NUM URL
+  $0 -a -n NUM URL
+
+Opciones:
+  -a        Usar axel en lugar de aria2c
+  -n NUM    Número de conexiones, default: 8
+  -h        Mostrar ayuda
+
+Ejemplos:
+  $0 "https://ejemplo.com/archivo.iso"
+  $0 -a "https://ejemplo.com/archivo.iso"
+  $0 -n 16 "https://ejemplo.com/archivo.iso"
+  $0 -a -n 16 "https://ejemplo.com/archivo.iso"
+EOF
+}
+
+while getopts ":an:h" opt; do
+  case "$opt" in
+    a)
+      DOWNLOADER="axel"
+      ;;
+    n)
+      CONNECTIONS="$OPTARG"
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    :)
+      echo "Error: la opción -$OPTARG requiere un argumento." >&2
+      usage
+      exit 1
+      ;;
+    \?)
+      echo "Error: opción inválida: -$OPTARG" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $((OPTIND - 1))
+
+if [[ $# -ne 1 ]]; then
+  echo "Error: debes pasar exactamente una URL." >&2
+  usage
+  exit 1
+fi
+
+URL="$1"
+
+if ! [[ "$CONNECTIONS" =~ ^[0-9]+$ ]] || [[ "$CONNECTIONS" -lt 1 ]]; then
+  echo "Error: -n debe ser un número entero mayor que 0." >&2
+  exit 1
+fi
+
+if ! command -v "$DOWNLOADER" >/dev/null 2>&1; then
+  echo "Error: '$DOWNLOADER' no está instalado o no está en PATH." >&2
+  exit 1
+fi
+
+case "$DOWNLOADER" in
+  aria2c)
+    aria2c -x "$CONNECTIONS" -s "$CONNECTIONS" "$URL"
+    ;;
+  axel)
+    axel -n "$CONNECTIONS" "$URL"
+    ;;
+esac

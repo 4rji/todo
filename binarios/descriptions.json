@@ -870,5 +870,16 @@
             "Includes install helpers for wget downloads, Debian/Ubuntu, macOS Homebrew, Windows, and Docker.",
             "Shows configured 4rji tunnel routes and checks local service ports before reporting status."
         ]
+    },
+    "axe": {
+        "name": "axe",
+        "short_desc": "Downloads a URL with aria2c by default or axel, using configurable parallel connections.",
+        "detailed_desc": [
+            "Downloads one URL using aria2c by default.",
+            "Use -a to switch to axel.",
+            "Use -n NUM to set the number of parallel connections; default is 8.",
+            "",
+            "It validates that exactly one URL is provided, checks that -n is a positive integer, and verifies the selected downloader exists in PATH before running."
+        ]
     }
 }
