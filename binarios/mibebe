@@ -25,6 +25,7 @@ USE_FZF="auto"         # auto | no
 PROMPT_TIMEOUT=6
 EXCLUDE_RE='tailscale'
 DEADMAN_SEC=""
+SHOW_ARGS=0
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -39,6 +40,7 @@ Uso: mibebe [opciones]
   -w           Watch mode (refresh continuo, Ctrl+C para salir)
   -i SEG       Intervalo del watch mode (default: ${WATCH_INTERVAL}s)
   -K SEG       Deadman: mostrar, esperar SEG seg, killall (combina con -w para loop)
+  -a           Mostrar args completos del proceso (segunda línea por conexión)
   -t N         Top N procesos a mostrar (default: ${TOP_N})
   -L           No listar puertos en LISTEN
   -F           No usar fzf aunque esté instalado
@@ -53,6 +55,7 @@ Ejemplos:
   mibebe -k               # cerrar todas (cuidado)
   mibebe -K 13            # deadman: mostrar, esperar 13s, killall, salir
   mibebe -K 13 -w         # loop deadman infinito (ex-pssc)
+  mibebe -a               # interactivo + args completos por conexión
 EOF
 }
 
@@ -77,6 +80,54 @@ is_private_ip() {
         ::1|::|fe80:*|fc*|fd*)                       return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Cache de PID->comm de ps. lsof devuelve nombres incorrectos para apps Electron
+# (claude muestra "2.1.138", "Brave\x20", etc.) — ps los devuelve bien.
+PS_CACHE=""
+build_ps_cache() {
+    # ps comm en macOS suele devolver path absoluto. Extraemos basename con awk.
+    PS_CACHE=$(ps -axo pid=,comm= 2>/dev/null | awk '
+        {
+            pid=$1; $1=""; sub(/^[[:space:]]+/, "")
+            n=split($0, a, "/")
+            name=(n > 1 ? a[n] : $0)
+            print pid, name
+        }' || true)
+}
+
+# Devuelve comm real desde PS_CACHE, fallback al cmd de lsof si no encuentra.
+real_cmd() {
+    local pid=$1 fallback=$2 line
+    if [ -n "$PS_CACHE" ]; then
+        line=$(awk -v p="$pid" '$1==p {sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); print; exit}' <<< "$PS_CACHE" 2>/dev/null || true)
+    fi
+    if [ -n "${line:-}" ]; then
+        printf '%s' "$line"
+    else
+        printf '%s' "$fallback"
+    fi
+}
+
+# Args completos del proceso (PID). Truncado a 120 chars con elipsis.
+get_args() {
+    local pid=$1 args
+    args=$(ps -p "$pid" -o args= 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')
+    if [ "${#args}" -gt 120 ]; then
+        printf '%s…' "${args:0:117}"
+    else
+        printf '%s' "$args"
+    fi
+}
+
+# Escape mínimo para JSON (backslash, dquote, tab, newline).
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\t'/ }
+    s=${s//$'\n'/ }
+    printf '%s' "$s"
 }
 
 # Saca la IP de "ip:port" o "[ipv6]:port".
@@ -139,14 +190,19 @@ get_connections() {
 
 # ─── Top N procesos ─────────────────────────────────────────────────────────
 top_processes() {
-    local rows
-    rows=$(get_connections | awk -F'|' 'NF{print $1}' | sort | uniq -c | sort -rn | head -n "$TOP_N")
-    if [ -z "$rows" ]; then
+    local resolved rows
+    resolved=$(get_connections | while IFS='|' read -r cmd pid user proto local remote; do
+        [ -z "${cmd:-}" ] && continue
+        printf '%s\n' "$(real_cmd "$pid" "$cmd")"
+    done)
+    if [ -z "$resolved" ]; then
         echo -e "${gris}(sin procesos con conexiones)${fin}"
         return
     fi
+    rows=$(printf '%s\n' "$resolved" | sort | uniq -c | sort -rn | head -n "$TOP_N")
     echo -e "${cyan}Top ${TOP_N} procesos con más conexiones:${fin}"
-    printf '%s\n' "$rows" | awk -v c="$amarillo" -v f="$fin" '{ printf "  %s%5d%s  %s\n", c, $1, f, $2 }'
+    printf '%s\n' "$rows" | awk -v c="$amarillo" -v f="$fin" '
+        { count=$1; $1=""; sub(/^[[:space:]]+/, ""); printf "  %s%5d%s  %s\n", c, count, f, $0 }'
 }
 
 # ─── Tabla de conexiones ────────────────────────────────────────────────────
@@ -162,9 +218,10 @@ show_connections_table() {
     printf "${cafe}%-3s %-12s %-7s %-10s %-30s %-30s %s${fin}\n" \
         "#" "CMD" "PID" "USER" "LOCAL" "REMOTE" "TIPO"
 
-    local i=1 cmd pid user proto local remote rip color label
+    local i=1 cmd pid user proto local remote rip color label args
     while IFS='|' read -r cmd pid user proto local remote; do
         [ -z "${cmd:-}" ] && continue
+        cmd=$(real_cmd "$pid" "$cmd")
         rip=$(extract_ip "$remote")
         if is_private_ip "$rip"; then
             color=$verde; label="PRIV"
@@ -173,21 +230,34 @@ show_connections_table() {
         fi
         printf "${color}%-3d %-12.12s %-7s %-10.10s %-30.30s %-30.30s %s${fin}\n" \
             "$i" "$cmd" "$pid" "$user" "$local" "$remote" "$label"
+        if [ "$SHOW_ARGS" -eq 1 ]; then
+            args=$(get_args "$pid")
+            [ -n "$args" ] && printf "     ${gris}↳ %s${fin}\n" "$args"
+        fi
         i=$((i + 1))
     done <<< "$conns"
 }
 
 # ─── Salida JSON ────────────────────────────────────────────────────────────
 json_output() {
-    local first=1 cmd pid user proto local remote rip kind
+    local first=1 cmd pid user proto local remote rip kind args args_esc
+    build_ps_cache
     printf '{\n  "connections": [\n'
     while IFS='|' read -r cmd pid user proto local remote; do
         [ -z "${cmd:-}" ] && continue
+        cmd=$(real_cmd "$pid" "$cmd")
         rip=$(extract_ip "$remote")
         if is_private_ip "$rip"; then kind=private; else kind=public; fi
         [ "$first" -eq 0 ] && printf ',\n'
-        printf '    {"cmd":"%s","pid":%s,"user":"%s","proto":"%s","local":"%s","remote":"%s","kind":"%s"}' \
-            "$cmd" "$pid" "$user" "$proto" "$local" "$remote" "$kind"
+        if [ "$SHOW_ARGS" -eq 1 ]; then
+            args=$(get_args "$pid")
+            args_esc=$(json_escape "$args")
+            printf '    {"cmd":"%s","pid":%s,"user":"%s","proto":"%s","local":"%s","remote":"%s","kind":"%s","args":"%s"}' \
+                "$cmd" "$pid" "$user" "$proto" "$local" "$remote" "$kind" "$args_esc"
+        else
+            printf '    {"cmd":"%s","pid":%s,"user":"%s","proto":"%s","local":"%s","remote":"%s","kind":"%s"}' \
+                "$cmd" "$pid" "$user" "$proto" "$local" "$remote" "$kind"
+        fi
         first=0
     done <<< "$(get_connections)"
     printf '\n  ]\n}\n'
@@ -279,6 +349,7 @@ interactive_kill() {
 
 # ─── Iteración principal (watch o one-shot) ─────────────────────────────────
 main_iteration() {
+    build_ps_cache
     ssh_section
     print_sep
     listeners_section
@@ -325,7 +396,7 @@ deadman_loop() {
 }
 
 # ─── Args ───────────────────────────────────────────────────────────────────
-while getopts "nkjwi:K:t:LFe:h" opt; do
+while getopts "nkjwi:K:at:LFe:h" opt; do
     case $opt in
         n) ACTION=show ;;
         k) ACTION=killall ;;
@@ -333,6 +404,7 @@ while getopts "nkjwi:K:t:LFe:h" opt; do
         w) WATCH=1 ;;
         i) WATCH_INTERVAL=$OPTARG ;;
         K) DEADMAN_SEC=$OPTARG ;;
+        a) SHOW_ARGS=1 ;;
         t) TOP_N=$OPTARG ;;
         L) NO_LISTENERS=1 ;;
         F) USE_FZF=no ;;
