@@ -397,11 +397,6 @@
             "For nano 5 or newer, it also converts tabs to spaces."
         ]
     },
-    "ccssh": {
-        "name": "ccssh",
-        "short_desc": "Establece conexión SSH con verificación de permisos.",
-        "detailed_desc": "ssh -p <puerto> <usuario>@<ip>"
-    },
     "qemuconsola": {
         "name": "qemuconsola",
         "short_desc": "Habilita y inicia el servicio de consola serial en QEMU.",

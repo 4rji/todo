@@ -419,8 +419,7 @@ sshk                kitty +kitten ssh
 sshexit             Instala un mensaje de salida de ssh en la zsh ZSH
 x11uso              Instrucciones para x11
 fixssh              Seguido de la ip, para borrar la ip del localhost cuando se duplica	
-cssh                copia mui clave a una maquina remota
-ccssh               Version para M1 mac de cssh
+cssh                copia tu clave a una maquina remota (Linux/macOS, puerto 22 por defecto)
 sshconf             Hace un archivo .ssh/config para conectarse por medio de jump ejemplo: ssh maquina-final
 sshmont             Monta una carpeta usando sshh           Edita el banner de inicio de session de ssh, cuando se loguea
 sshc                Binario en comprimidos, que enviar un comando a los host ssh, tipo ansible
