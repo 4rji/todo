@@ -619,6 +619,19 @@
         "short_desc": "Reverse SSH port forwarding over Paramiko.",
         "detailed_desc": "Creates a reverse SSH tunnel using Python and Paramiko. It connects to a remote SSH server and opens a remote port that forwards traffic back to a specified host:port accessible from the local machine. Equivalent to 'ssh -R', useful for exposing local services remotely. Supports password or key authentication and can be automated or integrated into other Python tools."
     },
+    "sss": {
+        "name": "sss",
+        "short_desc": "Shows SSH service status, local IP, current user, and SSH port.",
+        "detailed_desc": [
+            "Prints a compact SSH status panel for the current machine.",
+            "",
+            "Detects the default network interface on macOS or Linux.",
+            "Shows the interface IP address, current username, SSH daemon state, and configured SSH port.",
+            "",
+            "On macOS it uses route and ifconfig.",
+            "On Linux it uses ip route and ip addr."
+        ]
+    },
     "deploy": {
         "name": "deploy",
         "short_desc": "Despliega una máquina vulnerable en Docker desde una imagen .tar.",

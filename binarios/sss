@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Colors
+green="\e[32m"
+yellow="\e[33m"
+blue="\e[34m"
+red="\e[31m"
+bold="\e[1m"
+reset="\e[0m"
+
+os_type=$(uname -s)
+
+get_network_interface() {
+    if [[ "$os_type" == "Darwin" ]]; then
+        route -n get default 2>/dev/null | grep interface | awk '{print $2; exit}' || echo "en0"
+    else
+        ip route 2>/dev/null | awk '/default/ {print $5; exit}' || echo "eth0"
+    fi
+}
+
+get_ip_address() {
+    local iface="$1"
+    if [[ "$os_type" == "Darwin" ]]; then
+        ifconfig "$iface" 2>/dev/null | grep "inet " | awk '{print $2}' | head -1
+    else
+        ip -4 addr show "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+\.\d+\.\d+\.\d+' | head -1
+    fi
+}
+
+get_ssh_status() {
+    if pgrep -x sshd &>/dev/null; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+get_ssh_port() {
+    grep -E '^#?Port ' /etc/ssh/sshd_config 2>/dev/null | grep -v '^\s*#' | awk '{print $2}' || echo "22"
+}
+
+network_interface=$(get_network_interface)
+ssh_status=$(get_ssh_status | tr '[:lower:]' '[:upper:]')
+ssh_ip=$(get_ip_address "$network_interface")
+ssh_port=$(get_ssh_port)
+user=$(whoami)
+
+if [[ "$ssh_status" == "RUNNING" ]]; then
+    status_color="$green"
+else
+    status_color="$red"
+fi
+
+printf '\n'
+printf "${bold}${blue}   ___________________________________________________${reset}\n\n"
+printf "\t\t${bold}${green}SSH${reset} ${bold}status:${reset}  ${status_color}${ssh_status}${reset}\n\n"
+printf "\t\t${bold}Tu IP es:${reset}  ${yellow}${ssh_ip:-N/A}${reset}\n\n"
+printf "\t\t${bold}Usuario:${reset}  ${green}${user}${reset}\n\n"
+printf "\t\t${bold}Puerto:${reset}  ${yellow}${ssh_port}${reset}\n\n"
+printf "${bold}${blue}   ___________________________________________________${reset}\n\n"

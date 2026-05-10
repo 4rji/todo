@@ -411,6 +411,7 @@ ssh-getpublic       Descarga la llave publica a la maquina.
 ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
 sshc                copia directorio o archivo por ssh, lo comprime y descomprime
 sshp                ssh proxy D 1080 en background, completo, bashfun bash function
+sss                 Shows SSH service status, local IP, current user, and SSH port.
 
 sshsync             Sincroniza el archivo ssh con los nuevos de github. no borra nada
 sshdown             Descarga .ssh/config y crea copia
