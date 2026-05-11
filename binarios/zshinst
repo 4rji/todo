@@ -10,12 +10,54 @@ SYNTAX_DIR="$OHMYZSH_CUSTOM/plugins/zsh-syntax-highlighting"
 
 msg() { printf '\n[+] %s\n' "$1"; }
 warn() { printf '\n[!] %s\n' "$1"; }
+is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Falta comando: $1"
     exit 1
   }
+}
+
+find_zsh_bin() {
+  if is_macos && command -v brew >/dev/null 2>&1; then
+    local brew_zsh brew_prefix
+
+    brew_prefix="$(brew --prefix 2>/dev/null || true)"
+    if [[ -n "$brew_prefix" && -x "$brew_prefix/bin/zsh" ]]; then
+      printf '%s\n' "$brew_prefix/bin/zsh"
+      return
+    fi
+
+    brew_zsh="$(brew --prefix zsh 2>/dev/null || true)"
+    if [[ -n "$brew_zsh" && -x "$brew_zsh/bin/zsh" ]]; then
+      printf '%s\n' "$brew_zsh/bin/zsh"
+      return
+    fi
+  fi
+
+  command -v zsh
+}
+
+ensure_shell_registered() {
+  local shell_path="$1"
+
+  [[ -r /etc/shells ]] || {
+    warn "No puedo leer /etc/shells. Si chsh falla, agregá manualmente: $shell_path"
+    return
+  }
+
+  if grep -Fxq "$shell_path" /etc/shells; then
+    return
+  fi
+
+  warn "$shell_path no está en /etc/shells. Lo agrego con sudo para que chsh funcione."
+  if command -v sudo >/dev/null 2>&1; then
+    printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null || \
+      warn "No pude agregar $shell_path a /etc/shells. Ejecutá: echo '$shell_path' | sudo tee -a /etc/shells"
+  else
+    warn "sudo no está disponible. Ejecutá como root: echo '$shell_path' >> /etc/shells"
+  fi
 }
 
 need_cmd git
@@ -70,7 +112,13 @@ source $ZSH/oh-my-zsh.sh
 EOF
 
 msg "Cambiando shell por defecto a zsh"
-ZSH_BIN="$(command -v zsh)"
+ZSH_BIN="$(find_zsh_bin)"
+echo "[+] Usando zsh: $ZSH_BIN"
+
+if is_macos; then
+  ensure_shell_registered "$ZSH_BIN"
+fi
+
 if chsh -s "$ZSH_BIN"; then
   echo "[+] Ejecutado: chsh -s $ZSH_BIN"
 else

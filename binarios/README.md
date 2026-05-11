@@ -136,7 +136,8 @@ elast-fileb-inst    Instala y configura elasticsearch, filebeat y envio suricata
 zeekinst            Zeek para debian 12 y 13
 zeekclone           git clone para arch, sin usar yay. make and makefile
 oniuxinst           Instala cargo, oniux y curl ip
-fastinst            Instala fastfetch, fastconf y fastconfmac para solo el archivo conf.
+fastinst            Instala fastfetch en Linux/macOS y conserva config; --force regenera con fastconf.
+fastfinst           Alias de fastinst para instalar fastfetch y configurar fastconf.
 fastconfmac         Writes a styled Fastfetch config with a custom message and logo.
 searchinst          Instala searxng que es como google pero privado.
 lazydockerdinst     Instala lazydocker con go. instala go tambien
@@ -187,12 +188,12 @@ instgithub          Instala github desktop en kali
 pythonscritps       instala requerimientos y baje scritps del curso de python
 obsidianinst        Instala obsidian en deb, baja paquete e instala notas 
 zeroinst            Script para zero raspberry
-zshinst             instala zsh con todo, ya no necesita c1-5, instala functions
+zshinst             Configura zsh con todo, Oh My Zsh, powerlevel10k y plugins; compatible Linux/macOS
 zshinst1            antes zshinst, Instala la zsh h-my-zsh powerlevel10k
 zshinst2            Instala la configuracion de barra terminal .p10k.zsh, 
 tmuxinst            Archivos para la configuracion de tmux, lo instala. con B
 neofetchinst        Instala y personaliza neofetch para ppg1
-kittyinst           Instala kitty y baja su configuracion
+kittyinst           Instala kitty en Linux/macOS y baja su configuracion
 ovpninst            Instala OpenvpnServer para webadmin, 4rjiDocs
 xrayinst            instala xray. no es mi script.
 xrayinst2           Descarga el archivo de configuracion a b1 

@@ -1,27 +1,110 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+msg() { printf '\n[+] %s\n' "$1"; }
+warn() { printf '\n[!] %s\n' "$1"; }
+die() {
+  printf '\n[-] %s\n' "$1" >&2
+  exit 1
+}
 
-echo "[+] Detectando distribución..."
+CONFIG_FILE="$HOME/.config/fastfetch/config.jsonc"
+FORCE_CONFIG=0
 
-if command -v pacman &>/dev/null; then
-    echo "[+] Instalando fastfetch en Arch..."
-    sudo pacman -Sy --noconfirm fastfetch
-elif command -v apt &>/dev/null; then
-    echo "[+] Instalando fastfetch en Debian/Ubuntu..."
-    sudo apt update
-    sudo apt install -y fastfetch
-else
-    echo "[-] Distribución no soportada"
-    exit 1
-fi
+case "${1:-}" in
+  -f|--force)
+    FORCE_CONFIG=1
+    shift
+    ;;
+  "")
+    ;;
+  *)
+    die "Uso: fastinst [--force]"
+    ;;
+esac
 
-echo "[+] Generando archivo de configuración..."
-mkdir -p ~/.config/fastfetch
-fastfetch --gen-config
+script_dir() {
+  CDPATH= cd "$(dirname "$0")" && pwd -P
+}
 
-echo "[+] Modificando logo a 'macos_small'..."
-sed -i 's/^logo = .*/logo = "macos_small"/' ~/.config/fastfetch/config.conf
+find_cmd() {
+  local cmd="$1" path
 
-echo "[+] Listo. Ejecuta con:"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    command -v "$cmd"
+    return
+  fi
+
+  for path in "/opt/homebrew/bin/$cmd" "/usr/local/bin/$cmd"; do
+    if [[ -x "$path" ]]; then
+      printf '%s\n' "$path"
+      return
+    fi
+  done
+
+  return 1
+}
+
+install_fastfetch() {
+  local brew_bin
+
+  if FASTFETCH_BIN="$(find_cmd fastfetch 2>/dev/null)"; then
+    msg "fastfetch ya está instalado: $FASTFETCH_BIN"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      brew_bin="$(find_cmd brew 2>/dev/null)" || die "Homebrew no está instalado. Instalá brew y vuelve a correr fastinst."
+      msg "Instalando fastfetch en macOS con Homebrew"
+      "$brew_bin" install fastfetch
+      ;;
+    Linux)
+      if command -v pacman >/dev/null 2>&1; then
+        msg "Instalando fastfetch en Arch/Manjaro"
+        sudo pacman -Sy --noconfirm fastfetch
+      elif command -v apt >/dev/null 2>&1; then
+        msg "Instalando fastfetch en Debian/Ubuntu/Kali"
+        sudo apt update
+        sudo apt install -y fastfetch
+      else
+        die "Linux no soportado. Necesito pacman o apt."
+      fi
+      ;;
+    *)
+      die "Sistema no soportado: $(uname -s)"
+      ;;
+  esac
+
+  FASTFETCH_BIN="$(find_cmd fastfetch 2>/dev/null)" || die "fastfetch no quedó disponible en PATH"
+}
+
+run_fastconf() {
+  local dir conf
+  dir="$(script_dir)"
+
+  if [[ -f "$CONFIG_FILE" && "$FORCE_CONFIG" -ne 1 ]]; then
+    msg "Configuración existente conservada: $CONFIG_FILE"
+    echo "Para regenerarla: fastinst --force"
+    return
+  fi
+
+  for conf in "$dir/fastconf" "/opt/4rji/bin/fastconf"; do
+    if [[ -x "$conf" ]]; then
+      msg "Generando configuración con $conf"
+      "$conf"
+      return
+    fi
+  done
+
+  warn "fastconf no está en $dir ni en /opt/4rji/bin. Genero config básica."
+  mkdir -p "$HOME/.config/fastfetch"
+  "$FASTFETCH_BIN" --gen-config
+}
+
+install_fastfetch
+
+run_fastconf
+
+msg "Listo. Ejecuta con:"
 echo "    fastfetch"
