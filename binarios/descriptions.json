@@ -49,6 +49,18 @@
             "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen 4rji.com display."
         ]
     },
+    "rasp-4rji-kioskinst": {
+        "name": "rasp-4rji-kioskinst",
+        "short_desc": "Installs desktop autostart for rasp-4rji-kiosk on Raspberry Pi.",
+        "detailed_desc": [
+            "Creates an XDG desktop autostart entry for the selected Raspberry Pi user.",
+            "",
+            "The autostart entry waits a configurable delay, then runs /opt/4rji/bin/rasp-4rji-kiosk from the graphical desktop session.",
+            "",
+            "Use --enable-autologin on Raspberry Pi OS to switch boot behavior to Desktop Autologin through raspi-config.",
+            "Use --remove to delete the autostart entry."
+        ]
+    },
     "pythonnc": {
         "name": "pythonnc",
         "short_desc": "Netcat replacement written in Python.",
