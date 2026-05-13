@@ -54,8 +54,8 @@ timeshiftinst       Instala y configura timeshift solo con directorios basicos.
 doasinst            Instala doas y con -i remueve sudo
 wallpaperinst       Instala wallpaper del grub de kali
 browshinst          Browsh para ver el browser en ssh terminal necesita firefox
-rasp-4rji-kiosk    Launches Chromium in Wayland kiosk mode pointed at 4rji.com.
-rasp-4rji-kioskinst Installs desktop autostart for rasp-4rji-kiosk on Raspberry Pi.
+rasp-kios           Launches Chromium in Wayland kiosk mode pointed at 4rji.com.
+rasp-kiosinst       Installs desktop autostart for rasp-kios on Raspberry Pi.
 mapat               alias de mapa en telnet - telnet mapscii.me
 modinvest           Crea snapshop de modulos, para comparar e investigar
 interfacess         imprime ejemplos y comandos de configuración de red, dhcp, 

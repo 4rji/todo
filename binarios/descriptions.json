@@ -38,8 +38,8 @@
             "After installation, it tries to load the 88XXau kernel module."
         ]
     },
-    "rasp-4rji-kiosk": {
-        "name": "rasp-4rji-kiosk",
+    "rasp-kios": {
+        "name": "rasp-kios",
         "short_desc": "Launches Chromium in Wayland kiosk mode pointed at 4rji.com.",
         "detailed_desc": [
             "Starts /bin/chromium directly in kiosk mode and opens https://4rji.com.",
@@ -49,13 +49,13 @@
             "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen 4rji.com display."
         ]
     },
-    "rasp-4rji-kioskinst": {
-        "name": "rasp-4rji-kioskinst",
-        "short_desc": "Installs desktop autostart for rasp-4rji-kiosk on Raspberry Pi.",
+    "rasp-kiosinst": {
+        "name": "rasp-kiosinst",
+        "short_desc": "Installs desktop autostart for rasp-kios on Raspberry Pi.",
         "detailed_desc": [
             "Creates an XDG desktop autostart entry for the selected Raspberry Pi user.",
             "",
-            "The autostart entry waits a configurable delay, then runs /opt/4rji/bin/rasp-4rji-kiosk from the graphical desktop session.",
+            "The autostart entry waits a configurable delay, then runs /opt/4rji/bin/rasp-kios from the graphical desktop session.",
             "",
             "Use --enable-autologin on Raspberry Pi OS to switch boot behavior to Desktop Autologin through raspi-config.",
             "Use --remove to delete the autostart entry."

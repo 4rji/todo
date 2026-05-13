@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_BIN="${APP_BIN:-/opt/4rji/bin/rasp-4rji-kiosk}"
-AUTOSTART_NAME="rasp-4rji-kiosk.desktop"
+APP_BIN="${APP_BIN:-/opt/4rji/bin/rasp-kios}"
+AUTOSTART_NAME="rasp-kios.desktop"
+LEGACY_AUTOSTART_NAME="rasp-4rji-kiosk.desktop"
 DELAY="${KIOSK_DELAY:-8}"
 TARGET_USER="${KIOSK_USER:-}"
 ENABLE_AUTOLOGIN=0
@@ -11,7 +12,7 @@ REMOVE=0
 usage() {
   cat <<'EOF'
 Uso:
-  rasp-4rji-kioskinst [usuario] [opciones]
+  rasp-kiosinst [usuario] [opciones]
 
 Opciones:
   --enable-autologin   En Raspberry Pi OS, usa raspi-config para activar Desktop Autologin.
@@ -20,14 +21,14 @@ Opciones:
   -h, --help           Muestra esta ayuda.
 
 Variables:
-  APP_BIN=/opt/4rji/bin/rasp-4rji-kiosk
+  APP_BIN=/opt/4rji/bin/rasp-kios
   KIOSK_USER=pi
   KIOSK_DELAY=8
 
 Ejemplos:
-  sudo rasp-4rji-kioskinst pi --enable-autologin
-  rasp-4rji-kioskinst --delay 12
-  rasp-4rji-kioskinst pi --remove
+  sudo rasp-kiosinst pi --enable-autologin
+  rasp-kiosinst --delay 12
+  rasp-kiosinst pi --remove
 EOF
 }
 
@@ -89,7 +90,7 @@ fi
 
 if [[ "$TARGET_USER" == "root" ]]; then
   echo "[!] No instales el kiosk para root. Usa un usuario grafico, por ejemplo:"
-  echo "    sudo rasp-4rji-kioskinst pi --enable-autologin"
+  echo "    sudo rasp-kiosinst pi --enable-autologin"
   exit 1
 fi
 
@@ -113,10 +114,12 @@ USER_HOME="$(printf '%s\n' "$PASSWD_ENTRY" | cut -d: -f6)"
 USER_GROUP="$(id -gn "$TARGET_USER")"
 AUTOSTART_DIR="$USER_HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/$AUTOSTART_NAME"
+LEGACY_AUTOSTART_FILE="$AUTOSTART_DIR/$LEGACY_AUTOSTART_NAME"
 
 if [[ "$REMOVE" -eq 1 ]]; then
-  if [[ -e "$AUTOSTART_FILE" ]]; then
+  if [[ -e "$AUTOSTART_FILE" || -e "$LEGACY_AUTOSTART_FILE" ]]; then
     run_root rm -f "$AUTOSTART_FILE"
+    run_root rm -f "$LEGACY_AUTOSTART_FILE"
     echo "[OK] Autostart borrado: $AUTOSTART_FILE"
   else
     echo "[OK] No habia autostart que borrar: $AUTOSTART_FILE"
@@ -126,7 +129,7 @@ fi
 
 if [[ ! -e "$APP_BIN" ]]; then
   echo "[!] No existe el launcher: $APP_BIN"
-  echo "    Instala primero rasp-4rji-kiosk en /opt/4rji/bin."
+  echo "    Instala primero rasp-kios en /opt/4rji/bin."
   exit 1
 fi
 
@@ -162,6 +165,10 @@ else
   fi
   mkdir -p "$AUTOSTART_DIR"
   install -m 0644 "$TMP_FILE" "$AUTOSTART_FILE"
+fi
+
+if [[ -e "$LEGACY_AUTOSTART_FILE" ]]; then
+  run_root rm -f "$LEGACY_AUTOSTART_FILE"
 fi
 
 if [[ "$ENABLE_AUTOLOGIN" -eq 1 ]]; then
