@@ -49,6 +49,17 @@
             "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen 4rji.com display."
         ]
     },
+    "rasp-kios2": {
+        "name": "rasp-kios2",
+        "short_desc": "Launches Chromium in X11 kiosk mode pointed at 10.0.4.107:8888.",
+        "detailed_desc": [
+            "Sets DISPLAY=:0, then starts /bin/chromium directly in kiosk mode.",
+            "",
+            "It opens http://10.0.4.107:8888 with start-maximized, X11 ozone support, hidden error dialogs, disabled infobars, and overlay scrollbars.",
+            "",
+            "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen local web display."
+        ]
+    },
     "rasp-kiosinst": {
         "name": "rasp-kiosinst",
         "short_desc": "Installs desktop autostart for rasp-kios on Raspberry Pi.",

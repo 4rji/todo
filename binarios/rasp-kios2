@@ -1,0 +1,3 @@
+#!/bin/bash
+export DISPLAY=:0
+/bin/chromium --kiosk --start-maximized --ozone-platform=x11 --noerrdialogs --disable-infobars --enable-features=OverlayScrollbar http://10.0.4.107:8888
