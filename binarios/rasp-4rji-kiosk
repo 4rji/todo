@@ -1,0 +1,3 @@
+#!/bin/bash
+/bin/chromium --kiosk --start-maximized --ozone-platform=wayland --noerrdialogs --disable-infobars --enable-features=OverlayScrollbar https://4rji.com
+

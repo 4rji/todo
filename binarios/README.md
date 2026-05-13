@@ -54,6 +54,7 @@ timeshiftinst       Instala y configura timeshift solo con directorios basicos.
 doasinst            Instala doas y con -i remueve sudo
 wallpaperinst       Instala wallpaper del grub de kali
 browshinst          Browsh para ver el browser en ssh terminal necesita firefox
+rasp-4rji-kiosk    Launches Chromium in Wayland kiosk mode pointed at 4rji.com.
 mapat               alias de mapa en telnet - telnet mapscii.me
 modinvest           Crea snapshop de modulos, para comparar e investigar
 interfacess         imprime ejemplos y comandos de configuración de red, dhcp, 
@@ -123,6 +124,7 @@ lolcatinst          Instala gem, ruby y lolcat
 
 
 ###------instaladores
+alfainst            Installs or updates the rtl8812au DKMS driver for Alfa Wi-Fi adapters.
 networktools        herramientas de network como ping, fping, instala y muestra
 vagraninst          Para instalar vagrant en linux agregando apt list
 cargoinst           Instala cargo y tambien herramientas de la lista

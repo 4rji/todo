@@ -25,6 +25,30 @@
             "The menu repeats until the user chooses q to quit."
         ]
     },
+    "alfainst": {
+        "name": "alfainst",
+        "short_desc": "Installs or updates the rtl8812au DKMS driver for Alfa Wi-Fi adapters.",
+        "detailed_desc": [
+            "Installs or updates the aircrack-ng rtl8812au driver with DKMS on Debian, Ubuntu, or Kali systems.",
+            "",
+            "It checks for Linux, sudo, and apt, updates package indexes, and installs build dependencies plus matching Linux headers.",
+            "If the repository already exists, it pulls with --ff-only; otherwise it clones into RTL8812AU_DIR or ./rtl8812au.",
+            "",
+            "Use --upgrade when you also want to run apt upgrade before installing dependencies.",
+            "After installation, it tries to load the 88XXau kernel module."
+        ]
+    },
+    "rasp-4rji-kiosk": {
+        "name": "rasp-4rji-kiosk",
+        "short_desc": "Launches Chromium in Wayland kiosk mode pointed at 4rji.com.",
+        "detailed_desc": [
+            "Starts /bin/chromium directly in kiosk mode and opens https://4rji.com.",
+            "",
+            "It uses start-maximized, Wayland ozone support, hidden error dialogs, disabled infobars, and overlay scrollbars.",
+            "",
+            "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen 4rji.com display."
+        ]
+    },
     "pythonnc": {
         "name": "pythonnc",
         "short_desc": "Netcat replacement written in Python.",
