@@ -14,6 +14,7 @@ tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloaktools        Post-detection investigation checklist for decloak analysis
 decloak.py          File decloaking tool to identify possible rootkit-based content hiding
 copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
+galletapython       Serves galleta.js and logs base64 cookie callbacks for lab testing.
 processdecloak      Busca procesos ocultos en linux
 tlscheck            TLS cert check using SHA256 Useful for detecting TLS interception - MITM.
 ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
@@ -53,6 +54,9 @@ timeshiftinst       Instala y configura timeshift solo con directorios basicos.
 doasinst            Instala doas y con -i remueve sudo
 wallpaperinst       Instala wallpaper del grub de kali
 browshinst          Browsh para ver el browser en ssh terminal necesita firefox
+rasp-kios           Launches Chromium in Wayland kiosk mode pointed at 4rji.com.
+rasp-kios2          Launches Chromium in X11 kiosk mode pointed at 10.0.4.107:8888.
+rasp-kiosinst       Installs desktop autostart for rasp-kios on Raspberry Pi.
 mapat               alias de mapa en telnet - telnet mapscii.me
 modinvest           Crea snapshop de modulos, para comparar e investigar
 interfacess         imprime ejemplos y comandos de configuración de red, dhcp, 
@@ -76,12 +80,14 @@ apache9000          Modifica la configuracion de apache para correr en el puerto
 pwdc                Copia el directorio actual con pwd y xclip
 grubp               Crea una copia de grub, boot, efi y la guarda en /var/lib/os-system, restaura tambien
 mk                  Crea markitdown de los archivos ./mk file
+mann                Wrapper que usa mannm en macOS y mann_amd en Linux desde /opt/4rji/bin
 
 ###------descargar_cosas
 wgett               Descarga archivos con wget, carpeta completa reescribiendo o no
 wgetf               Descarga (FUNCTION) - HTTP minimo que hace GET via TCP - /dev/tcp, http only
 wgetraw             Descarga HTTP minimo que hace GET via TCP - /dev/tcp
 bajar               Downloads MP3 audio, best video, or streams a URL with mpv via yt-dlp.
+axe                 Downloads a URL with aria2c by default or axel, using configurable parallel connections.
 
 
 
@@ -120,6 +126,7 @@ lolcatinst          Instala gem, ruby y lolcat
 
 
 ###------instaladores
+alfainst            Installs or updates the rtl8812au DKMS driver for Alfa Wi-Fi adapters.
 networktools        herramientas de network como ping, fping, instala y muestra
 vagraninst          Para instalar vagrant en linux agregando apt list
 cargoinst           Instala cargo y tambien herramientas de la lista
@@ -133,7 +140,9 @@ elast-fileb-inst    Instala y configura elasticsearch, filebeat y envio suricata
 zeekinst            Zeek para debian 12 y 13
 zeekclone           git clone para arch, sin usar yay. make and makefile
 oniuxinst           Instala cargo, oniux y curl ip
-fastinst            Instala fastfetch, fastconf y fastconfmac para solo el archivo conf.
+fastinst            Instala fastfetch en Linux/macOS y conserva config; --force regenera con fastconf.
+fastfinst           Alias de fastinst para instalar fastfetch y configurar fastconf.
+fastconfmac         Writes a styled Fastfetch config with a custom message and logo.
 searchinst          Instala searxng que es como google pero privado.
 lazydockerdinst     Instala lazydocker con go. instala go tambien
 instpowershell      Descarga nishang powershell modules
@@ -183,13 +192,12 @@ instgithub          Instala github desktop en kali
 pythonscritps       instala requerimientos y baje scritps del curso de python
 obsidianinst        Instala obsidian en deb, baja paquete e instala notas 
 zeroinst            Script para zero raspberry
-zshinstc            Instala y compila zsh 5.9, para centos 7
-zshinst             instala zsh con todo, ya no necesita c1-5, instala functions
+zshinst             Configura zsh con todo, Oh My Zsh, powerlevel10k y plugins; compatible Linux/macOS
 zshinst1            antes zshinst, Instala la zsh h-my-zsh powerlevel10k
 zshinst2            Instala la configuracion de barra terminal .p10k.zsh, 
 tmuxinst            Archivos para la configuracion de tmux, lo instala. con B
 neofetchinst        Instala y personaliza neofetch para ppg1
-kittyinst           Instala kitty y baja su configuracion
+kittyinst           Instala kitty en Linux/macOS y baja su configuracion
 ovpninst            Instala OpenvpnServer para webadmin, 4rjiDocs
 xrayinst            instala xray. no es mi script.
 xrayinst2           Descarga el archivo de configuracion a b1 
@@ -223,6 +231,7 @@ nixbus              Para buscar programas en linea de comando y tambien corregir
 
 ###------utilidades 
 gitc                Menu rapido de github para gh
+gcom                Interactive Git menu for committing, pushing, fetching, pulling, and status checks.
 videocapture        Captures HTTP traffic from an IPCam, extracts frames from the pcap, and reconstructs into video
 zipcomm             Comandos basicos de zip
 vmdig               Para manejar Digital ocean API
@@ -269,7 +278,7 @@ colores             Colores en hexadecimal
 grepfind            incorpora grep y find en un script para buscar palabras en archivos
 todos               Hace un fzf a el directorio 4rj, con cat -l rb, para abrir usar nvim $(todos)
 ayudah              Aplica -h mensaje para mostrar al inicio de un script
-comandos            Muestra varios comandos en lista. util
+man                 usa fzf para mostrar varios comandos en lista. util
 bashfun             Agrega las funciones function a las bash zsh, en zshrc bashrc mktem
 whx                 hace un xargs cat a un binario y pregunta si deseo editarlo #ejemplo whx mired     
 whr                 hace un nano a un binario    
@@ -289,7 +298,7 @@ todob               actualiza los binarios, funciones, alias y 2-4rji.sh,   -o p
 herrabinp           para pacman, existe para yum, y para dnf, y apt es la normal de arriba todob
 herralias           Actualiza los binarios descargando solo alias
 airzip              Comprime y envia una carpeta por airsend -f
-cscp                copiar archivos en scp en lugar de sftp    
+ 
 csftp               copia un archivo por sftp hubicado en home, pregunta la IP y usuario y archivo     
 weather             Muestra el clima geolocalizacion usar
 mdcolors            Genera colores para archivos md 
@@ -319,7 +328,6 @@ picoduckytool       Para formatear raspberri pico, se necesito el github en el m
 dor                 Disables automatic lock, screensaver, and sleep, then restores the previous state on demand
 
 ###------Repositorios
-fixme               corre fix-4rji para solucionar repositorios despuies de la instalacion             
 repos               vuelve a instalar por defaul los repos de kali cuando no funcionan.                
 fixkalirepos	    Borra todo los archivos en /etc/apt/ y luego reinstala y descarga pgp
 contenedor          Instala paquetes basicos, util en contenedores docker
@@ -343,8 +351,10 @@ sweepold            solo hace el sweep normal de las ips
 nsweep_{192.168.1}  hace un nmap -sn en la red para buscar maquinas activas.   
 nsweep2             Otro que hace un nmap -sn                        
 
-expo                Hace un scaneo con o sin Pn, y lo genera en carpeta tmp, hace expo1, expo2, expo3
-expos               Version mejorada de expo, usar este. ./script IP
+expo                Cadena ping+whichsys+expo1+expo2(+expo3). Flag -u agrega UDP top-100 al final
+expo1               Full nmap -p- a IP (con o sin -Pn), escribe ./allPorts (oG)
+expo2               Lee ./allPorts, extrae puertos open, copia al clipboard (pbcopy/xclip/wl-copy), llama expo3
+expo3               Lee ./allPorts para IP, pide puertos y corre nmap -sCV detallado, salida ./nmap_results
 expo4               crea un archibo clip1 del portapapeles para expo5                                  
 expo5               limpia el archivo targeted y muestra solo los servicios, crea resumen 
 sweepall            hace nmap xml para abrir con firefox, USA sweep, ips y puertos o puertos2
@@ -364,6 +374,9 @@ nessusinst          instalar nessus
 
 
 ###------fail2ban
+f2b                 Bans a prompted IP address in the Fail2Ban SSH jail.
+f2u                 Unbans a prompted IP address from the Fail2Ban SSH jail.
+f2j                 Shows recent Fail2Ban logs and the SSH jail status.
 f2binst             instala debian fail2ban f2b
 f2c                 fail2ban comandos 
 
@@ -371,7 +384,6 @@ f2c                 fail2ban comandos
 ###------para bspwx
 target1             cambia el estatus de la bateria por cualquier otra cosa que se quiera poner ahi    
 asd                 copia el contenido de target1 a el portapapeles                                    
-fixethernet         Arregla la red del script ethernet_status para bspwx escritorio
 
 
 ###------artilleria
@@ -399,21 +411,21 @@ findbin             Para buscar binarios como zeek
 
 
 ###------ssh
+pingz               pingzm en macOS y pingz_amd en Linux. Chequea SSH hosts del config.
 ssh-getkey          se descarga la llave para el script ssh-getpublic
 ssh-getpublic       Descarga la llave publica a la maquina.
 ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
 sshc                copia directorio o archivo por ssh, lo comprime y descomprime
 sshp                ssh proxy D 1080 en background, completo, bashfun bash function
-pingt               Hace traceroute con ping
-pingz               misma que pings pero usa nc para ver status del puerto ssh en el .config
+sss                 Shows SSH service status, local IP, current user, and SSH port.
+
 sshsync             Sincroniza el archivo ssh con los nuevos de github. no borra nada
 sshdown             Descarga .ssh/config y crea copia
 sshk                kitty +kitten ssh 
 sshexit             Instala un mensaje de salida de ssh en la zsh ZSH
 x11uso              Instrucciones para x11
 fixssh              Seguido de la ip, para borrar la ip del localhost cuando se duplica	
-cssh                copia mui clave a una maquina remota
-ccssh               Version para M1 mac de cssh
+cssh                copia tu clave a una maquina remota (Linux/macOS, puerto 22 por defecto)
 sshconf             Hace un archivo .ssh/config para conectarse por medio de jump ejemplo: ssh maquina-final
 sshmont             Monta una carpeta usando sshh           Edita el banner de inicio de session de ssh, cuando se loguea
 sshc                Binario en comprimidos, que enviar un comando a los host ssh, tipo ansible
@@ -597,8 +609,6 @@ simbo               Es el CTL Trabaja con sheldono, y nala para esconderme sheld
 simboc              En lugar de correr script corre la revershell bash, mas escondida
 nala                El mismo que nala, funciona mejor, usar simbo para esconder
 ezuri               en binarios_go, para cambiar el nombre del proceso. git clone solamente
-psss                Escanea por conexiones lsof netstat, mi bebe mibebe
-pssc                Mismo que psss pero este las cierra en 12 segundos automaticamente mibebe
 mapa                Busca un proceso despues del script y lo mata ps aux
 ippsec              Script de ippsec de ssh, aun no lo pruebo
 pythonroot          Usa getcap para tener una consola interactiva en python
@@ -634,12 +644,12 @@ enum                guarda whichsys, nmap, se ejecuta desde nmap folder
 contra              Copia una contrasena del portapapales a content/passwords
 usua                Copia un usuario a /content/users
 bashcurl            Crea una bash 443 TCP para usar en curl, monta servidor, crea bash, curl localhost/bash | bash
+index.html1          Minimal Bash TCP reverse-shell payload for lab use.
 eyewit              Guarda la pagina con eyewitness, solo pregunta por el directorio, usar $eyeruta export
 pas                 Guarda clipboad en maquina.md
 alis                Make an alias for zshrc quickly
 qwe                 Alias de clipc && pas
 goo                 Abre google chrome con la ip o pagina despues, es una bash function
-listaa              Agrega un nuevo nombre a la lista apache para el servidor apache
 hosthtb             Agrega el host para paginas, toma la $ip de zsh y solo pide el host.htb por ejemplo
 galletas            Recibe cookies de session, php js xss html injection phpsessid
 ngrok               Instala ngrok para dockers, toma token de ngroktk script, conecta ssh y http. 
@@ -660,8 +670,6 @@ splunktestport      ejecuta un tcpdump para ver si recibe datos el puerto 998
 ###------ CCDC
 chronservinst       Instala servidor chrony con flags 
 cockpitremove       remueve cock pit 
-psss
-pssc
 usuario             Crea un usuario en bash, automatico.
 banner              Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubuntu, -star usa banner.txt
 bannerlogin         Modify the banner after login with ssh and also when start computer
@@ -677,8 +685,7 @@ findinst            Busca si un programa esta instalado, en dpkg - apt - systemc
 findpak             Busca paquetes y servicios que esten instalados en varias distros
 
 sshmoni             sshmoni loop para correr el sshmoni while loop detecta conexiones
-mibebe              escanea las dos sshmoni lsofmoni
-mibebemata          Mi bebe mata solo. lol
+mibebe              monitor de conexiones SSH/lsof con killer interactivo: -w watch, -K deadman, -j JSON, fzf, PUB/PRIV
 sshmoni             Este busca conexiones activas ssh, muestra procesos PID y luego ejecuta killsshmanual
 iarpon              Arpon para protejer de arp poising. arp sniff 
 iicmp               para protejer de ataques icmp, solo cambia el 0 a 1 este script
@@ -702,16 +709,12 @@ newprocess          Nuevos procesos en linux
 snoop               Hace un awk a los logs de snoopy
 snoopinst           Instala snoopy
 ppt
-mibebemata
-psss                Escanea por conexiones lsof netstat, mi bebe mibebe
-pssc                Mismo que psss pero este las cierra en 12 segundos automaticamente mibebe
 sshmoni
 fwcom               firewall-cmd commands, comandos para manejar el firewall
 firewall-ipt        un firewall manual que usa iptables 
 ipredir             redirecciona una IP por otra, util para mandar o cambiar trafico
 finddb              Busca una database corriendo ya sea sqlite mariadb
 python9inst         instala python 3.9 compila para yum 
-zshupdate           actualiza descargando compidor a 5.9
 passl               version SIN batcat
 pasw                version de passwd con batcat
 curlfix             Se supone arregla curl, no probado.
@@ -748,10 +751,7 @@ redhavi-check       Checa las malconfiguraciones
 
 ###------ otros
 redhavi-check       Checa las malconfiguraciones
-cht                 Pone chattr +i a los binarios de opt
-chtt                chattr -i, quita a los binarios de opt 
-chtm                Pone chattr +i a los binarios de opt/ MAC
-chttm               Pone chattr -i a los binarios de opt para MAC- QUITA
+cht                 Marca binarios de /opt/4rji/bin como inmutables. Con -i quita. Detecta Linux/Mac (chattr/chflags)
 dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
 wifi-radar          En comprimidos, muestra la calidad de la senal wifi en un webserver, necesitas wifi
 wifi-radar-finder   en comprimidos, muestra las redes wifi con su intensidad para buscarlas
@@ -775,8 +775,6 @@ nixclean            Arregla la shell de nixos para los scripts 4rji
 ssa                 Busca un host en ssh
 dhclientcomm        Comandos para dhclient y para dar de alta un ip en debian
 mac-route           Prioritizar wifi sobre ethernet en mac (discontinued)
-codexx              Muestra los modelos disponibles de codex (discondinued)
-zshconf             Configuraciones de la zsh, aun no en script, para copiar y pegar (discontinued)
 servidores          Inicia el programa servidores que es la webapp de flash para proxmox
 servidoresprogram   El codigo de servidores para proxmox servidores
 loopp               While true; function and script, loop is the function.
@@ -793,16 +791,10 @@ limpiar             NO USAR  Limpia el home con shred y scrub (solo home del usu
 limpiartest         Genera archivos de varios tamanos para probar
 cortes              Muestra cortes archivos con awk cut (no grep or find)
 ddf                 hace un diff archivo vs archivo.backup                                             
-copyrrs             Copia archivo por rsync preguntado hosts y puerto
-copyrs              Copia archivo o carpeta por rsync usando sshconf
-copyrs-old          Copia archivo por rsync usando sshconf 
-copyrsr             Recibe un archivo por medio de rsync
-copyrsyn            Usa hosts ansible y copia un archivo con rsync y clave privada
-copycar	            Copia una carpeta folder por medio de ssh scp
 limpiarf            Limpiar un archivo buscando, awk grep palabra.
-pings               Hace un ping a todos los hosts dentro de archivo ssh/config
-pingsm              Version para mac
-pssh1               Hace un ping a un servidor y luego se conecta
+
+
+
 fixhost             Arregla know_hosts para ssh duplicados
 sshhostt            Lista los hosts del archivo sshconf, para conectarse
 sshhost             Lista igual pero en go. binario. 

@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 
-# Verificar si se proporciona un argumento que representa el archivo
 if [ -z "$1" ]; then
-    echo "Por favor, proporcione un nombre de archivo."
+    echo "Proporcione un archivo."
     exit 1
 fi
 
-# Verificar si el archivo existe
 if [ ! -f "$1" ]; then
-    echo "El archivo especificado no existe."
+    echo "Archivo no existe: $1"
     exit 1
 fi
 
-# Asignar permisos de ejecución al archivo
 chmod +x "$1"
-echo "Se han asignado permisos de ejecución al archivo $1."
-
+echo "Permisos +x asignados: $1"

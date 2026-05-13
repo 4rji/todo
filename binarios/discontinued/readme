@@ -1,0 +1,15 @@
+cscp                copiar archivos en scp en lugar de sftp   
+zshinstc            Instala y compila zsh 5.9, para centos 7
+copyrsyn            Usa hosts ansible y copia un archivo con rsync y clave privada
+pingz               misma que pings pero usa nc para ver status del puerto ssh en el .config
+copyrrs             Copia archivo por rsync preguntado hosts y puerto
+copyrs              Copia archivo o carpeta por rsync usando sshconf
+copyrsr             Recibe un archivo por medio de rsync
+copycar	            Copia una carpeta folder por medio de ssh scp
+pings               Hace un ping a todos los hosts dentro de archivo ssh/config
+pingsm              Version para mac
+pssh1               Hace un ping a un servidor y luego se conecta
+fixme               corre fix-4rji para solucionar repositorios despuies de la instalacion             
+
+fixethernet         Arregla la red del script ethernet_status para bspwx escritorio
+

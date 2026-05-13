@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bin_dir="/opt/4rji/bin"
+
+case "$(uname -s)" in
+  Darwin)
+    target="${bin_dir}/mannm"
+    ;;
+  Linux)
+    target="${bin_dir}/mann_amd"
+    ;;
+  *)
+    printf 'mann: sistema no soportado: %s\n' "$(uname -s)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -x "$target" ]]; then
+  printf 'mann: no se encontro ejecutable: %s\n' "$target" >&2
+  exit 1
+fi
+
+exec "$target" "$@"

@@ -19,20 +19,20 @@ case "$platform" in
         tmp_base="/dev/shm"
         actualizador="todou"
         if [[ "$arch" != "x86_64" && "$arch" != "amd64" ]]; then
-            echo -e "${amarillo}Arquitectura Linux no principal: ${arch}. El binario todo incluido puede no ser compatible.${reset}"
+            echo -e "${amarillo}Non-standard Linux architecture: ${arch}. Included binaries may not be compatible.${reset}"
         fi
         ;;
     Darwin)
         tmp_base="${TMPDIR:-/tmp}"
         actualizador="todoum"
         if [[ "$arch" != "arm64" && "$arch" != "aarch64" ]]; then
-            echo -e "${amarillo}Arquitectura macOS no principal: ${arch}. El binario todo incluido puede no ser compatible.${reset}"
+            echo -e "${amarillo}Non-standard macOS architecture: ${arch}. Included binaries may not be compatible.${reset}"
         fi
         ;;
     *)
         tmp_base="${TMPDIR:-/tmp}"
         actualizador=""
-        echo -e "${amarillo}Sistema no reconocido: ${platform} ${arch}. Usando temporal en ${tmp_base}.${reset}"
+        echo -e "${amarillo}Unrecognized system: ${platform} ${arch}. Using temp in ${tmp_base}.${reset}"
         ;;
 esac
 
@@ -40,12 +40,12 @@ if [[ ! -d "$tmp_base" ]]; then
     tmp_base="/tmp"
 fi
 
-# Función para mostrar el uso del script
+# Show script usage
 mostrar_uso() {
-    echo "Uso: $0 [-p] [-a] [-c]"
-    echo "  -p    Mostrar únicamente las preguntas interactivas."
-    echo "  -a    Ejecutar todo el script (descargar bina y mostrar preguntas)."
-    echo "  -c    Preguntar y, de confirmarse, borrar todos los archivos de ${bin_dir}/*."
+    echo "Usage: $0 [-p] [-a] [-c]"
+    echo "  -p    Show interactive questions only."
+    echo "  -a    Run full script (download binaries and show questions)."
+    echo "  -c    Clean ${bin_dir}/* then run normal flow (download binaries)."
     exit 1
 }
 
@@ -63,7 +63,7 @@ while getopts "pac" opt; do
             borrarBinarios=true
             ;;
         \?)
-            echo "Opción inválida: -$OPTARG" >&2
+            echo "Invalid option: -$OPTARG" >&2
             mostrar_uso
             ;;
     esac
@@ -91,17 +91,17 @@ descargar_y_ejecutar() {
     elif command -v curl >/dev/null 2>&1; then
         curl -fsSL "$url" | bash
     else
-        echo "No se encontro wget ni curl para descargar: $url" >&2
+        echo "wget or curl not found to download: $url" >&2
         return 1
     fi
 }
 
-# Función para descargar y configurar bina
+# Download and configure binaries
 descargar_bina() {
     echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
-    echo "Descargando bina..."
+    echo "Downloading binaries..."
 
-    # Crear directorio temporal y realizar operaciones
+    # Create temp directory and perform operations
     mktem
     git clone --depth 1 https://github.com/4rji/todo.git
     cd todo || exit 1
@@ -111,27 +111,31 @@ descargar_bina() {
         sudo cp -a binarios/.todoignore "$bin_dir"
     fi
     echo ""
-    echo -e "\033[1;34mbinarios actualizados\033[0m"
+    echo -e "\033[1;34mBinaries updated\033[0m"
     cd || exit 1
     echo ""
 }
 
-# Función para borrar todos los archivos en /opt/4rji/bin/*
+# Remove immutable attributes and delete files in /opt/4rji/bin/*
 borrar_archivos() {
-    read -n1 -p "$(echo -e "${amarillo}¿Quieres borrar todos los archivos de ${bin_dir}/*? (y/N): ${reset}")" respuesta_borrar
-    echo ""
-    respuesta_borrar=$(echo "$respuesta_borrar" | tr '[:upper:]' '[:lower:]')
-    if [[ "$respuesta_borrar" == "y" ]]; then
-        sudo rm -rf "${bin_dir:?}"/*
-        echo -e "${verde}Archivos borrados con éxito en ${bin_dir}/*${reset}"
+    echo -e "${amarillo}Cleaning ${bin_dir}/* ...${reset}"
+
+    # Remove immutable attribute from any files that have it
+    sudo find "${bin_dir}" -type f -exec chattr -i {} + 2>/dev/null || true
+
+    # Delete files and capture exit code
+    if sudo rm -rf "${bin_dir:?}"/* 2>/dev/null; then
+        echo -e "${verde}Files successfully removed from ${bin_dir}/*${reset}"
+        return 0
     else
-        echo "Operación cancelada."
+        echo -e "${amarillo}Warning: Some files could not be removed. Proceeding anyway.${reset}"
+        return 0
     fi
 }
 
 actualizar_database() {
     if [[ -z "$actualizador" ]]; then
-        echo "No hay actualizador definido para ${platform} ${arch}."
+        echo "No updater defined for ${platform} ${arch}."
         return 0
     fi
 
@@ -140,20 +144,39 @@ actualizar_database() {
     elif command -v "$actualizador" >/dev/null 2>&1; then
         "$actualizador"
     else
-        echo "No se encontro ${actualizador}; no se pudo actualizar ~/.todo.txt." >&2
+        echo "${actualizador} not found; could not update ~/.todo.txt." >&2
         return 1
     fi
 }
 
-# Si se activa la opción -c, ejecutar la función y salir
+# Si se activa la opción -c, limpiar primero y luego seguir con flujo normal
 if [[ $borrarBinarios == true ]]; then
     borrar_archivos
-    exit 0
 fi
 
 # Ejecutar descarga de bina si corresponde
-if [[ $mostrarBina == true || ( $mostrarBina == false && $mostrarPreguntas == false ) ]]; then
+if [[ $mostrarBina == true || $borrarBinarios == true || ( $mostrarBina == false && $mostrarPreguntas == false ) ]]; then
     descargar_bina
+fi
+
+# Tras -c y descarga de bina, ofrecer ejecutar binariosgo
+if [[ $borrarBinarios == true ]]; then
+    echo ""
+    read -p "$(echo -e ${verde}'Download Go binaries? [Y/n]: '${reset})" -n 1 -r respuesta_go
+    echo ""
+    respuesta_go=${respuesta_go:-y}
+    respuesta_go=$(echo "$respuesta_go" | tr '[:upper:]' '[:lower:]')
+    if [[ "$respuesta_go" == "y" ]]; then
+        if [[ -x "${bin_dir}/binariosgo" ]]; then
+            "${bin_dir}/binariosgo"
+        elif command -v binariosgo >/dev/null 2>&1; then
+            binariosgo
+        else
+            echo "binariosgo not found in ${bin_dir} or PATH." >&2
+        fi
+    else
+        echo "Skipped Go binaries."
+    fi
 fi
 
 # Ejecutar preguntas si corresponde
@@ -162,36 +185,36 @@ if [[ $mostrarPreguntas == true || $mostrarBina == true ]]; then
     echo -e "${verde}_________________________________________________________${reset}"
     echo ""
 
-    # Preguntar al usuario si desea agregar la ruta al PATH
-    read -p "¿Deseas agregar ${bin_dir} a tu PATH? (y/n): " -n 1 -r
-    echo    # Mueve a una nueva línea
+    # Ask user if they want to add the path to PATH
+    read -p "Add ${bin_dir} to your PATH? (y/n): " -n 1 -r
+    echo    # Move to new line
 
-    # Por defecto, si el usuario presiona Enter, considera 'n'
+    # By default, if user presses Enter, consider 'n'
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Agregar el directorio de binarios al PATH en ~/.zshrc
+        # Add binary directory to PATH in ~/.zshrc
         echo "export PATH=\$PATH:${bin_dir}" >> ~/.zshrc
-        echo "El directorio ${bin_dir} ha sido agregado a tu PATH en ~/.zshrc."
+        echo "Directory ${bin_dir} added to PATH in ~/.zshrc."
     else
-        echo "No se realizaron cambios en PATH."
+        echo "No changes made to PATH."
     fi
 
     echo -e "${azul}"
     echo "_________________________________________________________"
     echo ""
 
-    # Pregunta al usuario
-    read -n1 -p "$(echo -e ${verde}'¿Instalar todos los alias? (s/N): '${reset})" respuesta
+    # Ask user
+    read -n1 -p "$(echo -e ${verde}'Install all aliases? (y/N): '${reset})" respuesta
     echo ""
 
-    # Define un valor predeterminado si el usuario presiona Enter
+    # Define default value if user presses Enter
     respuesta=${respuesta:-n}
 
-    # Convierte la respuesta a minúsculas para facilitar la comparación
+    # Convert response to lowercase
     respuesta=$(echo "$respuesta" | tr '[:upper:]' '[:lower:]')
 
-    # Verifica la respuesta
-    if [ "$respuesta" == "s" ]; then
-        echo -e "${verde}Instalando todos los alias... ${reset}"
+    # Check response
+    if [ "$respuesta" == "y" ]; then
+        echo -e "${verde}Installing all aliases... ${reset}"
         descargar_y_ejecutar https://raw.githubusercontent.com/4rji/4rji/main/alias.sh
     else
         echo ""
@@ -200,25 +223,25 @@ if [[ $mostrarPreguntas == true || $mostrarBina == true ]]; then
     echo -e "${amarillo}"
     echo "_________________________________________________________"
     echo ""
-    echo -e "${amarillo} ########### ALERTA.  #################${reset}"
+    echo -e "${amarillo} ########### WARNING  #################${reset}"
     echo ""
-    echo -e "${amarillo}Tarda mucho en instalarse${reset}"
+    echo -e "${amarillo}This takes a long time to install${reset}"
     echo ""
     echo -e "${amarillo}_________________________________________________________${reset}"
     echo ""
 
-    # Pregunta al usuario
-    read -n1 -p "$(echo -e ${verde}'¿Quieres instalar 2-arji? (s/N): '${reset})" respuesta
+    # Ask user
+    read -n1 -p "$(echo -e ${verde}'Install 2-arji? (y/N): '${reset})" respuesta
     echo ""
 
-    # Define un valor predeterminado si el usuario presiona Enter
+    # Define default value if user presses Enter
     respuesta=${respuesta:-n}
 
-    # Convierte la respuesta a minúsculas para facilitar la comparación
+    # Convert response to lowercase
     respuesta=$(echo "$respuesta" | tr '[:upper:]' '[:lower:]')
 
-    # Verifica la respuesta
-    if [ "$respuesta" == "s" ]; then
+    # Check response
+    if [ "$respuesta" == "y" ]; then
         descargar_y_ejecutar https://raw.githubusercontent.com/4rji/4rji/main/2-4rji.sh
     else
         echo ""

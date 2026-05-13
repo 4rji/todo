@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_BIN="${APP_BIN:-/opt/4rji/bin/rasp-kios}"
+AUTOSTART_NAME="rasp-kios.desktop"
+LEGACY_AUTOSTART_NAME="rasp-4rji-kiosk.desktop"
+DELAY="${KIOSK_DELAY:-8}"
+TARGET_USER="${KIOSK_USER:-}"
+ENABLE_AUTOLOGIN=0
+REMOVE=0
+
+usage() {
+  cat <<'EOF'
+Uso:
+  rasp-kiosinst [usuario] [opciones]
+
+Opciones:
+  --enable-autologin   En Raspberry Pi OS, usa raspi-config para activar Desktop Autologin.
+  --delay N            Espera N segundos antes de iniciar Chromium. Default: 8.
+  --remove             Borra el autostart creado para el usuario.
+  -h, --help           Muestra esta ayuda.
+
+Variables:
+  APP_BIN=/opt/4rji/bin/rasp-kios
+  KIOSK_USER=pi
+  KIOSK_DELAY=8
+
+Ejemplos:
+  sudo rasp-kiosinst pi --enable-autologin
+  rasp-kiosinst --delay 12
+  rasp-kiosinst pi --remove
+EOF
+}
+
+run_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --enable-autologin)
+      ENABLE_AUTOLOGIN=1
+      ;;
+    --remove)
+      REMOVE=1
+      ;;
+    --delay)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "[!] Falta el valor para --delay"
+        exit 1
+      fi
+      DELAY="$1"
+      ;;
+    --delay=*)
+      DELAY="${1#*=}"
+      ;;
+    -*)
+      echo "[!] Opcion no reconocida: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      if [[ -n "$TARGET_USER" ]]; then
+        echo "[!] Solo se acepta un usuario objetivo."
+        usage
+        exit 1
+      fi
+      TARGET_USER="$1"
+      ;;
+  esac
+  shift
+done
+
+if [[ -z "$TARGET_USER" ]]; then
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    TARGET_USER="$SUDO_USER"
+  else
+    TARGET_USER="$(id -un)"
+  fi
+fi
+
+if [[ "$TARGET_USER" == "root" ]]; then
+  echo "[!] No instales el kiosk para root. Usa un usuario grafico, por ejemplo:"
+  echo "    sudo rasp-kiosinst pi --enable-autologin"
+  exit 1
+fi
+
+if ! [[ "$DELAY" =~ ^[0-9]+$ ]]; then
+  echo "[!] --delay debe ser un numero entero de segundos."
+  exit 1
+fi
+
+if ! command -v getent >/dev/null 2>&1; then
+  echo "[!] getent no esta disponible; este instalador esta pensado para Linux/Raspberry Pi OS."
+  exit 1
+fi
+
+PASSWD_ENTRY="$(getent passwd "$TARGET_USER" || true)"
+if [[ -z "$PASSWD_ENTRY" ]]; then
+  echo "[!] Usuario no existe: $TARGET_USER"
+  exit 1
+fi
+
+USER_HOME="$(printf '%s\n' "$PASSWD_ENTRY" | cut -d: -f6)"
+USER_GROUP="$(id -gn "$TARGET_USER")"
+AUTOSTART_DIR="$USER_HOME/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/$AUTOSTART_NAME"
+LEGACY_AUTOSTART_FILE="$AUTOSTART_DIR/$LEGACY_AUTOSTART_NAME"
+
+if [[ "$REMOVE" -eq 1 ]]; then
+  if [[ -e "$AUTOSTART_FILE" || -e "$LEGACY_AUTOSTART_FILE" ]]; then
+    run_root rm -f "$AUTOSTART_FILE"
+    run_root rm -f "$LEGACY_AUTOSTART_FILE"
+    echo "[OK] Autostart borrado: $AUTOSTART_FILE"
+  else
+    echo "[OK] No habia autostart que borrar: $AUTOSTART_FILE"
+  fi
+  exit 0
+fi
+
+if [[ ! -e "$APP_BIN" ]]; then
+  echo "[!] No existe el launcher: $APP_BIN"
+  echo "    Instala primero rasp-kios en /opt/4rji/bin."
+  exit 1
+fi
+
+if [[ ! -x "$APP_BIN" ]]; then
+  echo "[*] Haciendo ejecutable: $APP_BIN"
+  run_root chmod +x "$APP_BIN"
+fi
+
+write_autostart() {
+  cat <<EOF
+[Desktop Entry]
+Type=Application
+Name=4rji Kiosk
+Comment=Launch 4rji kiosk at graphical login
+Exec=sh -lc "sleep ${DELAY}; exec ${APP_BIN}"
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+EOF
+}
+
+TMP_FILE="$(mktemp)"
+trap 'rm -f "$TMP_FILE"' EXIT
+write_autostart > "$TMP_FILE"
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  install -d -m 0755 -o "$TARGET_USER" -g "$USER_GROUP" "$AUTOSTART_DIR"
+  install -m 0644 -o "$TARGET_USER" -g "$USER_GROUP" "$TMP_FILE" "$AUTOSTART_FILE"
+else
+  if [[ "$(id -un)" != "$TARGET_USER" ]]; then
+    echo "[!] Para instalar a otro usuario, ejecuta con sudo."
+    exit 1
+  fi
+  mkdir -p "$AUTOSTART_DIR"
+  install -m 0644 "$TMP_FILE" "$AUTOSTART_FILE"
+fi
+
+if [[ -e "$LEGACY_AUTOSTART_FILE" ]]; then
+  run_root rm -f "$LEGACY_AUTOSTART_FILE"
+fi
+
+if [[ "$ENABLE_AUTOLOGIN" -eq 1 ]]; then
+  if command -v raspi-config >/dev/null 2>&1; then
+    echo "[*] Activando Desktop Autologin con raspi-config..."
+    run_root raspi-config nonint do_boot_behaviour B4
+  else
+    echo "[!] raspi-config no esta disponible; salteando Desktop Autologin."
+  fi
+fi
+
+echo "[OK] Autostart instalado: $AUTOSTART_FILE"
+echo "[OK] Launcher configurado: $APP_BIN"
+echo "[i] Reinicia la Raspberry o cierra/abre la sesion grafica para probarlo."

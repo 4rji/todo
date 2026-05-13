@@ -13,10 +13,82 @@
             "The script derives the binary name from the selected target, shows the current build context in the header, and returns to the menu after each action."
         ]
     },
+    "gcom": {
+        "name": "gcom",
+        "short_desc": "Interactive Git menu for committing, pushing, fetching, pulling, and status checks.",
+        "detailed_desc": [
+            "Shows a colorized interactive menu for common Git repository actions.",
+            "",
+            "Option 1 runs git add ., commits with the provided message or the default 'gcom', then pushes main to origin and backup.",
+            "Other options fetch origin, pull origin/main, fetch all remotes, or show git status.",
+            "",
+            "The menu repeats until the user chooses q to quit."
+        ]
+    },
+    "alfainst": {
+        "name": "alfainst",
+        "short_desc": "Installs or updates the rtl8812au DKMS driver for Alfa Wi-Fi adapters.",
+        "detailed_desc": [
+            "Installs or updates the aircrack-ng rtl8812au driver with DKMS on Debian, Ubuntu, or Kali systems.",
+            "",
+            "It checks for Linux, sudo, and apt, updates package indexes, and installs build dependencies plus matching Linux headers.",
+            "If the repository already exists, it pulls with --ff-only; otherwise it clones into RTL8812AU_DIR or ./rtl8812au.",
+            "",
+            "Use --upgrade when you also want to run apt upgrade before installing dependencies.",
+            "After installation, it tries to load the 88XXau kernel module."
+        ]
+    },
+    "rasp-kios": {
+        "name": "rasp-kios",
+        "short_desc": "Launches Chromium in Wayland kiosk mode pointed at 4rji.com.",
+        "detailed_desc": [
+            "Starts /bin/chromium directly in kiosk mode and opens https://4rji.com.",
+            "",
+            "It uses start-maximized, Wayland ozone support, hidden error dialogs, disabled infobars, and overlay scrollbars.",
+            "",
+            "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen 4rji.com display."
+        ]
+    },
+    "rasp-kios2": {
+        "name": "rasp-kios2",
+        "short_desc": "Launches Chromium in X11 kiosk mode pointed at 10.0.4.107:8888.",
+        "detailed_desc": [
+            "Sets DISPLAY=:0, then starts /bin/chromium directly in kiosk mode.",
+            "",
+            "It opens http://10.0.4.107:8888 with start-maximized, X11 ozone support, hidden error dialogs, disabled infobars, and overlay scrollbars.",
+            "",
+            "Designed as a lightweight Raspberry Pi kiosk launcher for a full-screen local web display."
+        ]
+    },
+    "rasp-kiosinst": {
+        "name": "rasp-kiosinst",
+        "short_desc": "Installs desktop autostart for rasp-kios on Raspberry Pi.",
+        "detailed_desc": [
+            "Creates an XDG desktop autostart entry for the selected Raspberry Pi user.",
+            "",
+            "The autostart entry waits a configurable delay, then runs /opt/4rji/bin/rasp-kios from the graphical desktop session.",
+            "",
+            "Use --enable-autologin on Raspberry Pi OS to switch boot behavior to Desktop Autologin through raspi-config.",
+            "Use --remove to delete the autostart entry."
+        ]
+    },
     "pythonnc": {
         "name": "pythonnc",
         "short_desc": "Netcat replacement written in Python.",
         "detailed_desc": "Implements client and server functionalities similar to Netcat. Supports remote command shell (-c), file upload (-u), and command execution (-e) over TCP connections. Can operate in listen mode to accept incoming connections or act as a client to send data. Includes multi-threaded connection handling for concurrent sessions."
+    },
+    "galletapython": {
+        "name": "galletapython",
+        "short_desc": "Serves galleta.js and logs base64 cookie callbacks for lab testing.",
+        "detailed_desc": [
+            "Starts a simple HTTP server on 0.0.0.0:80 for lab callbacks.",
+            "",
+            "When /galleta.js is requested, it serves the local galleta.js file as JavaScript.",
+            "For other GET requests, it returns a basic success response.",
+            "",
+            "If a request includes ?b64=, the value is appended to cookies.txt in the current directory.",
+            "Because it binds to port 80, running it may require elevated privileges."
+        ]
     },
     "virust": {
         "name": "virust",
@@ -70,6 +142,18 @@
             "The generated payload opens an interactive Bash TCP connection to port 443 on the provided IP.",
             "",
             "After creating the payload, it can start a Python HTTP server on port 80 from /tmp/apache so the file can be downloaded with curl."
+        ]
+    },
+    "index.html1": {
+        "name": "index.html1",
+        "short_desc": "Minimal Bash TCP reverse-shell payload for lab use.",
+        "detailed_desc": [
+            "Contains a short Bash payload that opens an interactive shell over /dev/tcp.",
+            "",
+            "The payload connects to 10.10.14.3 on TCP port 443 and redirects stdin, stdout, and stderr through that socket.",
+            "It is a static lab payload file, not an interactive menu or installer.",
+            "",
+            "Use only in authorized lab environments."
         ]
     },
     "bajar": {
@@ -252,6 +336,36 @@
         "short_desc": "Instala y configura fail2ban y dependencias.",
         "detailed_desc": "sudo apt-get install -y iptables\nsudo apt-get install -y rsyslog\nsudo apt-get install -y fail2ban"
     },
+    "f2b": {
+        "name": "f2b",
+        "short_desc": "Bans a prompted IP address in the Fail2Ban SSH jail.",
+        "detailed_desc": [
+            "Prompts for an IP address to block.",
+            "",
+            "Runs fail2ban-client with sudo to ban that IP in the sshd jail.",
+            "Command used: sudo fail2ban-client set sshd banip <ip>."
+        ]
+    },
+    "f2u": {
+        "name": "f2u",
+        "short_desc": "Unbans a prompted IP address from the Fail2Ban SSH jail.",
+        "detailed_desc": [
+            "Prompts for an IP address to remove from the jail.",
+            "",
+            "Runs fail2ban-client with sudo to unban that IP from the sshd jail.",
+            "Command used: sudo fail2ban-client set sshd unbanip <ip>."
+        ]
+    },
+    "f2j": {
+        "name": "f2j",
+        "short_desc": "Shows recent Fail2Ban logs and the SSH jail status.",
+        "detailed_desc": [
+            "Prints the last three lines from /var/log/fail2ban.log.",
+            "",
+            "Then shows the current Fail2Ban status for the sshd jail.",
+            "Commands used: sudo tail -3 /var/log/fail2ban.log and sudo fail2ban-client status sshd."
+        ]
+    },
     "artilleria": {
         "name": "artilleria",
         "short_desc": "Instala iptables en diferentes distribuciones Linux.",
@@ -330,11 +444,6 @@
             "For nano 5 or newer, it also converts tabs to spaces."
         ]
     },
-    "ccssh": {
-        "name": "ccssh",
-        "short_desc": "Establece conexión SSH con verificación de permisos.",
-        "detailed_desc": "ssh -p <puerto> <usuario>@<ip>"
-    },
     "qemuconsola": {
         "name": "qemuconsola",
         "short_desc": "Habilita y inicia el servicio de consola serial en QEMU.",
@@ -389,16 +498,6 @@
         "name": "firefoxephemeral",
         "short_desc": "Configura Firefox con perfiles efímeros y soporte multilingüe.",
         "detailed_desc": "mkdir -p /tmp/fx-profile\necho \"user_pref('intl.accept_languages', '<lang_code>,en');\nuser_pref('general.useragent.locale', '<lang_code>');\nuser_pref('intl.locale.requested', '<lang_code>');\" > /tmp/fx-profile/user.js"
-    },
-    "s1pinst": {
-        "name": "s1pinst",
-        "short_desc": "Instala Docker y verifica la instalación.",
-        "detailed_desc": "sudo apt-get install -y docker.io\nsudo yum install -y docker\nsudo dnf install -y docker\nsudo pacman -S docker"
-    },
-    "pings": {
-        "name": "pings",
-        "short_desc": "Monitorea el estado de hosts definidos en el archivo de configuración SSH.",
-        "detailed_desc": "ping -c 1 <host>"
     },
     "aaron": {
         "name": "aaron",
@@ -562,6 +661,19 @@
         "short_desc": "Reverse SSH port forwarding over Paramiko.",
         "detailed_desc": "Creates a reverse SSH tunnel using Python and Paramiko. It connects to a remote SSH server and opens a remote port that forwards traffic back to a specified host:port accessible from the local machine. Equivalent to 'ssh -R', useful for exposing local services remotely. Supports password or key authentication and can be automated or integrated into other Python tools."
     },
+    "sss": {
+        "name": "sss",
+        "short_desc": "Shows SSH service status, local IP, current user, and SSH port.",
+        "detailed_desc": [
+            "Prints a compact SSH status panel for the current machine.",
+            "",
+            "Detects the default network interface on macOS or Linux.",
+            "Shows the interface IP address, current username, SSH daemon state, and configured SSH port.",
+            "",
+            "On macOS it uses route and ifconfig.",
+            "On Linux it uses ip route and ip addr."
+        ]
+    },
     "deploy": {
         "name": "deploy",
         "short_desc": "Despliega una máquina vulnerable en Docker desde una imagen .tar.",
@@ -609,6 +721,19 @@
         "name": "fastconf",
         "short_desc": "Configuración de fastfetch para mostrar información del sistema.",
         "detailed_desc": "Pregunta por un mensaje a mostrar y genera un arhcivo .jsonc para fastfetch."
+    },
+    "fastconfmac": {
+        "name": "fastconfmac",
+        "short_desc": "Writes a styled Fastfetch config with a custom message and logo.",
+        "detailed_desc": [
+            "Prompts for a custom message to show at the top of Fastfetch.",
+            "",
+            "Installs fastfetch when missing on Arch or Debian-based systems.",
+            "Writes the config to ~/.config/fastfetch/config.jsonc.",
+            "",
+            "Uses $HOME/Imágenes/logo.png as the logo source.",
+            "The generated layout groups hardware, software, local IP, and color modules."
+        ]
     },
     "portspoofinst": {
         "name": "portspoofinst",
@@ -792,6 +917,17 @@
             "",
             "Includes install helpers for wget downloads, Debian/Ubuntu, macOS Homebrew, Windows, and Docker.",
             "Shows configured 4rji tunnel routes and checks local service ports before reporting status."
+        ]
+    },
+    "axe": {
+        "name": "axe",
+        "short_desc": "Downloads a URL with aria2c by default or axel, using configurable parallel connections.",
+        "detailed_desc": [
+            "Downloads one URL using aria2c by default.",
+            "Use -a to switch to axel.",
+            "Use -n NUM to set the number of parallel connections; default is 8.",
+            "",
+            "It validates that exactly one URL is provided, checks that -n is a positive integer, and verifies the selected downloader exists in PATH before running."
         ]
     }
 }

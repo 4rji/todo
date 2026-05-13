@@ -1,52 +1,153 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Función para imprimir una línea decorativa
+CONFIG="$HOME/.ssh/config"
+
+c_reset=$'\033[0m'
+c_bold=$'\033[1m'
+c_cyan=$'\033[96m'
+c_yellow=$'\033[93m'
+c_green=$'\033[92m'
+c_red=$'\033[91m'
+c_blue=$'\033[94m'
+
 print_separator() {
-    echo ""
-    echo -e "\e[96m\e[1m_________________________________________________________\e[0m"
-    echo ""
+    printf '\n%s%s_________________________________________________________%s\n\n' "$c_cyan" "$c_bold" "$c_reset"
 }
 
-# Función para solicitar al usuario un valor con un color específico
-prompt_with_color() {
-    echo -e "\e["$1"m\e[1m$2\e[0m"
+prompt_color() {
+    printf '%s%s%s%s' "$1" "$c_bold" "$2" "$c_reset"
 }
 
-# Solicitar al usuario los detalles del host
-print_separator
-echo -e "\e[93m\e[1mIngrese los detalles del host:\e[0m"
-prompt_with_color "92" "Nombre del host: "
-read host_name
-prompt_with_color "91" "Hostname o direccion IP del host: "
-read host_address
-prompt_with_color "94" "Nombre de usuario SSH: "
-read user_name
-prompt_with_color "94" "Puerto SSH del host (opcional, dejar vacío para el valor predeterminado 22): "
-read host_port
+usage() {
+    cat <<EOF
+Uso:
+  $(basename "$0")                          # modo interactivo
+  $(basename "$0") user@host                # agrega directo, puerto 22
+  $(basename "$0") user@host:2222           # agrega con puerto custom
+  $(basename "$0") host                     # sin user, puerto 22
+  $(basename "$0") user@host:port nombre    # alias custom (default = host)
 
-# Crear la cadena de configuración del host
-config_line="Host $host_name\n\tHostname $host_address"
-# Agregar el nombre de usuario SSH al host si se proporciona
-if [ -n "$user_name" ]; then
-    config_line="$config_line\n\tUser $user_name"
-fi
-# Agregar el puerto SSH al host si se proporciona
-if [ -n "$host_port" ]; then
-    config_line="$config_line\n\tPort $host_port"
-fi
+Si no se especifica puerto, se usa 22.
+EOF
+    exit "${1:-1}"
+}
 
-# Agregar la cadena de configuración al archivo ~/.ssh/config
-echo -e "$config_line" >> ~/.ssh/config
+ensure_config() {
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    if [[ ! -f "$CONFIG" ]]; then
+        : > "$CONFIG"
+        chmod 600 "$CONFIG"
+    fi
+}
 
-# Mostrar el contenido del archivo creado
-print_separator
-echo -e "\e[93m\e[1mContenido del archivo ~/.ssh/config:\e[0m"
-cat ~/.ssh/config
-print_separator
+append_host() {
+    local name="$1" host="$2" user="$3" port="$4"
+    {
+        printf '\nHost %s\n' "$name"
+        printf '\tHostname %s\n' "$host"
+        [[ -n "$user" ]] && printf '\tUser %s\n' "$user"
+        printf '\tPort %s\n' "$port"
+    } >> "$CONFIG"
+    printf '%s%sAgregado:%s Host=%s Hostname=%s User=%s Port=%s\n' \
+        "$c_green" "$c_bold" "$c_reset" "$name" "$host" "${user:-<ninguno>}" "$port"
+}
 
+parse_target() {
+    local arg="$1"
+    local user="" rest="" host="" port="22"
 
-#Para Jump usando XPS dell
-#Host deb
-#        Hostname 192.168.122.162
-#        User ass
-#        ProxyJump xps  
+    if [[ "$arg" == *"@"* ]]; then
+        user="${arg%%@*}"
+        rest="${arg#*@}"
+    else
+        rest="$arg"
+    fi
+
+    if [[ "$rest" == *":"* ]]; then
+        host="${rest%%:*}"
+        port="${rest##*:}"
+    else
+        host="$rest"
+    fi
+
+    if [[ -z "$host" ]]; then
+        printf '%sError: host vacío.%s\n' "$c_red" "$c_reset" >&2
+        return 1
+    fi
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+        printf '%sError: puerto inválido "%s".%s\n' "$c_red" "$port" "$c_reset" >&2
+        return 1
+    fi
+
+    printf '%s\n%s\n%s\n' "$user" "$host" "$port"
+}
+
+interactive_mode() {
+    print_separator
+    printf '%s%sIngresá los detalles del host:%s\n' "$c_yellow" "$c_bold" "$c_reset"
+
+    prompt_color "$c_green" "Nombre del host (alias): "
+    read -r host_name
+
+    prompt_color "$c_red" "Hostname o IP: "
+    read -r host_address
+
+    prompt_color "$c_blue" "Usuario SSH (opcional): "
+    read -r user_name
+
+    prompt_color "$c_blue" "Puerto SSH (vacío = 22): "
+    read -r host_port
+    [[ -z "$host_port" ]] && host_port=22
+
+    if [[ -z "$host_name" || -z "$host_address" ]]; then
+        printf '%sFaltan datos obligatorios (nombre y hostname).%s\n' "$c_red" "$c_reset" >&2
+        exit 1
+    fi
+    if ! [[ "$host_port" =~ ^[0-9]+$ ]] || (( host_port < 1 || host_port > 65535 )); then
+        printf '%sPuerto inválido.%s\n' "$c_red" "$c_reset" >&2
+        exit 1
+    fi
+
+    append_host "$host_name" "$host_address" "$user_name" "$host_port"
+}
+
+cli_mode() {
+    local target="$1"
+    local name="${2:-}"
+    local parsed user host port
+    parsed="$(parse_target "$target")" || exit 1
+    user="$(printf '%s' "$parsed" | sed -n '1p')"
+    host="$(printf '%s' "$parsed" | sed -n '2p')"
+    port="$(printf '%s' "$parsed" | sed -n '3p')"
+    [[ -z "$name" ]] && name="$host"
+    append_host "$name" "$host" "$user" "$port"
+}
+
+main() {
+    case "${1:-}" in
+        -h|--help) usage 0 ;;
+    esac
+
+    ensure_config
+
+    if [[ $# -ge 1 ]]; then
+        cli_mode "$@"
+    else
+        interactive_mode
+    fi
+
+    print_separator
+    printf '%s%sContenido de %s:%s\n' "$c_yellow" "$c_bold" "$CONFIG" "$c_reset"
+    cat "$CONFIG"
+    print_separator
+}
+
+main "$@"
+
+# Ejemplo Jump:
+# Host deb
+#         Hostname 192.168.122.162
+#         User ass
+#         ProxyJump xps

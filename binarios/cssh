@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -u
+
 # Define colors
 COLOR_RESET="\033[0m"
 COLOR_LINE="\033[1;37m"      # Bright white for separator lines
@@ -15,22 +17,27 @@ echo -e "\n\033[1;31m_________________________________________________________\0
 echo -e "\n${COLOR_INFO}Verifying SSH key permissions...${COLOR_RESET}\n"
 
 # Check if the user@IP argument was provided
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo -e "${COLOR_WARNING}Error: You must provide the user@IP argument${COLOR_RESET}"
-  #  exit 1
-fi
-
-# Check if the ssh_port argument was provided
-if [ -z "$2" ]; then
-    echo -e "${COLOR_WARNING}Error: You must provide the ssh_port argument${COLOR_RESET}"
-   # exit 1
+    echo -e "${COLOR_INFO}Usage: $(basename "$0") user@host [port]${COLOR_RESET}"
+    exit 1
 fi
 
 # Get the user@IP from the argument
 client="$1"
 
-# Get the SSH port from the second argument
-ssh_port="$2"
+# Get the SSH port from the second argument (default 22)
+ssh_port="${2:-22}"
+
+# Portable permission read: BSD stat (macOS) vs GNU stat (Linux)
+get_perm() {
+    local file="$1"
+    if stat -f "%Lp" "$file" >/dev/null 2>&1; then
+        stat -f "%Lp" "$file"
+    else
+        stat -c "%a" "$file"
+    fi
+}
 
 # Function to check permissions of a given file
 check_permissions() {
@@ -40,12 +47,12 @@ check_permissions() {
 
     if [ -f "$file" ]; then
         echo -e "\n${COLOR_INFO}Verifying permissions for $description:${COLOR_RESET}"
-        perm=$(stat -c "%a" "$file")
-        echo -e "${COLOR_COMMAND}stat -c \"%a\" $file${COLOR_RESET}"
-        
+        perm=$(get_perm "$file")
+        echo -e "${COLOR_COMMAND}stat (perm) $file -> $perm${COLOR_RESET}"
+
         if [ "$perm" != "$expected_perm" ]; then
             echo -e "${COLOR_WARNING}Warning: Incorrect permissions on $description ($perm).${COLOR_RESET}"
-            
+
             echo ""
             echo -e "${COLOR_INFO}To fix the permissions, run the following command:${COLOR_RESET}"
             echo -e "${COLOR_COMMAND}chmod $expected_perm $file${COLOR_RESET}"
@@ -54,7 +61,6 @@ check_permissions() {
         fi
     else
         echo -e "${COLOR_WARNING}Error: $description not found at $file${COLOR_RESET}"
-        #exit 1
     fi
 }
 
@@ -84,11 +90,15 @@ echo ""
 
 echo -e "\n${COLOR_LINE}_________________________________________________________${COLOR_RESET}\n"
 
-# Generate the new SSH key
-echo -e "${COLOR_INFO}To generate the SSH key, run:${COLOR_RESET}"
-echo -e "${COLOR_COMMAND}ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519${COLOR_RESET}"
-echo ""
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+# Generate the SSH key only if it does not already exist
+if [ ! -f "$private_key" ]; then
+    echo -e "${COLOR_INFO}No SSH key found. Generating one:${COLOR_RESET}"
+    echo -e "${COLOR_COMMAND}ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519${COLOR_RESET}"
+    echo ""
+    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+else
+    echo -e "${COLOR_SUCCESS}SSH key already exists at $private_key, skipping generation.${COLOR_RESET}"
+fi
 
 echo -e "\n${COLOR_LINE}_________________________________________________________${COLOR_RESET}\n"
 

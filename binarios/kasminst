@@ -8,7 +8,31 @@ KASM_HASH="7f020d"
 KASM_TARBALL="kasm_release_${KASM_VERSION}.${KASM_HASH}.tar.gz"
 KASM_URL="https://kasm-static-content.s3.amazonaws.com/${KASM_TARBALL}"
 KASM_SHA256="22a293ea52b2adb7f3f72a2de8e9be799f443b9da040e066df403478da77f62d"
+
+# Versión simple (sin Docker preinstall, sin swap, sin SHA256 check).
+KASM_SIMPLE_VERSION="1.18.1"
+KASM_SIMPLE_TARBALL="kasm_release_${KASM_SIMPLE_VERSION}.tar.gz"
+KASM_SIMPLE_URL="https://kasm-static-content.s3.amazonaws.com/${KASM_SIMPLE_TARBALL}"
 # ============================================================================
+
+# ==== Modo simple vs completo ==============================================
+echo "¿Ejecutar versión simple? (sólo descarga + install.sh, sin Docker preinstall ni swap)"
+echo "  1) Sí — versión simple (Kasm ${KASM_SIMPLE_VERSION})"
+echo "  2) No — versión completa (Docker + swap + SHA256, Kasm ${KASM_VERSION})"
+read -rp "Opción [1/2]: " modo
+
+if [ "$modo" = "1" ]; then
+    cd /tmp
+    curl -O "$KASM_SIMPLE_URL"
+    tar -xf "$KASM_SIMPLE_TARBALL"
+    sudo bash kasm_release/install.sh
+    exit 0
+fi
+
+if [ "$modo" != "2" ]; then
+    echo "Error: opción inválida '$modo'." >&2
+    exit 1
+fi
 
 # Paquetes base: Docker Engine + Compose V2 (V1 está EOL desde junio 2023).
 paquetes_apt=("docker.io" "docker-compose")

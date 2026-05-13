@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_URL="https://github.com/aircrack-ng/rtl8812au.git"
+REPO_DIR="${RTL8812AU_DIR:-$PWD/rtl8812au}"
+RUN_UPGRADE=0
+
+msg() { printf '\n[+] %s\n' "$1"; }
+warn() { printf '\n[!] %s\n' "$1"; }
+die() {
+  printf '\n[-] %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'USAGE'
+Uso: alfainst [--upgrade]
+
+Instala o actualiza el driver rtl8812au con DKMS para adaptadores Alfa.
+
+Opciones:
+  --upgrade   Ejecuta sudo apt upgrade -y antes de instalar dependencias.
+
+Variables:
+  RTL8812AU_DIR=/ruta/rtl8812au   Directorio local del repositorio.
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --upgrade)
+      RUN_UPGRADE=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      die "Opcion no reconocida: $1"
+      ;;
+  esac
+  shift
+done
+
+[[ "$(uname -s)" == "Linux" ]] || die "Este instalador solo soporta Linux."
+command -v sudo >/dev/null 2>&1 || die "sudo no esta disponible."
+command -v apt >/dev/null 2>&1 || die "apt no esta disponible. Usa Debian, Ubuntu o Kali."
+
+msg "Actualizando indice de paquetes"
+sudo apt update
+
+if [[ "$RUN_UPGRADE" -eq 1 ]]; then
+  msg "Actualizando paquetes del sistema"
+  sudo apt upgrade -y
+else
+  warn "Omitiendo apt upgrade. Usa --upgrade si quieres actualizar el sistema."
+fi
+
+msg "Instalando dependencias"
+sudo apt install -y \
+  bc \
+  build-essential \
+  dkms \
+  git \
+  "linux-headers-$(uname -r)"
+
+if [[ -d "$REPO_DIR/.git" ]]; then
+  msg "Actualizando repositorio existente: $REPO_DIR"
+  git -C "$REPO_DIR" pull --ff-only
+elif [[ -e "$REPO_DIR" ]]; then
+  die "Ya existe $REPO_DIR, pero no parece ser un repositorio git."
+else
+  msg "Clonando rtl8812au en $REPO_DIR"
+  git clone "$REPO_URL" "$REPO_DIR"
+fi
+
+msg "Instalando driver con DKMS"
+sudo make -C "$REPO_DIR" dkms_install
+
+if command -v modprobe >/dev/null 2>&1; then
+  msg "Cargando modulo 88XXau"
+  sudo modprobe 88XXau || warn "No se pudo cargar 88XXau. Reinicia o revisa Secure Boot si el modulo no carga."
+fi
+
+msg "Listo. Revisa el adaptador con: ip link"

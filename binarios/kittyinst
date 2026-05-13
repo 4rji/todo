@@ -1,105 +1,95 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Lista de paquetes a instalar
-paquetes=("kitty" )
-
-# Función para verificar si un paquete está instalado (Debian/Ubuntu/Kali)
-paquete_instalado_apt() {  
-    dpkg -l "$1" | grep -q '^ii'   2>/dev/null
-}
-
-# Función para verificar si un paquete está instalado (CentOS/RHEL)
-paquete_instalado_yum() {
-    yum list installed "$1" 2> /dev/null
-}
-
-# Función para verificar si un paquete está instalado (Fedora)
-paquete_instalado_dnf() {
-    dnf list installed "$1" 2> /dev/null
-}
-
-# Función para verificar si un paquete está instalado (Arch Linux)
-paquete_instalado_pacman() {
-    pacman -Qi "$1" 2> /dev/null
-}
-
-# Detectar el sistema operativo
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-fi
-
-# Instalar paquetes basados en el sistema operativo
-for paquete in "${paquetes[@]}"; do
-    case $OS in
-        "debian"|"ubuntu"|"kali")
-            if ! paquete_instalado_apt "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo apt-get install -y "$paquete"  2>/dev/null
-            fi
-            ;;
-        "centos"|"rhel")
-            if ! paquete_instalado_yum "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo yum install -y "$paquete" 2>/dev/null
-            fi
-            ;;
-        "fedora")
-            if ! paquete_instalado_dnf "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo dnf install -y "$paquete" 2>/dev/null
-            fi
-            ;;
-        "arch")
-            if ! paquete_instalado_pacman "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo pacman -S --noconfirm "$paquete" 2>/dev/null
-            fi
-            ;;
-        *)
-            ;;
-    esac
-done
-
-
-
-
-# Colores
 green='\033[0;32m'
 yellow='\033[0;33m'
 red='\033[0;31m'
 nocolor='\033[0m'
 
-# Directorio de kitty
+msg() { printf '%b%s%b\n' "$green" "$1" "$nocolor"; }
+info() { printf '%b%s%b\n' "$yellow" "$1" "$nocolor"; }
+die() {
+  printf '%b%s%b\n' "$red" "$1" "$nocolor" >&2
+  exit 1
+}
+
+kitty_instalado() {
+  command -v kitty >/dev/null 2>&1 ||
+    [[ -d /Applications/kitty.app ]] ||
+    [[ -d "$HOME/Applications/kitty.app" ]]
+}
+
+instalar_kitty() {
+  if kitty_instalado; then
+    msg "kitty ya está instalado"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      command -v brew >/dev/null 2>&1 || die "Homebrew no está instalado. Instalá brew y vuelve a correr kittyinst."
+      info "Instalando kitty en macOS con Homebrew..."
+      brew install --cask kitty
+      ;;
+    Linux)
+      if command -v apt-get >/dev/null 2>&1; then
+        info "Instalando kitty con apt..."
+        sudo apt-get update
+        sudo apt-get install -y kitty
+      elif command -v pacman >/dev/null 2>&1; then
+        info "Instalando kitty con pacman..."
+        sudo pacman -S --noconfirm kitty
+      elif command -v dnf >/dev/null 2>&1; then
+        info "Instalando kitty con dnf..."
+        sudo dnf install -y kitty
+      elif command -v yum >/dev/null 2>&1; then
+        info "Instalando kitty con yum..."
+        sudo yum install -y kitty
+      else
+        die "Linux no soportado. Necesito apt, pacman, dnf o yum."
+      fi
+      ;;
+    *)
+      die "Sistema no soportado: $(uname -s)"
+      ;;
+  esac
+}
+
+descargar() {
+  local url="$1"
+  local destino="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$destino"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$destino" "$url"
+  else
+    die "Necesito curl o wget para descargar la configuración."
+  fi
+}
+
+instalar_kitty
+
 kitty_dir="$HOME/.config/kitty"
 mkdir -p "$kitty_dir"
-echo -e "${green}Directorio de kitty listo:${nocolor} $kitty_dir"
+msg "Directorio de kitty listo: $kitty_dir"
 
-# Archivos a descargar
-declare -A files=(
-  ["kitty.conf"]="https://raw.githubusercontent.com/4rji/dotfiles/main/kitty/kitty.conf"
-  ["color.ini"]="https://raw.githubusercontent.com/4rji/dotfiles/main/kitty/color.ini"
-  ["aura-theme.conf"]="https://raw.githubusercontent.com/4rji/dotfiles/refs/heads/main/kitty/aura-theme.conf"
-)
+while IFS='|' read -r file url; do
+  [[ -n "$file" ]] || continue
 
-# Descargar archivos
-for file in "${!files[@]}"; do
   path="$kitty_dir/$file"
-  wget -q -O "$path" "${files[$file]}"
-  if [ $? -eq 0 ]; then
-    echo -e "${yellow}Archivo actualizado:${nocolor} $path"
+  if descargar "$url" "$path"; then
+    info "Archivo actualizado: $path"
   else
-    echo -e "${red}Error al descargar:${nocolor} $file"
+    die "Error al descargar: $file"
   fi
-done
+done <<'EOF'
+kitty.conf|https://raw.githubusercontent.com/4rji/dotfiles/main/kitty/kitty.conf
+color.ini|https://raw.githubusercontent.com/4rji/dotfiles/main/kitty/color.ini
+aura-theme.conf|https://raw.githubusercontent.com/4rji/dotfiles/refs/heads/main/kitty/aura-theme.conf
+EOF
 
+msg "Instalación exitosa."
 
-
-# Mensaje de instalación exitosa
-echo -e "${green}Instalación exitosa.${nocolor}"
-
-echo -e "\n\033[1;37m_________________________________________________________\033[0m\n"
+printf '\n\033[1;37m_________________________________________________________\033[0m\n\n'
 echo "Para editar el tema kitten theme"
-echo ""
-
-

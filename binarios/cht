@@ -1,9 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-if [ $# -eq 0 ]; then
-    echo "Uso: $0 archivo"
+usage() {
+    echo "Uso: $0 [-i] archivo"
+    echo "  Sin flags: marca archivo como inmutable en /opt/4rji/bin"
+    echo "  -i       : quita inmutabilidad"
+    echo "Detecta OS: Linux usa chattr, macOS usa chflags."
     exit 1
-fi
+}
+
+remove=false
+
+while getopts ":i" opt; do
+    case $opt in
+        i) remove=true ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+[ $# -eq 0 ] && usage
 
 archivo="/opt/4rji/bin/$1"
 
@@ -12,4 +27,16 @@ if [ ! -e "$archivo" ]; then
     exit 1
 fi
 
-sudo chattr +i "$archivo"
+if [[ "$(uname)" == "Darwin" ]]; then
+    if $remove; then
+        sudo chflags nouchg "$archivo"
+    else
+        sudo chflags uchg "$archivo"
+    fi
+else
+    if $remove; then
+        sudo chattr -i "$archivo"
+    else
+        sudo chattr +i "$archivo"
+    fi
+fi

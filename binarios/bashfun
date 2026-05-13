@@ -29,31 +29,64 @@ nv() {
   nix-shell -p neovim --run "nvim $1"
 }
 
-#para mac
-function mktemm() {
-    ramdisk_path="/Volumes/RAMDisk"
+mktem() {
+    case "$(uname -s)" in
+        Darwin)
+            ramdisk_path="/Volumes/RAMDisk"
 
-    # Crear RAM disk si no existe
-    if [ ! -d "$ramdisk_path" ]; then
-        echo "Montando RAMDisk..."
-        diskutil erasevolume HFS+ RAMDisk $(hdiutil attach -nomount ram://$((4 * 1024 * 1024 * 1024 / 512))) >/dev/null
-    fi
+            if [ ! -d "$ramdisk_path" ]; then
+                echo "Montando RAMDisk..."
+
+                # Tamaño en MB
+                size_mb=1024
+
+                # hdiutil usa bloques de 512 bytes
+                sectors=$((size_mb * 1024 * 1024 / 512))
+
+                dev=$(hdiutil attach -nomount "ram://$sectors" | tr -d '[:space:]')
+
+                if [ -z "$dev" ]; then
+                    echo "Error: no se pudo crear el dispositivo RAMDisk" >&2
+                    return 1
+                fi
+
+                echo "Dispositivo creado: $dev"
+
+                diskutil eraseVolume APFS RAMDisk "$dev" >/dev/null
+
+                if [ ! -d "$ramdisk_path" ]; then
+                    echo "Error: RAMDisk no se montó en $ramdisk_path" >&2
+                    return 1
+                fi
+            fi
+
+            base="$ramdisk_path"
+            ;;
+
+        Linux)
+            base="/dev/shm"
+            ;;
+
+        *)
+            echo "Sistema no soportado: $(uname -s)" >&2
+            return 1
+            ;;
+    esac
 
     if [ -n "$1" ]; then
-        new_dir=$(mktemp -d "$ramdisk_path/tmp.$1.XXXXXX")
+        new_dir=$(mktemp -d "$base/tmp.$1.XXXXXX")
     else
-        new_dir=$(mktemp -d "$ramdisk_path/tmp.XXXXXX")
+        new_dir=$(mktemp -d "$base/tmp.XXXXXX")
+    fi
+
+    if [ ! -d "$new_dir" ]; then
+        echo "Error: no se pudo crear el directorio temporal" >&2
+        return 1
     fi
 
     echo "Directorio creado en: $new_dir"
-    cd "$new_dir" || return
+    cd "$new_dir" || return 1
     echo "Cambiado al directorio: $PWD"
-}
-
-
-#para copiar lo que tengo en el portapapeles a un archivo por ssh
-cpl() {
-  pbpaste | ssh -J xps-arch natasha@192.168.122.10 "cat >> $1"
 }
     
 
@@ -112,29 +145,18 @@ todo_todo() {
 zle -N todo_todo 
 bindkey '^T' todo_todo
 
-
-
-function mktem() {
-    if [ -n "$1" ]; then
-        new_dir=$(mktemp -d /dev/shm/tmp."$1".XXXXXX)
-    else
-        new_dir=$(mktemp -d /dev/shm/tmp.XXXXXX)
-    fi
-    echo "Directorio creado en: $new_dir"
-    cd "$new_dir" || return
-    echo "Cambiado al directorio: $PWD"
+#mann
+mann_mann() {
+        if [[ -n "$BUFFER" ]]; then
+                zle accept-line
+                return
+        fi
+        /opt/4rji/bin/mann </dev/tty >/dev/tty 2>&1
 }
+zle -N mann_mann
+bindkey '^[m' mann_mann
 
-function mktem2() {
-    if [ -n "$1" ]; then
-        new_dir=$(mktemp -d /tmp/tmp."$1".XXXXXX)
-    else
-        new_dir=$(mktemp -d /tmp/tmp.XXXXXX)
-    fi
-    echo "Directorio creado en: $new_dir"
-    cd "$new_dir" || return
-    echo "Cambiado al directorio: $PWD"
-}
+
 
 function __fzf_history_search() {
   local selected

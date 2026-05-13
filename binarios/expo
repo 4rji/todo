@@ -1,54 +1,72 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Function to print in color
 print_color() {
-    local color_code=$1
-    shift
-    echo -e "\e[1;${color_code}m$@\e[0m"
+    local code=$1; shift
+    printf '\e[1;%sm%s\e[0m\n' "$code" "$*"
 }
 
-# Function to ping an IP
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") <ip|host> [-u]
+  -u    Tambien escanea UDP top-100 puertos despues del TCP (lento, requiere root)
+EOF
+    exit 1
+}
+
 ping_ip() {
     local ip=$1
-    echo ""
+    echo
     print_color 36 "Pinging IP: $ip"
-    echo ""
-    ping -c 1 "$ip"
+    echo
+    ping -c 1 -W 2 "$ip" || print_color 33 "Ping fallo, continuo igual"
 }
 
-# Function to determine the operating system
 determine_os() {
-    local ip=$1
-    local os_type
-    os_type=$(timeout 1s whichsys "$ip")  # Assign the output of whichsys to the variable
-    echo -e "\n\033[1;37m_________________________________________________________\033[0m\n"
-
+    local ip=$1 os_type
+    os_type=$(timeout 5s whichsys "$ip" 2>/dev/null || echo "unknown")
+    printf '\n\033[1;37m_________________________________________________________\033[0m\n\n'
     print_color 31 "$os_type"
-    echo -e "\n\033[1;37m_________________________________________________________\033[0m\n"
-
-    echo "$os_type" > OS-type  # Save the output to the OS-type file
+    printf '\n\033[1;37m_________________________________________________________\033[0m\n\n'
+    printf '%s\n' "$os_type" > OS-type
 }
 
-# Check if an argument was provided
-if [ $# -eq 0 ]; then
-    echo "Please provide an argument for the script."
-    exit 1
+udp_scan() {
+    local ip=$1
+    printf '\n\033[1;37m_________________________________________________________\033[0m\n\n'
+    print_color 35 "UDP top-100 scan (lento, paciencia)..."
+    echo
+    sudo nmap -sU --top-ports 100 --open -v -n "$ip" -oG allPortsUDP
+}
+
+udp=0
+ip=""
+for arg in "$@"; do
+    case "$arg" in
+        -u)        udp=1 ;;
+        -h|--help) usage ;;
+        -*)        print_color 31 "Flag desconocido: $arg"; usage ;;
+        *)         ip=$arg ;;
+    esac
+done
+
+[[ -z "$ip" ]] && usage
+[[ "$ip" =~ ^[A-Za-z0-9.:-]+$ ]] || { print_color 31 "IP/host invalido"; exit 1; }
+
+if (( udp == 0 )); then
+    print_color 33 "[tip] Existe flag -u para incluir scan UDP top-100. Ej: $(basename "$0") $ip -u"
 fi
 
-# Assign the argument to a variable
-ip="$1"
-
-# Call the functions
 ping_ip "$ip"
 determine_os "$ip"
 
-# After pinging and determining the operating system, execute expo1 and expo2
-expo1 "$ip"
-
-# Check if expo1 executed successfully
-if [ $? -ne 0 ]; then
-    echo "The script expo1 did not execute successfully. Exiting the script."
+if ! expo1 "$ip"; then
+    print_color 31 "expo1 fallo. Aborto."
     exit 1
 fi
 
 expo2
+
+if (( udp )); then
+    udp_scan "$ip"
+fi
