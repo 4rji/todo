@@ -23,6 +23,7 @@ fi
 usage() {
   printf "%sUsage:%s\n" "$C_BOLD$C_BLUE" "$C_RESET"
   printf "  ./wifiAP -AP <ap_interface> [-i <internet_interface>] [-s <ssid>] [-c <channel>] [-C <country>] [-2]\n\n"
+  printf "  ./wifiAP -k [-AP <ap_interface>]\n\n"
 
   printf "%sRecommended for Internet sharing:%s\n" "$C_BOLD$C_GREEN" "$C_RESET"
   printf "  sudo ./wifiAP -AP wlan0 -i wlan1\n\n"
@@ -34,6 +35,8 @@ usage() {
   printf "  ./wifiAP -AP wlan0 -i wlan1 -2                 %s# legacy 2.4GHz only (max compat)%s\n" "$C_CYAN" "$C_RESET"
   printf "  ./wifiAP -AP wlan0 -i wlan1 -C AR              %s# set country code%s\n" "$C_CYAN" "$C_RESET"
   printf "  ./wifiAP -AP wlan0 -i wlan1 -p 12341234        %s# create network with WPA2 password%s\n\n" "$C_CYAN" "$C_RESET"
+  printf "  sudo ./wifiAP -k -AP wlan0                     %s# stop the AP created on wlan0%s\n" "$C_CYAN" "$C_RESET"
+  printf "  sudo ./wifiAP -k                               %s# stop all APs created by wifiAP%s\n\n" "$C_CYAN" "$C_RESET"
 
   printf "%sArguments:%s\n" "$C_BOLD$C_BLUE" "$C_RESET"
   printf "  -AP Wireless interface that will become the Access Point.\n"
@@ -44,6 +47,7 @@ usage() {
   printf "  -p  WPA2-PSK password (8-63 chars). If omitted, AP is open.\n"
   printf "  -2  Force legacy 2.4GHz mode (802.11g only, no 802.11n).\n"
   printf "      Use for very old/picky devices (some IoT, old Hak5 gear).\n\n"
+  printf "  -k  Kill/clean wifiAP-created APs. With -AP, stops that interface only.\n\n"
 
   printf "%sNotes:%s\n" "$C_BOLD$C_YELLOW" "$C_RESET"
   printf "  - Creates an open Access Point with no password.\n"
@@ -53,6 +57,7 @@ usage() {
   printf "  - Only the AP interface is reconfigured.\n"
   printf "  - Your Internet connection stays up as long as it uses a different interface.\n"
   printf "  - Requires hostapd and dnsmasq. Internet sharing also requires iptables.\n"
+  printf "  - Use -k to stop an AP started by this script from another terminal.\n"
 }
 
 if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
@@ -87,6 +92,11 @@ AP_CIDR="24"
 AP_SUBNET="10.55.0.0/24"
 DHCP_START="10.55.0.10"
 DHCP_END="10.55.0.100"
+KILL_MODE=0
+STATE_DIR="/run/wifiAP"
+STATE_FILE=""
+CONTROLLER_PID="$$"
+CONTROLLER_STARTTIME=""
 HOSTAPD_CONF=""
 DNSMASQ_CONF=""
 HOSTAPD_PID=""
@@ -159,6 +169,10 @@ while [[ $# -gt 0 ]]; do
       LEGACY_MODE=1
       shift
       ;;
+    -k)
+      KILL_MODE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -171,63 +185,106 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$AP_IFACE" ]]; then
-  echo "AP interface is required." >&2
-  usage
-  exit 1
-fi
+state_file_for_iface() {
+  local iface="$1"
+  printf '%s/%s.state' "$STATE_DIR" "$iface"
+}
 
-if [[ -n "$PASSWORD" ]]; then
-  if (( ${#PASSWORD} < 8 || ${#PASSWORD} > 63 )); then
-    echo "Password must be between 8 and 63 characters." >&2
+validate_state_iface() {
+  local iface="$1"
+
+  if [[ -z "$iface" ]]; then
+    echo "AP interface is required." >&2
     exit 1
   fi
-fi
 
-HOSTAPD_CONF="$(mktemp /tmp/hostapd-${AP_IFACE}-XXXX.conf)"
+  if [[ "$iface" == */* ]]; then
+    echo "Interface name cannot contain '/'." >&2
+    exit 1
+  fi
+}
 
-cleanup() {
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR"
+  chmod 700 "$STATE_DIR"
+}
+
+process_starttime() {
+  local pid="$1"
+  awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true
+}
+
+pid_cmdline() {
+  local pid="$1"
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
+tracked_controller_running() {
+  [[ -n "$CONTROLLER_PID" ]] || return 1
+  [[ -n "$CONTROLLER_STARTTIME" ]] || return 1
+  kill -0 "$CONTROLLER_PID" 2>/dev/null || return 1
+
+  [[ "$(process_starttime "$CONTROLLER_PID")" == "$CONTROLLER_STARTTIME" ]]
+}
+
+stop_tracked_child() {
+  local pid="$1"
+  local process_name="$2"
+  local expected_conf="${3:-}"
+  local cmdline
+
+  [[ -n "$pid" ]] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    cmdline="$(pid_cmdline "$pid")"
+    [[ "$cmdline" == *"$process_name"* ]] || return 0
+    if [[ -n "$expected_conf" && "$cmdline" != *"$expected_conf"* ]]; then
+      return 0
+    fi
+  fi
+
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+cleanup_resources() {
   set +e
 
-  if [[ -n "$HOSTAPD_PID" ]]; then
-    kill "$HOSTAPD_PID" 2>/dev/null || true
-    wait "$HOSTAPD_PID" 2>/dev/null || true
-  fi
+  stop_tracked_child "$HOSTAPD_PID" hostapd "$HOSTAPD_CONF"
+  stop_tracked_child "$DNSMASQ_PID" dnsmasq "$DNSMASQ_CONF"
 
-  if [[ -n "$DNSMASQ_PID" ]]; then
-    kill "$DNSMASQ_PID" 2>/dev/null || true
-    wait "$DNSMASQ_PID" 2>/dev/null || true
-  fi
-
-  if [[ $IPTABLES_NAT_ADDED -eq 1 ]]; then
+  if [[ $IPTABLES_NAT_ADDED -eq 1 && -n "$WAN_IFACE" ]] && command -v iptables >/dev/null 2>&1; then
     iptables -t nat -D POSTROUTING -s "$AP_SUBNET" -o "$WAN_IFACE" -j MASQUERADE 2>/dev/null || true
   fi
 
-  if [[ $IPTABLES_FWD1_ADDED -eq 1 ]]; then
+  if [[ $IPTABLES_FWD1_ADDED -eq 1 && -n "$WAN_IFACE" && -n "$AP_IFACE" ]] && command -v iptables >/dev/null 2>&1; then
     iptables -D FORWARD -i "$WAN_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
   fi
 
-  if [[ $IPTABLES_FWD2_ADDED -eq 1 ]]; then
+  if [[ $IPTABLES_FWD2_ADDED -eq 1 && -n "$AP_IFACE" && -n "$WAN_IFACE" ]] && command -v iptables >/dev/null 2>&1; then
     iptables -D FORWARD -i "$AP_IFACE" -o "$WAN_IFACE" -j ACCEPT 2>/dev/null || true
   fi
 
-  if [[ $IPTABLES_MSS_ADDED -eq 1 ]]; then
+  if [[ $IPTABLES_MSS_ADDED -eq 1 && -n "$WAN_IFACE" ]] && command -v iptables >/dev/null 2>&1; then
     iptables -t mangle -D FORWARD -o "$WAN_IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
   fi
 
-  if [[ -n "$IP_FORWARD_OLD" ]]; then
+  if [[ -n "$IP_FORWARD_OLD" ]] && command -v sysctl >/dev/null 2>&1; then
     sysctl -w "net.ipv4.ip_forward=$IP_FORWARD_OLD" >/dev/null 2>&1 || true
   fi
 
-  ip link set "$AP_IFACE" down >/dev/null 2>&1 || true
-  ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$AP_IFACE" >/dev/null 2>&1 || true
+  if [[ -n "$AP_IFACE" ]] && command -v ip >/dev/null 2>&1; then
+    ip link set "$AP_IFACE" down >/dev/null 2>&1 || true
+    ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$AP_IFACE" >/dev/null 2>&1 || true
 
-  if command -v iw >/dev/null 2>&1; then
-    iw dev "$AP_IFACE" set type managed >/dev/null 2>&1 || true
+    if command -v iw >/dev/null 2>&1; then
+      iw dev "$AP_IFACE" set type managed >/dev/null 2>&1 || true
+    fi
+    ip link set "$AP_IFACE" up >/dev/null 2>&1 || true
   fi
-  ip link set "$AP_IFACE" up >/dev/null 2>&1 || true
 
-  if [[ $NM_MANAGED_CHANGED -eq 1 ]] && command -v nmcli >/dev/null 2>&1; then
+  if [[ $NM_MANAGED_CHANGED -eq 1 && -n "$AP_IFACE" ]] && command -v nmcli >/dev/null 2>&1; then
     nmcli device set "$AP_IFACE" managed yes >/dev/null 2>&1 || true
     for _ in 1 2 3 4 5; do
       state="$(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$AP_IFACE" '$1==d{print $2}')"
@@ -245,8 +302,309 @@ cleanup() {
 
   rm -f "$HOSTAPD_CONF"
   rm -f "$DNSMASQ_CONF"
+  [[ -n "$STATE_FILE" ]] && rm -f "$STATE_FILE"
 }
-trap cleanup EXIT INT TERM
+
+cleanup() {
+  cleanup_resources
+}
+
+load_state_file() {
+  local state_file="$1"
+
+  if [[ ! -f "$state_file" ]]; then
+    return 1
+  fi
+
+  if [[ ! -O "$state_file" ]]; then
+    echo "Skipping unsafe state file not owned by current user: $state_file" >&2
+    return 1
+  fi
+
+  AP_IFACE=""
+  WAN_IFACE=""
+  AP_ADDR="10.55.0.1"
+  AP_CIDR="24"
+  AP_SUBNET="10.55.0.0/24"
+  HOSTAPD_CONF=""
+  DNSMASQ_CONF=""
+  HOSTAPD_PID=""
+  DNSMASQ_PID=""
+  NM_MANAGED_CHANGED=0
+  NM_PREV_CONN=""
+  IP_FORWARD_OLD=""
+  IPTABLES_NAT_ADDED=0
+  IPTABLES_FWD1_ADDED=0
+  IPTABLES_FWD2_ADDED=0
+  IPTABLES_MSS_ADDED=0
+  CONTROLLER_PID=""
+  CONTROLLER_STARTTIME=""
+
+  # shellcheck source=/dev/null
+  source "$state_file"
+  STATE_FILE="$state_file"
+}
+
+stop_state_file() {
+  local state_file="$1"
+  local stopped=0
+
+  if ! load_state_file "$state_file"; then
+    return 1
+  fi
+
+  if tracked_controller_running; then
+    echo "Stopping tracked wifiAP controller for ${AP_IFACE:-unknown}..."
+    kill "$CONTROLLER_PID" 2>/dev/null || true
+
+    for _ in {1..40}; do
+      [[ ! -e "$state_file" ]] && stopped=1 && break
+      tracked_controller_running || break
+      sleep 0.25
+    done
+
+    if [[ $stopped -eq 1 || ! -e "$state_file" ]]; then
+      echo "Stopped AP on ${AP_IFACE:-unknown}."
+      return 0
+    fi
+
+    load_state_file "$state_file" || true
+  fi
+
+  echo "Cleaning tracked AP resources for ${AP_IFACE:-unknown}..."
+  cleanup_resources
+  echo "Stopped AP on ${AP_IFACE:-unknown}."
+}
+
+stop_untracked_child_by_conf_prefix() {
+  local process_name="$1"
+  local conf_prefix="$2"
+  local proc
+  local pid
+  local cmdline
+  local matched=1
+
+  for proc in /proc/[0-9]*; do
+    [[ -d "$proc" ]] || continue
+    pid="${proc##*/}"
+    cmdline="$(pid_cmdline "$pid")"
+    [[ "$cmdline" == *"$process_name"* && "$cmdline" == *"$conf_prefix"* ]] || continue
+    kill "$pid" 2>/dev/null || true
+    matched=0
+  done
+
+  return "$matched"
+}
+
+UNTRACKED_IFACES=()
+
+add_untracked_iface() {
+  local iface="$1"
+  local existing
+
+  [[ -n "$iface" ]] || return 0
+  [[ "$iface" == */* ]] && return 0
+
+  for existing in "${UNTRACKED_IFACES[@]}"; do
+    [[ "$existing" == "$iface" ]] && return 0
+  done
+
+  UNTRACKED_IFACES+=("$iface")
+}
+
+collect_untracked_ifaces() {
+  local proc
+  local pid
+  local cmdline
+  local file
+  local base
+  local iface
+  local nullglob_was_set=0
+
+  UNTRACKED_IFACES=()
+
+  for proc in /proc/[0-9]*; do
+    [[ -d "$proc" ]] || continue
+    pid="${proc##*/}"
+    cmdline="$(pid_cmdline "$pid")"
+
+    if [[ "$cmdline" =~ /tmp/hostapd-([^[:space:]/]+)-[A-Za-z0-9]+\.conf ]]; then
+      add_untracked_iface "${BASH_REMATCH[1]}"
+    fi
+
+    if [[ "$cmdline" =~ /tmp/dnsmasq-([^[:space:]/]+)-[A-Za-z0-9]+\.conf ]]; then
+      add_untracked_iface "${BASH_REMATCH[1]}"
+    fi
+  done
+
+  shopt -q nullglob && nullglob_was_set=1
+  shopt -s nullglob
+  for file in /tmp/hostapd-*.conf /tmp/dnsmasq-*.conf; do
+    base="${file##*/}"
+    iface="${base#hostapd-}"
+    iface="${iface#dnsmasq-}"
+    iface="${iface%-*.conf}"
+    add_untracked_iface "$iface"
+  done
+  [[ $nullglob_was_set -eq 0 ]] && shopt -u nullglob
+}
+
+stop_untracked_iface() {
+  local iface="$1"
+  local report_missing="${2:-1}"
+  local killed=0
+
+  if stop_untracked_child_by_conf_prefix hostapd "/tmp/hostapd-${iface}-"; then
+    killed=1
+  fi
+
+  if stop_untracked_child_by_conf_prefix dnsmasq "/tmp/dnsmasq-${iface}-"; then
+    killed=1
+  fi
+
+  if [[ $killed -eq 0 ]]; then
+    if [[ "$report_missing" -eq 1 ]]; then
+      echo "No wifiAP-created AP found for $iface."
+    fi
+    return 1
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip link set "$iface" down >/dev/null 2>&1 || true
+    ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$iface" >/dev/null 2>&1 || true
+
+    if command -v iw >/dev/null 2>&1; then
+      iw dev "$iface" set type managed >/dev/null 2>&1 || true
+    fi
+    ip link set "$iface" up >/dev/null 2>&1 || true
+  fi
+
+  if command -v nmcli >/dev/null 2>&1; then
+    nmcli device set "$iface" managed yes >/dev/null 2>&1 || true
+    nmcli device connect "$iface" >/dev/null 2>&1 || true
+  fi
+
+  rm -f /tmp/hostapd-"$iface"-*.conf
+  rm -f /tmp/dnsmasq-"$iface"-*.conf
+  echo "Stopped untracked wifiAP processes on $iface."
+  return 0
+}
+
+stop_all_untracked_ifaces() {
+  local iface
+  local stopped=0
+
+  collect_untracked_ifaces
+
+  for iface in "${UNTRACKED_IFACES[@]}"; do
+    if stop_untracked_iface "$iface" 0; then
+      stopped=1
+    fi
+  done
+
+  [[ $stopped -eq 1 ]]
+}
+
+stop_tracked_aps() {
+  local target_iface="$1"
+  local files=()
+  local nullglob_was_set=0
+  local state_file
+  local stopped=0
+
+  if [[ -n "$target_iface" ]]; then
+    validate_state_iface "$target_iface"
+    state_file="$(state_file_for_iface "$target_iface")"
+    if [[ ! -f "$state_file" ]]; then
+      stop_untracked_iface "$target_iface" 1 || true
+      return 0
+    fi
+    stop_state_file "$state_file" || true
+    return 0
+  fi
+
+  if [[ -d "$STATE_DIR" ]]; then
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    files=("$STATE_DIR"/*.state)
+    [[ $nullglob_was_set -eq 0 ]] && shopt -u nullglob
+
+    for state_file in "${files[@]}"; do
+      stop_state_file "$state_file" || true
+      stopped=1
+    done
+  fi
+
+  if stop_all_untracked_ifaces; then
+    stopped=1
+  fi
+
+  if [[ $stopped -eq 0 ]]; then
+    echo "No wifiAP-created APs found."
+  fi
+}
+
+write_state() {
+  local tmp_file
+
+  [[ -n "$STATE_FILE" ]] || return 0
+
+  ensure_state_dir
+  tmp_file="${STATE_FILE}.$$"
+  {
+    printf 'CONTROLLER_PID=%q\n' "$CONTROLLER_PID"
+    printf 'CONTROLLER_STARTTIME=%q\n' "$CONTROLLER_STARTTIME"
+    printf 'AP_IFACE=%q\n' "$AP_IFACE"
+    printf 'WAN_IFACE=%q\n' "$WAN_IFACE"
+    printf 'AP_ADDR=%q\n' "$AP_ADDR"
+    printf 'AP_CIDR=%q\n' "$AP_CIDR"
+    printf 'AP_SUBNET=%q\n' "$AP_SUBNET"
+    printf 'HOSTAPD_CONF=%q\n' "$HOSTAPD_CONF"
+    printf 'DNSMASQ_CONF=%q\n' "$DNSMASQ_CONF"
+    printf 'HOSTAPD_PID=%q\n' "$HOSTAPD_PID"
+    printf 'DNSMASQ_PID=%q\n' "$DNSMASQ_PID"
+    printf 'NM_MANAGED_CHANGED=%q\n' "$NM_MANAGED_CHANGED"
+    printf 'NM_PREV_CONN=%q\n' "$NM_PREV_CONN"
+    printf 'IP_FORWARD_OLD=%q\n' "$IP_FORWARD_OLD"
+    printf 'IPTABLES_NAT_ADDED=%q\n' "$IPTABLES_NAT_ADDED"
+    printf 'IPTABLES_FWD1_ADDED=%q\n' "$IPTABLES_FWD1_ADDED"
+    printf 'IPTABLES_FWD2_ADDED=%q\n' "$IPTABLES_FWD2_ADDED"
+    printf 'IPTABLES_MSS_ADDED=%q\n' "$IPTABLES_MSS_ADDED"
+  } > "$tmp_file"
+  chmod 600 "$tmp_file"
+  mv -f "$tmp_file" "$STATE_FILE"
+}
+
+if [[ -n "$AP_IFACE" ]]; then
+  validate_state_iface "$AP_IFACE"
+fi
+
+if [[ $KILL_MODE -eq 1 ]]; then
+  stop_tracked_aps "$AP_IFACE"
+  exit 0
+fi
+
+if [[ -z "$AP_IFACE" ]]; then
+  echo "AP interface is required." >&2
+  usage
+  exit 1
+fi
+
+if [[ -n "$PASSWORD" ]]; then
+  if (( ${#PASSWORD} < 8 || ${#PASSWORD} > 63 )); then
+    echo "Password must be between 8 and 63 characters." >&2
+    exit 1
+  fi
+fi
+
+STATE_FILE="$(state_file_for_iface "$AP_IFACE")"
+CONTROLLER_STARTTIME="$(process_starttime "$$")"
+HOSTAPD_CONF="$(mktemp /tmp/hostapd-${AP_IFACE}-XXXX.conf)"
+
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
+write_state
 
 require_cmd() {
   local cmd="$1"
@@ -333,6 +691,7 @@ if command -v nmcli >/dev/null 2>&1; then
   nmcli device disconnect "$AP_IFACE" >/dev/null 2>&1 || true
   nmcli device set "$AP_IFACE" managed no >/dev/null 2>&1 || true
   NM_MANAGED_CHANGED=1
+  write_state
 fi
 
 if command -v rfkill >/dev/null 2>&1; then
@@ -353,6 +712,7 @@ ip link set "$AP_IFACE" up
 
 echo "Starting DHCP on $AP_IFACE..."
 DNSMASQ_CONF="$(mktemp /tmp/dnsmasq-${AP_IFACE}-XXXX.conf)"
+write_state
 cat > "$DNSMASQ_CONF" <<EOF
 interface=$AP_IFACE
 bind-dynamic
@@ -370,20 +730,26 @@ EOF
 
 dnsmasq --conf-file="$DNSMASQ_CONF" --no-daemon --log-facility=- &
 DNSMASQ_PID="$!"
+write_state
 
 if [[ -n "$WAN_IFACE" ]]; then
   echo "Configuring NAT from $WAN_IFACE to $AP_IFACE..."
   IP_FORWARD_OLD="$(cat /proc/sys/net/ipv4/ip_forward)"
+  write_state
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
   iptables -t nat -A POSTROUTING -s "$AP_SUBNET" -o "$WAN_IFACE" -j MASQUERADE
   IPTABLES_NAT_ADDED=1
+  write_state
   iptables -A FORWARD -i "$WAN_IFACE" -o "$AP_IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
   IPTABLES_FWD1_ADDED=1
+  write_state
   iptables -A FORWARD -i "$AP_IFACE" -o "$WAN_IFACE" -j ACCEPT
   IPTABLES_FWD2_ADDED=1
+  write_state
   iptables -t mangle -A FORWARD -o "$WAN_IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
   IPTABLES_MSS_ADDED=1
+  write_state
 
 fi
 
@@ -394,5 +760,6 @@ else
 fi
 hostapd "$HOSTAPD_CONF" &
 HOSTAPD_PID="$!"
+write_state
 
 wait "$HOSTAPD_PID"

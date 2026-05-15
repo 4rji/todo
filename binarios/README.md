@@ -105,7 +105,7 @@ instparu            instala paru y scrub para arch (debian no necesita)
 mackarch            Cambia la MAC de arch linux
 rx6800              Instala el archivo de configuracion en Arch para que funcione la GPU
 wifiinterfaces      Arregla wifi en kali, terminal grafica texto, debian wifi GUI gui
-wifiAP              Starts an open Wi-Fi access point with DHCP and optional NAT sharing.
+wifiAP              Starts/stops an open Wi-Fi access point with DHCP and optional NAT sharing.
 fixwifiwlan         Resets a Wi-Fi card back to managed mode and reconnects it to NetworkManager.
 gpslogs             Logs Wi-Fi scan results with GPS coordinates to timestamped CSV files.
 kismet_db           angry - Extracts SSID from Kismet databases BSSID GPS data

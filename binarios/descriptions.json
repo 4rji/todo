@@ -810,11 +810,12 @@
     },
     "wifiAP": {
         "name": "wifiAP",
-        "short_desc": "Creates an open Wi-Fi access point with DHCP and optional NAT sharing.",
+        "short_desc": "Creates/stops an open Wi-Fi access point with DHCP and optional NAT sharing.",
         "detailed_desc": [
             "This Bash script turns a selected wireless interface into an open Wi-Fi access point using hostapd.",
             "It starts dnsmasq DHCP for connected clients and can share Internet access from a separate WAN interface with NAT.",
-            "On exit, it cleans up temporary configs, forwarding rules, IP forwarding, and NetworkManager interface state."
+            "On exit, it cleans up temporary configs, forwarding rules, IP forwarding, and NetworkManager interface state.",
+            "The -k flag stops AP instances created by wifiAP, either for a specific -AP interface or all detected instances."
         ]
     },
     "fixwifiwlan": {
