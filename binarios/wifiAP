@@ -105,6 +105,13 @@ HOSTAPD_PID=""
 DNSMASQ_PID=""
 NM_MANAGED_CHANGED=0
 NM_PREV_CONN=""
+AP_ORIG_CAPTURED=0
+AP_ORIG_LINK_UP=""
+AP_ORIG_TYPE=""
+AP_ORIG_IPV4_ADDRS=""
+AP_ORIG_IPV6_ADDRS=""
+AP_ORIG_NM_MANAGED=""
+AP_ORIG_NM_STATE=""
 IP_FORWARD_OLD=""
 IPTABLES_NAT_ADDED=0
 IPTABLES_FWD1_ADDED=0
@@ -221,6 +228,17 @@ pid_cmdline() {
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
 }
 
+wait_for_pid_exit() {
+  local pid="$1"
+
+  for _ in {1..30}; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+
+  return 1
+}
+
 tracked_controller_running() {
   [[ -n "$CONTROLLER_PID" ]] || return 1
   [[ -n "$CONTROLLER_STARTTIME" ]] || return 1
@@ -248,9 +266,181 @@ stop_tracked_child() {
 
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  if ! wait_for_pid_exit "$pid"; then
+    cmdline="$(pid_cmdline "$pid")"
+    if [[ "$cmdline" == *"$process_name"* ]]; then
+      kill -KILL "$pid" 2>/dev/null || true
+      wait_for_pid_exit "$pid" || true
+    fi
+  fi
+}
+
+iface_link_is_up() {
+  local iface="$1"
+  local flags
+
+  flags="$(ip -o link show dev "$iface" 2>/dev/null | sed -n 's/^[^<]*<\([^>]*\)>.*/\1/p' || true)"
+  [[ ",$flags," == *,UP,* ]]
+}
+
+iface_ipv4_addrs() {
+  local iface="$1"
+
+  ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{printf "%s%s", sep, $4; sep=" "}' || true
+}
+
+iface_ipv6_addrs() {
+  local iface="$1"
+
+  ip -o -6 addr show dev "$iface" scope global 2>/dev/null | awk '{printf "%s%s", sep, $4; sep=" "}' || true
+}
+
+nm_device_state() {
+  local iface="$1"
+
+  nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$iface" '$1==d{print $2; exit}' || true
+}
+
+nm_device_managed() {
+  local iface="$1"
+
+  nmcli -t -f GENERAL.NM-MANAGED device show "$iface" 2>/dev/null | awk -F: 'NR==1{print $2; exit}' || true
+}
+
+capture_original_iface_state() {
+  local iface="$1"
+
+  AP_ORIG_CAPTURED=1
+
+  if command -v ip >/dev/null 2>&1; then
+    if iface_link_is_up "$iface"; then
+      AP_ORIG_LINK_UP=1
+    else
+      AP_ORIG_LINK_UP=0
+    fi
+    AP_ORIG_IPV4_ADDRS="$(iface_ipv4_addrs "$iface")"
+    AP_ORIG_IPV6_ADDRS="$(iface_ipv6_addrs "$iface")"
+  fi
+
+  if command -v iw >/dev/null 2>&1; then
+    AP_ORIG_TYPE="$(iw dev "$iface" info 2>/dev/null | awk '$1=="type"{print $2; exit}' || true)"
+  fi
+
+  if command -v nmcli >/dev/null 2>&1; then
+    AP_ORIG_NM_MANAGED="$(nm_device_managed "$iface")"
+    AP_ORIG_NM_STATE="$(nm_device_state "$iface")"
+    NM_PREV_CONN="$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | awk -F: -v d="$iface" '$2==d{print $1; exit}' || true)"
+  fi
+
+  write_state
+}
+
+restore_saved_ip_addrs() {
+  local iface="$1"
+  local addr
+
+  for addr in $AP_ORIG_IPV4_ADDRS; do
+    ip addr add "$addr" dev "$iface" 2>/dev/null || true
+  done
+
+  for addr in $AP_ORIG_IPV6_ADDRS; do
+    ip -6 addr add "$addr" dev "$iface" 2>/dev/null || true
+  done
+}
+
+should_restore_saved_ip_addrs() {
+  if [[ $AP_ORIG_CAPTURED -ne 1 ]]; then
+    return 1
+  fi
+
+  if ! command -v nmcli >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$AP_ORIG_NM_STATE" == "unmanaged" ]]; then
+    return 0
+  fi
+
+  case "$AP_ORIG_NM_MANAGED" in
+    yes|YES|true|TRUE)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+restore_network_manager_state() {
+  local iface="$1"
+  local fallback_reset="${2:-0}"
+  local state
+
+  command -v nmcli >/dev/null 2>&1 || return 0
+
+  if [[ $AP_ORIG_CAPTURED -eq 1 && "$AP_ORIG_NM_STATE" == "unmanaged" ]]; then
+    nmcli device set "$iface" managed no >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  case "$AP_ORIG_NM_MANAGED" in
+    no|NO|false|FALSE)
+      nmcli device set "$iface" managed no >/dev/null 2>&1 || true
+      return 0
+      ;;
+  esac
+
+  if [[ $NM_MANAGED_CHANGED -eq 1 || $fallback_reset -eq 1 || -n "$AP_ORIG_NM_MANAGED" ]]; then
+    nmcli device set "$iface" managed yes >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5; do
+      state="$(nm_device_state "$iface")"
+      [[ "$state" != "unmanaged" && -n "$state" ]] && break
+      sleep 1
+    done
+
+    if [[ -n "$NM_PREV_CONN" ]]; then
+      nmcli connection up "$NM_PREV_CONN" ifname "$iface" >/dev/null 2>&1 \
+        || nmcli connection up "$NM_PREV_CONN" >/dev/null 2>&1 \
+        || nmcli device connect "$iface" >/dev/null 2>&1 || true
+    elif [[ "$AP_ORIG_NM_STATE" == "connected" || "$AP_ORIG_NM_STATE" == "connecting" || $fallback_reset -eq 1 ]]; then
+      nmcli device connect "$iface" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+restore_ap_interface() {
+  local iface="$1"
+  local fallback_reset="${2:-0}"
+  local target_type
+
+  [[ -n "$iface" ]] || return 0
+
+  if command -v ip >/dev/null 2>&1 && ip link show "$iface" >/dev/null 2>&1; then
+    ip link set "$iface" down >/dev/null 2>&1 || true
+    ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$iface" >/dev/null 2>&1 || true
+
+    if command -v iw >/dev/null 2>&1; then
+      target_type="${AP_ORIG_TYPE:-managed}"
+      iw dev "$iface" set type "$target_type" >/dev/null 2>&1 \
+        || iw dev "$iface" set type managed >/dev/null 2>&1 || true
+    fi
+
+    if should_restore_saved_ip_addrs; then
+      restore_saved_ip_addrs "$iface"
+    fi
+
+    if [[ "$AP_ORIG_LINK_UP" == "0" && $fallback_reset -eq 0 ]]; then
+      ip link set "$iface" down >/dev/null 2>&1 || true
+    else
+      ip link set "$iface" up >/dev/null 2>&1 || true
+    fi
+  fi
+
+  restore_network_manager_state "$iface" "$fallback_reset"
 }
 
 cleanup_resources() {
+  local fallback_reset=1
+
   set +e
 
   stop_tracked_child "$HOSTAPD_PID" hostapd "$HOSTAPD_CONF"
@@ -276,29 +466,12 @@ cleanup_resources() {
     sysctl -w "net.ipv4.ip_forward=$IP_FORWARD_OLD" >/dev/null 2>&1 || true
   fi
 
-  if [[ -n "$AP_IFACE" ]] && command -v ip >/dev/null 2>&1; then
-    ip link set "$AP_IFACE" down >/dev/null 2>&1 || true
-    ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$AP_IFACE" >/dev/null 2>&1 || true
-
-    if command -v iw >/dev/null 2>&1; then
-      iw dev "$AP_IFACE" set type managed >/dev/null 2>&1 || true
-    fi
-    ip link set "$AP_IFACE" up >/dev/null 2>&1 || true
-  fi
-
-  if [[ $NM_MANAGED_CHANGED -eq 1 && -n "$AP_IFACE" ]] && command -v nmcli >/dev/null 2>&1; then
-    nmcli device set "$AP_IFACE" managed yes >/dev/null 2>&1 || true
-    for _ in 1 2 3 4 5; do
-      state="$(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$AP_IFACE" '$1==d{print $2}')"
-      [[ "$state" != "unmanaged" && -n "$state" ]] && break
-      sleep 1
-    done
-    if [[ -n "$NM_PREV_CONN" ]]; then
-      nmcli connection up "$NM_PREV_CONN" ifname "$AP_IFACE" >/dev/null 2>&1 \
-        || nmcli connection up "$NM_PREV_CONN" >/dev/null 2>&1 \
-        || nmcli device connect "$AP_IFACE" >/dev/null 2>&1 || true
-    else
-      nmcli device connect "$AP_IFACE" >/dev/null 2>&1 || true
+  if [[ -n "$AP_IFACE" ]]; then
+    if [[ $AP_ORIG_CAPTURED -eq 1 ]]; then
+      fallback_reset=0
+      restore_ap_interface "$AP_IFACE" "$fallback_reset"
+    elif [[ $NM_MANAGED_CHANGED -eq 1 || -n "$DNSMASQ_CONF" || -n "$HOSTAPD_PID" || -n "$DNSMASQ_PID" ]]; then
+      restore_ap_interface "$AP_IFACE" "$fallback_reset"
     fi
   fi
 
@@ -334,6 +507,13 @@ load_state_file() {
   DNSMASQ_PID=""
   NM_MANAGED_CHANGED=0
   NM_PREV_CONN=""
+  AP_ORIG_CAPTURED=0
+  AP_ORIG_LINK_UP=""
+  AP_ORIG_TYPE=""
+  AP_ORIG_IPV4_ADDRS=""
+  AP_ORIG_IPV6_ADDRS=""
+  AP_ORIG_NM_MANAGED=""
+  AP_ORIG_NM_STATE=""
   IP_FORWARD_OLD=""
   IPTABLES_NAT_ADDED=0
   IPTABLES_FWD1_ADDED=0
@@ -392,6 +572,13 @@ stop_untracked_child_by_conf_prefix() {
     cmdline="$(pid_cmdline "$pid")"
     [[ "$cmdline" == *"$process_name"* && "$cmdline" == *"$conf_prefix"* ]] || continue
     kill "$pid" 2>/dev/null || true
+    if ! wait_for_pid_exit "$pid"; then
+      cmdline="$(pid_cmdline "$pid")"
+      if [[ "$cmdline" == *"$process_name"* && "$cmdline" == *"$conf_prefix"* ]]; then
+        kill -KILL "$pid" 2>/dev/null || true
+        wait_for_pid_exit "$pid" || true
+      fi
+    fi
     matched=0
   done
 
@@ -451,10 +638,28 @@ collect_untracked_ifaces() {
   [[ $nullglob_was_set -eq 0 ]] && shopt -u nullglob
 }
 
+untracked_conf_exists() {
+  local iface="$1"
+  local files=()
+  local nullglob_was_set=0
+
+  shopt -q nullglob && nullglob_was_set=1
+  shopt -s nullglob
+  files=(/tmp/hostapd-"$iface"-*.conf /tmp/dnsmasq-"$iface"-*.conf)
+  [[ $nullglob_was_set -eq 0 ]] && shopt -u nullglob
+
+  [[ ${#files[@]} -gt 0 ]]
+}
+
 stop_untracked_iface() {
   local iface="$1"
   local report_missing="${2:-1}"
   local killed=0
+  local had_conf=0
+
+  if untracked_conf_exists "$iface"; then
+    had_conf=1
+  fi
 
   if stop_untracked_child_by_conf_prefix hostapd "/tmp/hostapd-${iface}-"; then
     killed=1
@@ -465,30 +670,18 @@ stop_untracked_iface() {
   fi
 
   if [[ $killed -eq 0 ]]; then
-    if [[ "$report_missing" -eq 1 ]]; then
-      echo "No wifiAP-created AP found for $iface."
+    if [[ $had_conf -eq 0 && "$report_missing" -eq 1 ]]; then
+      echo "No wifiAP-created AP found for $iface. Resetting interface anyway."
     fi
-    return 1
   fi
 
-  if command -v ip >/dev/null 2>&1; then
-    ip link set "$iface" down >/dev/null 2>&1 || true
-    ip addr del "${AP_ADDR}/${AP_CIDR}" dev "$iface" >/dev/null 2>&1 || true
-
-    if command -v iw >/dev/null 2>&1; then
-      iw dev "$iface" set type managed >/dev/null 2>&1 || true
-    fi
-    ip link set "$iface" up >/dev/null 2>&1 || true
-  fi
-
-  if command -v nmcli >/dev/null 2>&1; then
-    nmcli device set "$iface" managed yes >/dev/null 2>&1 || true
-    nmcli device connect "$iface" >/dev/null 2>&1 || true
-  fi
+  restore_ap_interface "$iface" 1
 
   rm -f /tmp/hostapd-"$iface"-*.conf
   rm -f /tmp/dnsmasq-"$iface"-*.conf
-  echo "Stopped untracked wifiAP processes on $iface."
+  if [[ $killed -eq 1 || $had_conf -eq 1 ]]; then
+    echo "Stopped untracked wifiAP resources on $iface."
+  fi
   return 0
 }
 
@@ -567,6 +760,13 @@ write_state() {
     printf 'DNSMASQ_PID=%q\n' "$DNSMASQ_PID"
     printf 'NM_MANAGED_CHANGED=%q\n' "$NM_MANAGED_CHANGED"
     printf 'NM_PREV_CONN=%q\n' "$NM_PREV_CONN"
+    printf 'AP_ORIG_CAPTURED=%q\n' "$AP_ORIG_CAPTURED"
+    printf 'AP_ORIG_LINK_UP=%q\n' "$AP_ORIG_LINK_UP"
+    printf 'AP_ORIG_TYPE=%q\n' "$AP_ORIG_TYPE"
+    printf 'AP_ORIG_IPV4_ADDRS=%q\n' "$AP_ORIG_IPV4_ADDRS"
+    printf 'AP_ORIG_IPV6_ADDRS=%q\n' "$AP_ORIG_IPV6_ADDRS"
+    printf 'AP_ORIG_NM_MANAGED=%q\n' "$AP_ORIG_NM_MANAGED"
+    printf 'AP_ORIG_NM_STATE=%q\n' "$AP_ORIG_NM_STATE"
     printf 'IP_FORWARD_OLD=%q\n' "$IP_FORWARD_OLD"
     printf 'IPTABLES_NAT_ADDED=%q\n' "$IPTABLES_NAT_ADDED"
     printf 'IPTABLES_FWD1_ADDED=%q\n' "$IPTABLES_FWD1_ADDED"
@@ -636,6 +836,7 @@ if ! [[ "$CHANNEL" =~ ^[0-9]+$ ]]; then
 fi
 
 require_iface "$AP_IFACE"
+capture_original_iface_state "$AP_IFACE"
 
 if [[ -n "$WAN_IFACE" ]]; then
   require_cmd iptables iptables
@@ -686,7 +887,7 @@ fi
 
 echo "Preparing AP interface $AP_IFACE..."
 if command -v nmcli >/dev/null 2>&1; then
-  NM_PREV_CONN="$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | awk -F: -v d="$AP_IFACE" '$2==d{print $1; exit}')"
+  NM_PREV_CONN="$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null | awk -F: -v d="$AP_IFACE" '$2==d{print $1; exit}' || true)"
   if [[ -n "$NM_PREV_CONN" ]]; then
     echo "Saved previous NM connection on $AP_IFACE: $NM_PREV_CONN"
   fi
