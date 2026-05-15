@@ -29,7 +29,7 @@ usage() {
   printf "  sudo ./wifiAP -AP wlan0 -i wlan1\n\n"
 
   printf "%sExamples:%s\n" "$C_BOLD$C_BLUE" "$C_RESET"
-  printf "  ./wifiAP -AP wlan0                             %s# create simple eduroam2 network without password%s\n" "$C_CYAN" "$C_RESET"
+  printf "  ./wifiAP -AP wlan0                             %s# create local-only eduroam2 network (no Internet)%s\n" "$C_CYAN" "$C_RESET"
   printf "  ./wifiAP -AP wlan0 -i wlan1                    %s# same simple network but with Internet%s\n" "$C_CYAN" "$C_RESET"
   printf "  ./wifiAP -AP wlan2 -i wlan1 -s MyOpenAP -c 11  %s# create MyOpenAP network on channel 11%s\n" "$C_CYAN" "$C_RESET"
   printf "  ./wifiAP -AP wlan0 -i wlan1 -2                 %s# legacy 2.4GHz only (max compat)%s\n" "$C_CYAN" "$C_RESET"
@@ -53,6 +53,8 @@ usage() {
   printf "  - Creates an open Access Point with no password.\n"
   printf "  - Default mode: 2.4GHz + 802.11n + WMM (best compatibility for modern devices).\n"
   printf "  - The script always starts DHCP on the AP interface.\n"
+  printf "  - Omit -i to create a local-only/offline AP for direct access to this device.\n"
+  printf "  - Clients receive addresses in 10.55.0.0/24 and can reach this device at 10.55.0.1.\n"
   printf "  - If -i is provided, the script also enables NAT for Internet sharing.\n"
   printf "  - Only the AP interface is reconfigured.\n"
   printf "  - Your Internet connection stays up as long as it uses a different interface.\n"
@@ -751,6 +753,12 @@ if [[ -n "$WAN_IFACE" ]]; then
   IPTABLES_MSS_ADDED=1
   write_state
 
+fi
+
+if [[ -n "$WAN_IFACE" ]]; then
+  echo "Clients will get gateway $AP_ADDR and Internet through $WAN_IFACE."
+else
+  echo "Local-only mode: connect to '$SSID' and access this device at $AP_ADDR."
 fi
 
 if [[ -n "$PASSWORD" ]]; then
