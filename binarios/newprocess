@@ -6,6 +6,7 @@ export LC_ALL=C
 
 INTERVAL="${NEWPROCESS_INTERVAL:-1}"
 SHOW_ENDED="${NEWPROCESS_SHOW_ENDED:-1}"
+TRUNCATE_CMD="${NEWPROCESS_TRUNCATE_CMD:-0}"
 IGNORE_RE="${NEWPROCESS_IGNORE_RE-(^|[[:space:]])diff([[:space:]]|$)|kworker}"
 
 RED='\033[1;31m'
@@ -27,6 +28,7 @@ Usage: newprocess
 Optional variables:
   NEWPROCESS_INTERVAL=0.2     Seconds between snapshots. Default: 1
   NEWPROCESS_SHOW_ENDED=0     Do not show terminated processes. Default: 1
+  NEWPROCESS_TRUNCATE_CMD=1   Truncate CMD to terminal width. Default: 0
   NEWPROCESS_IGNORE_RE=''     Command regex to ignore. Default: diff|kworker
 
 Note: this script uses ps-based polling. It cannot guarantee detection of
@@ -47,9 +49,9 @@ snapshot() {
     local raw has_lstart status
 
     raw=$(make_tmp) || return 1
-    if ps -eo pid=,ppid=,user=,lstart=,command= >"$raw" 2>/dev/null; then
+    if ps -ww -eo pid=,ppid=,user=,lstart=,command= >"$raw" 2>/dev/null; then
         has_lstart=1
-    elif ps -eo pid=,ppid=,user=,command= >"$raw" 2>/dev/null; then
+    elif ps -ww -eo pid=,ppid=,user=,command= >"$raw" 2>/dev/null; then
         has_lstart=0
     else
         rm -f "$raw"
@@ -82,11 +84,7 @@ snapshot() {
             if (cmd ~ /(^|\/)ps[[:space:]].*-eo[[:space:]]/) next
             if (ignore_re != "" && cmd ~ ignore_re) next
 
-            if (has_lstart == 1) {
-                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tSTART=" start "\tCMD=" cmd
-            } else {
-                display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tCMD=" cmd
-            }
+            display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tCMD=" cmd
 
             printf "%s\t%s\n", key, display
         }
@@ -123,7 +121,8 @@ colorize() {
         -v red="$RED" \
         -v green="$GREEN" \
         -v dim="$DIM" \
-        -v cols="$COLS" '
+        -v cols="$COLS" \
+        -v truncate_cmd="$TRUNCATE_CMD" '
     {
         n = split($0, parts, "\t")
         out = "  " pcol prefix reset
@@ -153,7 +152,7 @@ colorize() {
         if (cmd_field != "") {
             avail = cols - used - 5
             if (avail < 20) avail = 20
-            if (length(cmd_field) > avail) {
+            if (truncate_cmd != "0" && length(cmd_field) > avail) {
                 cmd_field = substr(cmd_field, 1, avail - 1) "\xe2\x80\xa6"
             }
             out = out dim "CMD=" reset cmd_field
