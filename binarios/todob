@@ -10,6 +10,7 @@ amarillo='\e[0;33m'
 mostrarPreguntas=false
 mostrarBina=false
 borrarBinarios=false
+instalarHerramientas=false
 bin_dir="/opt/4rji/bin"
 platform="$(uname -s)"
 arch="$(uname -m)"
@@ -42,15 +43,16 @@ fi
 
 # Show script usage
 mostrar_uso() {
-    echo "Usage: $0 [-p] [-a] [-c]"
+    echo "Usage: $0 [-p] [-a] [-c] [-x]"
     echo "  -p    Show interactive questions only."
     echo "  -a    Run full script (download binaries and show questions)."
     echo "  -c    Clean ${bin_dir}/* then run normal flow (download binaries)."
+    echo "  -x    Install herrabin base tools for the detected OS, then update binaries."
     exit 1
 }
 
-# Verificar las opciones -p, -a y -c
-while getopts "pac" opt; do
+# Verificar las opciones -p, -a, -c y -x
+while getopts "pacx" opt; do
     case $opt in
         p)
             mostrarPreguntas=true
@@ -61,6 +63,9 @@ while getopts "pac" opt; do
             ;;
         c)
             borrarBinarios=true
+            ;;
+        x)
+            instalarHerramientas=true
             ;;
         \?)
             echo "Invalid option: -$OPTARG" >&2
@@ -96,6 +101,212 @@ descargar_y_ejecutar() {
     fi
 }
 
+ejecutar_privilegiado() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "sudo not found and current user is not root; cannot run: $*" >&2
+        return 1
+    fi
+}
+
+detectar_linux_id() {
+    os_id=""
+    os_like=""
+
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        os_id="${ID,,}"
+        os_like="${ID_LIKE,,}"
+    fi
+}
+
+os_tiene_like() {
+    local buscado="$1"
+
+    [[ " ${os_id} ${os_like} " == *" ${buscado} "* ]]
+}
+
+seleccionar_herramientas() {
+    paquetes=()
+    gestor=""
+
+    case "$platform" in
+        Darwin)
+            if ! command -v brew >/dev/null 2>&1; then
+                echo "Homebrew not found; cannot install herrabin tools on macOS." >&2
+                return 1
+            fi
+
+            gestor="brew"
+            paquetes=(
+                chafa fzf zoxide ripgrep fd curl git kitty nano zsh python
+                bat lsd tldr moreutils grc
+            )
+            return 0
+            ;;
+        Linux)
+            detectar_linux_id
+            ;;
+        *)
+            echo "Unsupported system for -x: ${platform} ${arch}" >&2
+            return 1
+            ;;
+    esac
+
+    case "$os_id" in
+        debian|ubuntu|kali|linuxmint|pop)
+            gestor="apt"
+            paquetes=(
+                sudo chafa fzf zoxide ripgrep fd-find curl git kitty nano
+                ifupdown zsh xclip python3 bat lsd tldr iproute2 net-tools
+                iputils-ping moreutils grc
+            )
+            ;;
+        arch|manjaro|endeavouros)
+            gestor="pacman"
+            paquetes=(
+                sudo chafa zoxide fzf curl ripgrep fd git kitty nano zsh xclip
+                python bat lsd tldr iproute2 net-tools iputils moreutils grc
+            )
+            ;;
+        fedora)
+            gestor="dnf"
+            paquetes=(
+                sudo chafa fzf curl git ripgrep fd-find kitty nano zsh xclip
+                python3 bat lsd tldr iproute net-tools iputils moreutils grc
+                zoxide
+            )
+            ;;
+        centos|rhel|ol|rocky|almalinux)
+            if command -v dnf >/dev/null 2>&1; then
+                gestor="dnf"
+            else
+                gestor="yum"
+            fi
+
+            paquetes=(
+                sudo chafa fzf curl git ripgrep fd-find kitty nano zsh xclip
+                python3 bat lsd tldr iproute net-tools iputils moreutils grc
+                zoxide
+            )
+            ;;
+        *)
+            if os_tiene_like debian; then
+                gestor="apt"
+                paquetes=(
+                    sudo chafa fzf zoxide ripgrep fd-find curl git kitty nano
+                    ifupdown zsh xclip python3 bat lsd tldr iproute2 net-tools
+                    iputils-ping moreutils grc
+                )
+            elif os_tiene_like arch; then
+                gestor="pacman"
+                paquetes=(
+                    sudo chafa zoxide fzf curl ripgrep fd git kitty nano zsh xclip
+                    python bat lsd tldr iproute2 net-tools iputils moreutils grc
+                )
+            elif os_tiene_like fedora || os_tiene_like rhel; then
+                if command -v dnf >/dev/null 2>&1; then
+                    gestor="dnf"
+                else
+                    gestor="yum"
+                fi
+
+                paquetes=(
+                    sudo chafa fzf curl git ripgrep fd-find kitty nano zsh xclip
+                    python3 bat lsd tldr iproute net-tools iputils moreutils grc
+                    zoxide
+                )
+            else
+                echo "Unsupported Linux distribution for -x: ${os_id:-unknown}" >&2
+                return 1
+            fi
+            ;;
+    esac
+
+    case "$gestor" in
+        apt|dnf|yum|pacman)
+            if ! command -v "$gestor" >/dev/null 2>&1; then
+                echo "Package manager not found: ${gestor}" >&2
+                return 1
+            fi
+            ;;
+    esac
+}
+
+paquete_instalado() {
+    local paquete="$1"
+
+    case "$gestor" in
+        apt)
+            dpkg -s "$paquete" >/dev/null 2>&1
+            ;;
+        dnf)
+            dnf list installed "$paquete" >/dev/null 2>&1
+            ;;
+        yum)
+            yum list installed "$paquete" >/dev/null 2>&1
+            ;;
+        pacman)
+            pacman -Q "$paquete" >/dev/null 2>&1
+            ;;
+        brew)
+            brew list --formula "$paquete" >/dev/null 2>&1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+instalar_paquete() {
+    local paquete="$1"
+
+    case "$gestor" in
+        apt)
+            ejecutar_privilegiado apt install -y "$paquete"
+            ;;
+        dnf)
+            ejecutar_privilegiado dnf install -y "$paquete"
+            ;;
+        yum)
+            ejecutar_privilegiado yum install -y "$paquete"
+            ;;
+        pacman)
+            ejecutar_privilegiado pacman -S --noconfirm "$paquete"
+            ;;
+        brew)
+            brew install "$paquete"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+instalar_herramientas_herrabin() {
+    if ! seleccionar_herramientas; then
+        return 1
+    fi
+
+    echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
+    echo "Installing herrabin base tools with ${gestor}..."
+
+    for paquete in "${paquetes[@]}"; do
+        if paquete_instalado "$paquete"; then
+            continue
+        fi
+
+        echo "Installing package ${paquete}..."
+        if ! instalar_paquete "$paquete"; then
+            echo -e "${amarillo}Warning: could not install ${paquete}; continuing.${reset}" >&2
+        fi
+    done
+}
+
 # Download and configure binaries
 descargar_bina() {
     echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
@@ -105,10 +316,10 @@ descargar_bina() {
     mktem
     git clone --depth 1 https://github.com/4rji/todo.git
     cd todo || exit 1
-    sudo mkdir -p "$bin_dir"
-    sudo cp -a binarios/* "$bin_dir"
+    ejecutar_privilegiado mkdir -p "$bin_dir"
+    ejecutar_privilegiado cp -a binarios/* "$bin_dir"
     if [[ -f binarios/.todoignore ]]; then
-        sudo cp -a binarios/.todoignore "$bin_dir"
+        ejecutar_privilegiado cp -a binarios/.todoignore "$bin_dir"
     fi
     echo ""
     echo -e "\033[1;34mBinaries updated\033[0m"
@@ -121,10 +332,10 @@ borrar_archivos() {
     echo -e "${amarillo}Cleaning ${bin_dir}/* ...${reset}"
 
     # Remove immutable attribute from any files that have it
-    sudo find "${bin_dir}" -type f -exec chattr -i {} + 2>/dev/null || true
+    ejecutar_privilegiado find "${bin_dir}" -type f -exec chattr -i {} + 2>/dev/null || true
 
     # Delete files and capture exit code
-    if sudo rm -rf "${bin_dir:?}"/* 2>/dev/null; then
+    if ejecutar_privilegiado rm -rf "${bin_dir:?}"/* 2>/dev/null; then
         echo -e "${verde}Files successfully removed from ${bin_dir}/*${reset}"
         return 0
     else
@@ -148,6 +359,11 @@ actualizar_database() {
         return 1
     fi
 }
+
+# Si se activa la opción -x, instalar herramientas antes de descargar binarios
+if [[ $instalarHerramientas == true ]]; then
+    instalar_herramientas_herrabin
+fi
 
 # Si se activa la opción -c, limpiar primero y luego seguir con flujo normal
 if [[ $borrarBinarios == true ]]; then

@@ -294,8 +294,10 @@ certgenerator       Crea certificados de cloudflare, para cert y cer key
 https-bloq-boots    Reads IPs from ips.txt and blocks HTTPS traffic with iptables TARPIT and DROP rules.
 adio                borra un archivo con scrub                                                         
 adios               borra toda una carpeta con scrub                                                   
-todob               actualiza los binarios, funciones, alias y 2-4rji.sh,   -o para omitir binarios 
-herrabinp           para pacman, existe para yum, y para dnf, y apt es la normal de arriba todob
+todob               actualiza binarios, funciones, alias y 2-4rji.sh; -x instala herrabin segun el OS
+herrabinX           wrapper de todob -x; detecta apt, dnf, yum, pacman o brew
+herrabinp           wrapper compatible de herrabin para todob -x
+herrabind           wrapper compatible de herrabin para todob -x
 herralias           Actualiza los binarios descargando solo alias
 airzip              Comprime y envia una carpeta por airsend -f
  

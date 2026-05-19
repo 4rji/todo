@@ -1,26 +1,15 @@
 #!/usr/bin/env bash
 
-#PARA PACMAN
-
-
-
-#sudo cp /usr/bin/batcat /usr/bin/bat
-# Colores
-verde='\e[0;32m'
-azul='\e[0;34m'
-reset='\e[0m'
-
-amarillo='\e[0;33m'
-reset='\e[0m'
-
-
-
-
-
 omitir=false
 omitirPreguntas=false
 
-# Verificar las opciones -o y -p
+mostrar_uso() {
+    echo "Usage: $0 [-o] [-p]"
+    echo "  -o    Omit install/update flow and show todob questions only."
+    echo "  -p    Install herrabin tools and update binaries without questions."
+    exit 1
+}
+
 while getopts "op" opt; do
     case $opt in
         o)
@@ -31,131 +20,29 @@ while getopts "op" opt; do
             ;;
         \?)
             echo "Opción inválida: -$OPTARG" >&2
-            exit 1
+            mostrar_uso
             ;;
     esac
 done
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+todob_bin=""
 
-if [[ $omitir != true ]]; then
-    # Lista de paquetes a instalar
-    paquetes=("sudo" "chafa" "zoxide" "fzf" "curl" "rg" "fd-find"  "git" "kitty" "nano" "zsh" "xclip" "python" "bat" "lsd" "tldr" "iproute2" "net-tools" "iputils" "moreutils" "grc")
-
-    # Verificar e instalar paquetes necesarios
-    echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
-    echo "Instalando paquetes necesarios..."
-    for paquete in "${paquetes[@]}"; do
-        if ! pacman -Q "$paquete" &>/dev/null; then
-            sudo pacman -S --noconfirm "$paquete" 
-        fi
-    done
-
-    # Función para crear directorios temporales
-    function mktem() {
-        if [ -n "$1" ]; then
-            new_dir=$(mktemp -d /dev/shm/tmp."$1".XXXXXX)
-        else
-            new_dir=$(mktemp -d /dev/shm/tmp.XXXXXX)
-        fi
-
-        cd "$new_dir" || return
-    }
-
-    # Crear directorio temporal y realizar operaciones
-    mktem
-    echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
-    git clone --depth 1 https://github.com/4rji/todo.git
-    cd todo || exit 1
-    sudo mkdir -p /opt/4rji/bin
-    sudo cp -rf binarios/* /opt/4rji/bin
-    echo ""
-    echo -e "\033[1;34mbinarios actualizados\033[0m"
-    todou
-    cd || exit 1
-    echo ""
+if [[ -x "${script_dir}/todob" ]]; then
+    todob_bin="${script_dir}/todob"
+elif command -v todob >/dev/null 2>&1; then
+    todob_bin="$(command -v todob)"
+else
+    echo "todob not found; cannot continue." >&2
+    exit 1
 fi
 
-# Comprobar si se debe omitir la sección de preguntas
-if [[ $omitirPreguntas == true ]]; then
-    echo ""
+if [[ $omitir == true && $omitirPreguntas == true ]]; then
     exit 0
-fi
-
-# Sección de preguntas empieza aquí
-
-
-
-
-
-
-
-echo ""
-echo -e "${verde}_________________________________________________________${reset}"
-
-
-
-
-
-# Preguntar al usuario si desea agregar la ruta al PATH
-read -p "Do you want to add /opt/4rji/bin to your PATH? (y/n): " -n 1 -r
-echo    # (opcional) mueve a una nueva línea
-
-# Por defecto, si el usuario presiona Enter, considera 'n'
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Agregar el directorio /opt/4rji/bin al PATH en ~/.zshrc
-    echo 'export PATH=$PATH:/opt/4rji/bin' >> ~/.zshrc
-    echo "The directory /opt/4rji/bin has been added to your PATH in ~/.zshrc."
-
-    # Opcional: recargar ~/.zshrc para aplicar los cambios sin necesidad de reiniciar la terminal
-    #source ~/.zshrc
+elif [[ $omitir == true ]]; then
+    exec "$todob_bin" -p
+elif [[ $omitirPreguntas == true ]]; then
+    exec "$todob_bin" -x
 else
-    echo "No changes made to PATH."
+    exec "$todob_bin" -x -a
 fi
-
-
-
-
-
-
-echo -e "${azul}"
-echo "_________________________________________________________"
-echo ""
-
-
-
-
-
-
-
-
-# Pregunta al usuario
-read -n1 -p "$(echo -e ${verde}'¿Instalar todos alias? (s/N): '${reset})" respuesta
-echo ""
-
-# Define un valor predeterminado si el usuario presiona Enter
-respuesta=${respuesta:-n}
-
-# Convierte la respuesta a minúsculas para facilitar la comparación
-respuesta=$(echo $respuesta | tr '[:upper:]' '[:lower:]')
-
-# Verifica la respuesta
-if [ "$respuesta" == "s" ]; then
-    echo -e "${verde}Instalando todos los alias... ${reset}"
-    wget -O - https://raw.githubusercontent.com/4rji/4rji/main/alias.sh | bash 
-    #source alias.sh  # Ejecuta el script descargado
-
-    # Borrar archivos
-    #rm alias.sh
-
-    # Aquí colocas el código para ejecutar bashfun
-else
-    echo ""
-fi
-
-
-
-
-
-/opt/4rji/bin/todou
-
-

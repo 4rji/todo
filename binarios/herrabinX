@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 
-
-#sudo cp /usr/bin/batcat /usr/bin/bat
-# Colores
-verde='\e[0;32m'
-azul='\e[0;34m'
-reset='\e[0m'
-
-amarillo='\e[0;33m'
-reset='\e[0m'
-
-
-
-
-
 omitir=false
 omitirPreguntas=false
 
-# Verificar las opciones -o y -p
+mostrar_uso() {
+    echo "Usage: $0 [-o] [-p]"
+    echo "  -o    Omit install/update flow and show todob questions only."
+    echo "  -p    Install herrabin tools and update binaries without questions."
+    exit 1
+}
+
 while getopts "op" opt; do
     case $opt in
         o)
@@ -28,250 +20,29 @@ while getopts "op" opt; do
             ;;
         \?)
             echo "Opción inválida: -$OPTARG" >&2
-            exit 1
+            mostrar_uso
             ;;
     esac
 done
 
-if [[ $omitir != true ]]; then
-    # Función para verificar si un paquete está instalado
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+todob_bin=""
 
-    paquetes=("sudo" "chafa" "fzf" "zoxide" "rg" "fd-find"  "curl" "git" "kitty" "nano" "ifupdown" "sudo" "zsh" "xclip" "python3" "bat" "lsd" "tldr" "iproute2" "net-tools" "iputils-ping" "moreutils" "grc" )
-
-    # Función para verificar si un paquete está instalado (Debian/Ubuntu/Kali)
-    paquete_instalado_apt() {  
-        dpkg -l "$1" | grep -q '^ii'  
-    }
-
-    # Función para verificar si un paquete está instalado (CentOS/RHEL)
-    paquete_instalado_yum() {
-        yum list installed "$1"  
-    }
-
-    # Función para verificar si un paquete está instalado (Fedora)
-    paquete_instalado_dnf() {
-        dnf list installed "$1" 
-    }
-
-    # Función para verificar si un paquete está instalado (Arch Linux)
-    paquete_instalado_pacman() {
-        pacman -Qi "$1" 
-    }
-
-    # Detectar el sistema operativo
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS=$ID
-    fi
-
-
-    # Instalar paquetes basados en el sistema operativo
-    for paquete in "${paquetes[@]}"; do
-        case $OS in
-            "debian"|"ubuntu"|"kali")
-                if ! paquete_instalado_apt "$paquete"; then
-                    echo "Instalando el paquete $paquete..."
-                    sudo apt install -y "$paquete"
-                fi
-                ;;
-            "centos"|"rhel"|"ol")
-                if ! paquete_instalado_yum "$paquete"; then
-                    echo "Instalando el paquete $paquete..."
-                    sudo yum install -y "$paquete"
-                fi
-                ;;
-            "fedora")
-                if ! paquete_instalado_dnf "$paquete"; then
-                    echo "Instalando el paquete $paquete..."
-                    sudo dnf install -y "$paquete"
-                fi
-                ;;
-            "arch")
-                if ! paquete_instalado_pacman "$paquete"; then
-                    echo "Instalando el paquete $paquete..."
-                    sudo pacman -S --noconfirm "$paquete"
-                fi
-                ;;
-            *)
-                echo "Sistema operativo no soportado: $OS"
-                ;;
-        esac
-    done
-
-    # Función para crear directorios temporales
-    function mktem() {
-        if [ -n "$1" ]; then
-            new_dir=$(mktemp -d /dev/shm/tmp."$1".XXXXXX)
-        else
-            new_dir=$(mktemp -d /dev/shm/tmp.XXXXXX)
-        fi
-        
-        echo "Directorio creado en: $new_dir"
-        cd "$new_dir" || return
-        echo "Cambiado al directorio: $PWD"
-    }
-
-    # Crear directorio temporal y realizar operaciones
-    mktem
-    git clone --depth 1 https://github.com/4rji/todo.git
-    cd todo
-    sudo mkdir -p /opt/4rji/bin
-    sudo cp -rf binarios/* /opt/4rji/bin
-    echo ""
-    echo -e "${azul}binarios actualizados${reset}"
-    todou
-    cd
-    echo ""
+if [[ -x "${script_dir}/todob" ]]; then
+    todob_bin="${script_dir}/todob"
+elif command -v todob >/dev/null 2>&1; then
+    todob_bin="$(command -v todob)"
+else
+    echo "todob not found; cannot continue." >&2
+    exit 1
 fi
 
-# Comprobar si se debe omitir la sección de preguntas
-if [[ $omitirPreguntas == true ]]; then
-    echo ""
+if [[ $omitir == true && $omitirPreguntas == true ]]; then
     exit 0
-fi
-
-# Sección de preguntas empieza aquí
-
-
-
-
-
-
-
-echo ""
-echo -e "${verde}_________________________________________________________${reset}"
-
-
-
-
-
-# Preguntar al usuario si desea agregar la ruta al PATH
-read -p "Do you want to add /opt/4rji/bin to your PATH? (y/n): " -n 1 -r
-echo    # (opcional) mueve a una nueva línea
-
-# Por defecto, si el usuario presiona Enter, considera 'n'
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Agregar el directorio /opt/4rji/bin al PATH en ~/.zshrc
-    echo 'export PATH=$PATH:/opt/4rji/bin' >> ~/.zshrc
-    echo "The directory /opt/4rji/bin has been added to your PATH in ~/.zshrc."
-
-    # Opcional: recargar ~/.zshrc para aplicar los cambios sin necesidad de reiniciar la terminal
-    #source ~/.zshrc
+elif [[ $omitir == true ]]; then
+    exec "$todob_bin" -p
+elif [[ $omitirPreguntas == true ]]; then
+    exec "$todob_bin" -x
 else
-    echo "No changes made to PATH."
+    exec "$todob_bin" -x -a
 fi
-
-
-
-
-
-
-echo -e "${azul}"
-echo "_________________________________________________________"
-echo ""
-
-
-
-
-
-# Pregunta al usuario si desea descargar los archivos COMPRIMIDOS. 
-read -p "¿Deseas descargar los comprimidos? [s/N] " respuesta
-
-# Convertir la respuesta en minúsculas
-respuesta=${respuesta,,}  # Esto es para convertir la respuesta a minúsculas
-
-# Comprobar si la respuesta es 's'
-if [[ "$respuesta" == "s" ]]; then
-    # Comando para crear el directorio si no existe
-    sudo mkdir -p /opt/4rji/bin/
-    
-    # Comando para descargar el archivo
-    git clone --depth 1 https://github.com/4rji/archivos-b
-    #sudo wget -O /opt/4rji/bin/comprimidos.tar.xz "https://github.com/4rji/archivos-b/blob/d5d6d8b3418c7b452f21e1de105a4747c6c480e1/comprimidos.tar.xz?raw=true"
-    cd archivos-b
-    # Comando para descomprimir el archivo
-    sudo tar -xvf comprimidos.tar.xz 
-    sudo mv comprimidos/* /opt/4rji/bin/
-    echo "Archivo descargado y descomprimido con éxito."
-else
-    echo "No se realizará ninguna descarga."
-fi
-
-
-
-echo -e "${azul}"
-echo "_________________________________________________________"
-echo ""
-
-
-
-
-
-
-# Pregunta al usuario
-read -n1 -p "$(echo -e ${verde}'¿Instalar todos alias? (s/N): '${reset})" respuesta
-echo ""
-
-# Define un valor predeterminado si el usuario presiona Enter
-respuesta=${respuesta:-n}
-
-# Convierte la respuesta a minúsculas para facilitar la comparación
-respuesta=$(echo $respuesta | tr '[:upper:]' '[:lower:]')
-
-# Verifica la respuesta
-if [ "$respuesta" == "s" ]; then
-    echo -e "${verde}Instalando todos los alias... ${reset}"
-    wget -O - https://raw.githubusercontent.com/4rji/4rji/main/alias.sh | bash 
-    #source alias.sh  # Ejecuta el script descargado
-
-    # Borrar archivos
-    #rm alias.sh
-
-    # Aquí colocas el código para ejecutar bashfun
-else
-    echo ""
-fi
-
-
-
-
-
-
-
-echo -e "${amarillo}"
-echo "_________________________________________________________"
-echo ""
-
-echo -e "${amarillo} ########### ALERTA.  #################${reset}"
-echo ""
-echo -e "${amarillo}Tarda mucho en instalarse${reset}"
-
-echo ""
-echo -e "${amarillo}_________________________________________________________${reset}"
-echo ""
-
-
-# Pregunta al usuario
-read -n1 -p "$(echo -e ${verde}'¿Quieres instalar  2-arji?  (s/N): '${reset})" respuesta
-echo ""
-
-# Define un valor predeterminado si el usuario presiona Enter
-respuesta=${respuesta:-n}
-
-# Convierte la respuesta a minúsculas para facilitar la comparación
-respuesta=$(echo $respuesta | tr '[:upper:]' '[:lower:]')
-
-# Verifica la respuesta
-if [ "$respuesta" == "s" ]; then
-    wget -O - https://raw.githubusercontent.com/4rji/4rji/main/2-4rji.sh | bash   
-   # source alias.sh  # Ejecuta el script descargado
-
-    #borrar archivos
-    #rm 2-4rji.sh
-else
-    echo ""
-fi
-
-todou
-
-
