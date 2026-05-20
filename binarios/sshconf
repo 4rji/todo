@@ -24,6 +24,7 @@ usage() {
 Uso:
   $(basename "$0")                          # modo interactivo
   $(basename "$0") user@host                # agrega directo, puerto 22
+  $(basename "$0") user@host nombre         # agrega directo con alias custom
   $(basename "$0") user@host:2222           # agrega con puerto custom
   $(basename "$0") host                     # sin user, puerto 22
   $(basename "$0") user@host:port nombre    # alias custom (default = host)
@@ -114,6 +115,11 @@ interactive_mode() {
 }
 
 cli_mode() {
+    if (( $# > 2 )); then
+        printf '%sError: demasiados argumentos.%s\n' "$c_red" "$c_reset" >&2
+        usage 1
+    fi
+
     local target="$1"
     local name="${2:-}"
     local parsed user host port
@@ -122,6 +128,10 @@ cli_mode() {
     host="$(printf '%s' "$parsed" | sed -n '2p')"
     port="$(printf '%s' "$parsed" | sed -n '3p')"
     [[ -z "$name" ]] && name="$host"
+    if [[ "$name" == *[[:space:]]* ]]; then
+        printf '%sError: el alias no puede contener espacios.%s\n' "$c_red" "$c_reset" >&2
+        exit 1
+    fi
     append_host "$name" "$host" "$user" "$port"
 }
 
