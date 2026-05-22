@@ -72,6 +72,18 @@
             "Use --remove to delete the autostart entry."
         ]
     },
+    "kiosinst": {
+        "name": "kiosinst",
+        "short_desc": "Installs an X11/Openbox Chromium kiosk that auto-starts on TTY1.",
+        "detailed_desc": [
+            "Installs a minimal Debian-style kiosk stack with Xorg, xinit, Openbox, Chromium, and unclutter.",
+            "",
+            "It writes ~/.xinitrc to disable screen blanking, rotate HDMI-1 inverted, hide the pointer, start Openbox, and open Chromium in incognito kiosk mode at https://google.com.",
+            "",
+            "It writes ~/.bash_profile so a first virtual terminal login without DISPLAY starts X automatically.",
+            "After setup, it recommends rebooting and also prints startx for manual launch."
+        ]
+    },
     "pythonnc": {
         "name": "pythonnc",
         "short_desc": "Netcat replacement written in Python.",

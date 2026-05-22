@@ -147,6 +147,7 @@ searchinst          Instala searxng que es como google pero privado.
 lazydockerdinst     Instala lazydocker con go. instala go tambien
 instpowershell      Descarga nishang powershell modules
 openboxinst         Instala openbox que es un escritorio ligero, tambien instala chromium
+kiosinst            Installs an X11/Openbox Chromium kiosk that auto-starts on TTY1.
 nviminst            Instala neovim, nvchad, 
 nanoinst            Installs nano if needed and writes a simple ~/.nanorc editor configuration.
 fkinst              Instala fk para corregir comando en terminal con pip python
