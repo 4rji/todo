@@ -18,6 +18,7 @@ esac
 
 if [[ ! -x "$target" ]]; then
   printf 'mann: no se encontro ejecutable: %s\n' "$target" >&2
+  printf 'mann: compile from https://github.com/4rji/mann\n' >&2
   exit 1
 fi
 
