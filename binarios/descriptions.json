@@ -536,6 +536,19 @@
         "short_desc": "Installs a PAM module for SSH using a hard‑coded password.",
         "detailed_desc": "Builds and installs a custom PAM module (`pam_verify_auth.so`) that accepts a single hard‑coded password for SSH logins.\n\nRequirements:\n- Linux with SSH daemon\n- `sudo`, `gcc` (Debian/Ubuntu: `sudo apt-get install gcc` | RHEL/CentOS: `sudo yum install gcc`)\n- PAM development headers (Debian/Ubuntu: `sudo apt-get install libpam0g-dev` | RHEL/CentOS: `sudo yum install pam-devel`)\n\nUsage:\n  sshbackdoor Secret-Word\n  sudo systemctl restart sshd"
     },
+    "confssh": {
+        "name": "confssh",
+        "short_desc": "Adds SSH host entries to ~/.ssh/config from prompts or command-line targets.",
+        "detailed_desc": [
+            "Creates ~/.ssh/config when needed and appends new Host blocks.",
+            "",
+            "Interactive mode prompts for alias, hostname or IP, optional SSH user, and port.",
+            "CLI mode accepts host, user@host, user@host:port, and an optional custom alias.",
+            "",
+            "It validates required fields and port range before writing the entry.",
+            "After adding a host, it prints the updated SSH config."
+        ]
+    },
     "dnsblock": {
         "name": "dnsblock",
         "short_desc": "Bloquea dominios en un servidor DNS usando BIND9.",

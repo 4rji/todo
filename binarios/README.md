@@ -429,7 +429,7 @@ sshexit             Instala un mensaje de salida de ssh en la zsh ZSH
 x11uso              Instrucciones para x11
 fixssh              Seguido de la ip, para borrar la ip del localhost cuando se duplica	
 cssh                copia tu clave a una maquina remota (Linux/macOS, puerto 22 por defecto)
-sshconf             Hace un archivo .ssh/config para conectarse por medio de jump ejemplo: ssh maquina-final
+confssh             Adds SSH hosts to ~/.ssh/config interactively or from user@host arguments.
 sshmont             Monta una carpeta usando sshh           Edita el banner de inicio de session de ssh, cuando se loguea
 sshc                Binario en comprimidos, que enviar un comando a los host ssh, tipo ansible
 sshcm               Mac version: envia comando a todos los hosts por medio de ssh, tipo ansible
@@ -799,7 +799,7 @@ limpiarf            Limpiar un archivo buscando, awk grep palabra.
 
 
 fixhost             Arregla know_hosts para ssh duplicados
-sshhostt            Lista los hosts del archivo sshconf, para conectarse
+sshhostt            Lists hosts from the SSH config managed by confssh for quick connections.
 sshhost             Lista igual pero en go. binario. 
 sshjump             Configura los jumps infinitamente.
 sshhuesped          Huespedes de mi configuracion
