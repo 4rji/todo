@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bin_dir="${DOMINF_BIN_DIR:-/opt/4rji/bin}"
+platform="$(uname -s)"
+
+case "$platform" in
+    Darwin)
+        target="${bin_dir}/dominfm"
+        ;;
+    Linux)
+        target="${bin_dir}/dominf_amd"
+        ;;
+    *)
+        printf 'dominf: sistema no soportado: %s\n' "$platform" >&2
+        printf 'dominf: soportado: macOS y Linux\n' >&2
+        exit 1
+        ;;
+esac
+
+if [[ ! -x "$target" ]]; then
+    printf 'dominf: no se encontro el ejecutable: %s\n' "$target" >&2
+    exit 127
+fi
+
+exec "$target" "$@"
