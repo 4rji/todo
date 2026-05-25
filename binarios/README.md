@@ -431,7 +431,7 @@ fixssh              Seguido de la ip, para borrar la ip del localhost cuando se 
 cssh                copia tu clave a una maquina remota (Linux/macOS, puerto 22 por defecto)
 confssh             Adds SSH hosts to ~/.ssh/config interactively or from user@host arguments.
 sshmont             Monta una carpeta usando sshh           Edita el banner de inicio de session de ssh, cuando se loguea
-sshc                Binario en comprimidos, que enviar un comando a los host ssh, tipo ansible
+sshc                Runs one SSH command in parallel across configured hosts.
 sshcm               Mac version: envia comando a todos los hosts por medio de ssh, tipo ansible
 sshmoni             Este busca conexiones activas ssh, muestra procesos PID y luego ejecuta killsshmanual
 

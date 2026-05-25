@@ -957,5 +957,24 @@
             "",
             "It validates that exactly one URL is provided, checks that -n is a positive integer, and verifies the selected downloader exists in PATH before running."
         ]
+    },
+    "sshc": {
+        "name": "sshc",
+        "short_desc": "Runs one SSH command in parallel across configured SSH hosts.",
+        "detailed_desc": [
+            "Reads ~/.ssh/config and collects Host entries that do not contain wildcard characters.",
+            "",
+            "Runs the provided command on up to 10 SSH hosts in parallel.",
+            "Examples: sshc uptime, sshc whoami, sshc sudo systemctl restart nginx.",
+            "",
+            "Uses BatchMode=yes so it never prompts for a password.",
+            "Uses ConnectTimeout=5 so each SSH connection waits at most 5 seconds.",
+            "",
+            "Disables strict host key checking with StrictHostKeyChecking=no and UserKnownHostsFile=/dev/null.",
+            "That accepts host keys automatically and does not save them.",
+            "",
+            "Successful hosts are printed in green with their command output below.",
+            "Any SSH error or non-zero remote command exit is printed as 'host offline' in red."
+        ]
     }
 }
