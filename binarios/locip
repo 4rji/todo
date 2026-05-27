@@ -4,6 +4,7 @@ set -euo pipefail
 BIN_DIR="/opt/4rji/bin"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
+LOCIP_ARGS=("$@")
 
 die() {
     echo "locip: $*" >&2
@@ -15,14 +16,12 @@ run_first_available() {
 
     for candidate in "$@"; do
         if [[ -x "$BIN_DIR/$candidate" ]]; then
-            exec "$BIN_DIR/$candidate" "${LOCIP_ARGS[@]}"
+            exec "$BIN_DIR/$candidate" "${LOCIP_ARGS[@]+"${LOCIP_ARGS[@]}"}"
         fi
     done
 
     die "no encontre binario ejecutable en $BIN_DIR para $OS $ARCH. Esperaba uno de: $*"
 }
-
-LOCIP_ARGS=("$@")
 
 case "$OS:$ARCH" in
     Linux:x86_64|Linux:amd64)
