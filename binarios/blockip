@@ -83,13 +83,17 @@ save_conf() {
 display_usage() {
   echo_msg "Usage" 34
   cat <<EOF
-  $0 <file>          → Blocks all listed IPs (one per line)
-  $0 <IP>            → Menu to block/check/unblock that IP
-  $0                 → Show this help
+  $0 <file>             → Blocks all listed IPs (one per line)
+  $0 <IP>               → Menu to block/check/unblock that IP
+  $0 -b <IP>            → Blocks one IP
+  $0 -c <IP>            → Checks if one IP is blocked
+  $0 -u <IP>            → Unblocks one IP
+  $0                    → Show this help
 
 Examples:
   $0 lista_ips.txt
   $0 203.0.113.10
+  $0 -u 203.0.113.10
 EOF
 }
 
@@ -132,6 +136,11 @@ delete_ip() {
   echo_msg "IP $1 removed if it existed" 32
 }
 
+valid_ip() {
+  local ip_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$'
+  [[ "$1" =~ $ip_regex ]]
+}
+
 # -------------------------
 # Start
 # -------------------------
@@ -148,6 +157,46 @@ fi
 
 ARG="$1"
 
+case "$ARG" in
+  -b)
+    if [[ $# -ne 2 ]] || ! valid_ip "$2"; then
+      echo_msg "Usage: $0 -b <IP>" 33
+      tput cnorm 2>/dev/null
+      exit 1
+    fi
+    block_ip "$2"
+    save_conf
+    tput cnorm 2>/dev/null
+    exit 0
+    ;;
+  -c)
+    if [[ $# -ne 2 ]] || ! valid_ip "$2"; then
+      echo_msg "Usage: $0 -c <IP>" 33
+      tput cnorm 2>/dev/null
+      exit 1
+    fi
+    check_ip "$2"
+    tput cnorm 2>/dev/null
+    exit 0
+    ;;
+  -u)
+    if [[ $# -ne 2 ]] || ! valid_ip "$2"; then
+      echo_msg "Usage: $0 -u <IP>" 33
+      tput cnorm 2>/dev/null
+      exit 1
+    fi
+    delete_ip "$2"
+    save_conf
+    tput cnorm 2>/dev/null
+    exit 0
+    ;;
+  -h)
+    display_usage
+    tput cnorm 2>/dev/null
+    exit 0
+    ;;
+esac
+
 # If it's a readable file → block from file
 if [[ -f "$ARG" && -r "$ARG" ]]; then
   block_file "$ARG"
@@ -156,8 +205,7 @@ if [[ -f "$ARG" && -r "$ARG" ]]; then
 fi
 
 # If it looks like an IP → action menu
-IP_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$'
-if [[ "$ARG" =~ $IP_REGEX ]]; then
+if valid_ip "$ARG"; then
   IP="$ARG"
   while true; do
     echo -e "\nActions for IP $IP:"

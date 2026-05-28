@@ -679,7 +679,7 @@ bannerlogin         Modify the banner after login with ssh and also when start c
 
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
 backd               Wrapper: usa backd_amd en Linux amd64 y backdm en macOS M
-blockip             Bloquea IPs agregando a un set ipset y aplicando una regla iptables
+blockip             Bloquea/desbloquea IPs con ipset e iptables; usa -u <IP> para desbloquear
 services            Encuentra servicios que no son del kernel linux corriendo.
 netevils            aun no se    
 procesos            Muestra los procesos de los usuarios sin PID, no PID
