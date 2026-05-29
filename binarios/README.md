@@ -747,8 +747,9 @@ vcen                Para manejar las maquinas en el vcenter desde cli linux, vmw
 vcenterinst         Descarga govc para vcenter vmware, variables adentro del script. 
 mailinst            Instala mail server en fedora 21. baja archivos de conf y todo.
 redhavi             Instala misconfiguraciones en linux.
-redhavi-fedora      Para ccdc igual misconfiguraciones
+redhavi-fedora      Para CCDC, prepara misconfiguraciones de laboratorio con dry-run por defecto
 redhavi-check       Checa las malconfiguraciones
+redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
 
 
 

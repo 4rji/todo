@@ -2,15 +2,16 @@
 
 TOTAL_CHECKS=0
 PASSED_CHECKS=0
+OS="unknown"
 
 
 
 # ANSI COLORS
-GREEN="\e[32m"
-RED="\e[31m"
-CYAN="\e[36m"
-YELLOW="\e[33m"
-RESET="\e[0m"
+GREEN=$'\033[32m'
+RED=$'\033[31m'
+CYAN=$'\033[36m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
 
 ok() {
     echo -e "${GREEN}[OK]${RESET}  $1"
@@ -32,7 +33,38 @@ subtitle() {
     echo -e "${YELLOW}-- $1 --${RESET}"
 }
 
+detect_os() {
+    if [ -n "${OS_OVERRIDE:-}" ]; then
+        OS="$OS_OVERRIDE"
+    elif [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        OS="${ID:-unknown}"
+    fi
+}
+
+package_installed() {
+    local pkg="$1"
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"
+            ;;
+        centos|rhel|ol|fedora)
+            rpm -q "$pkg" >/dev/null 2>&1
+            ;;
+        arch)
+            pacman -Qi "$pkg" >/dev/null 2>&1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+detect_os
 echo -e "\n${CYAN}=== CCDC Cleanup Verification ===${RESET}"
+echo -e "${YELLOW}Detected OS:       ${RESET}$OS"
 
 ############################################
 # 1) USERS: ccdc / splunk
@@ -134,6 +166,40 @@ done
 if [ "$found_webshell" -eq 0 ]; then
     ok "no shell_exec found under /var/www*"
 fi
+
+############################################
+# 5) INSECURE PACKAGES
+############################################
+section "Insecure Package Check"
+
+bad_pkgs=()
+
+case "$OS" in
+    debian|ubuntu|kali)
+        bad_pkgs=("telnet" "ftp" "tftp")
+        ;;
+    centos|rhel|ol)
+        bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+        ;;
+    fedora)
+        bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+        ;;
+    arch)
+        bad_pkgs=("inetutils" "tftp-hpa")
+        ;;
+    *)
+        bad "unsupported OS for package verification: $OS"
+        ;;
+esac
+
+for pkg in "${bad_pkgs[@]}"; do
+    subtitle "Checking package: $pkg"
+    if package_installed "$pkg"; then
+        bad "insecure package STILL installed: $pkg"
+    else
+        ok "insecure package not installed: $pkg"
+    fi
+done
 
 echo -e "\n${CYAN}=== Cleanup verification finished ===${RESET}\n"
 

