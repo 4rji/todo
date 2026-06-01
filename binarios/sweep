@@ -1,83 +1,301 @@
 #!/usr/bin/env bash
-#clear
+
 echo -e "\n\033[1;37m_________________________________________________________\033[0m\n"
 echo -e "\e[34mPerforms ARP and ping scan, shows both scans. To avoid ARP scan, run with -a\e[0m"
-
 echo -e "\n\033[1;37m_________________________________________________________\033[0m\n"
 
-# Lista de paquetes a instalar
-paquetes=("arp-scan")
-
-# Función para verificar si un paquete está instalado (Debian/Ubuntu/Kali)
-paquete_instalado_apt() {
-    dpkg -l "$1" | grep -q '^ii'  
-}
-
-# Función para verificar si un paquete está instalado (CentOS/RHEL)
-paquete_instalado_yum() {
-    yum list installed "$1" &> /dev/null
-}
-
-# Función para verificar si un paquete está instalado (Fedora)
-paquete_instalado_dnf() {
-    dnf list installed "$1" &> /dev/null
-}
-
-# Función para verificar si un paquete está instalado (Arch Linux)
-paquete_instalado_pacman() {
-    pacman -Qi "$1" &> /dev/null
-}
-
-# Detectar el sistema operativo
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-fi
-
-# Instalar paquetes basados en el sistema operativo
-for paquete in "${paquetes[@]}"; do
-    case $OS in
-        "debian"|"ubuntu"|"kali")
-            if ! paquete_instalado_apt "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo apt-get install -y "$paquete"
+detect_os() {
+    case "$(uname -s)" in
+        Darwin)
+            echo "macos"
+            ;;
+        Linux)
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                echo "${ID:-linux}"
+            else
+                echo "linux"
             fi
             ;;
-        "centos"|"rhel")
-            if ! paquete_instalado_yum "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo yum install -y "$paquete"
-            fi
+        *)
+            echo "unknown"
             ;;
-        "fedora")
-            if ! paquete_instalado_dnf "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo dnf install -y "$paquete"
-            fi
+    esac
+}
+
+install_arp_scan_linux() {
+    case "$OS" in
+        debian|ubuntu|kali)
+            dpkg -l arp-scan 2>/dev/null | grep -q '^ii' || sudo apt-get install -y arp-scan
             ;;
-        "arch")
-            if ! paquete_instalado_pacman "$paquete"; then
-                echo "Instalando el paquete $paquete..."
-                sudo pacman -S --noconfirm "$paquete"
-            fi
+        centos|rhel)
+            yum list installed arp-scan &>/dev/null || sudo yum install -y arp-scan
+            ;;
+        fedora)
+            dnf list installed arp-scan &>/dev/null || sudo dnf install -y arp-scan
+            ;;
+        arch)
+            pacman -Qi arp-scan &>/dev/null || sudo pacman -S --noconfirm arp-scan
             ;;
         *)
             ;;
     esac
-done
+}
 
+install_arp_scan_macos() {
+    if command -v arp-scan >/dev/null 2>&1; then
+        return
+    fi
 
+    if command -v brew >/dev/null 2>&1; then
+        echo "Installing arp-scan..."
+        brew install arp-scan
+    else
+        echo "arp-scan is not installed and Homebrew was not found."
+    fi
+}
 
+ensure_arp_scan() {
+    if command -v arp-scan >/dev/null 2>&1; then
+        return
+    fi
 
+    case "$OS_FAMILY" in
+        macos)
+            install_arp_scan_macos
+            ;;
+        linux)
+            install_arp_scan_linux
+            ;;
+    esac
+}
 
-
-
-# Function to display available interfaces and IPs
-function show_interfaces() {
+show_interfaces_linux() {
     ip -4 addr show | awk '/inet/ && !/127.0.0.1/ {split($2, a, "/"); printf "%s:%s\n", $NF, a[1]}'
 }
 
-# Check for -a option
+show_interfaces_macos() {
+    networksetup -listallhardwareports | awk '
+        /Device/ {
+            dev=$2
+            cmd="ipconfig getifaddr " dev
+            cmd | getline ip
+            close(cmd)
+            if (ip) print dev ":" ip
+        }
+    '
+}
+
+show_interfaces() {
+    case "$OS_FAMILY" in
+        macos)
+            show_interfaces_macos
+            ;;
+        linux)
+            show_interfaces_linux
+            ;;
+        *)
+            echo "Unsupported operating system." >&2
+            return 1
+            ;;
+    esac
+}
+
+load_interfaces() {
+    interfaces=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && interfaces+=("$line")
+    done <<EOF
+$(show_interfaces)
+EOF
+}
+
+select_interface() {
+    if [ "${#interfaces[@]}" -eq 0 ]; then
+        echo "No active interfaces found."
+        exit 1
+    fi
+
+    echo "Available interfaces and IPs:"
+    echo ""
+    for i in "${!interfaces[@]}"; do
+        interface="${interfaces[$i]%%:*}"
+        ip="${interfaces[$i]#*:}"
+        echo -e "$((i+1)) - \033[0;31m$interface\033[0m, \033[0;34m$ip\033[0m"
+    done
+    echo ""
+
+    read -p "$(echo -e '\033[1;33mSelect interface number: \033[0m')" selected_interface_number
+    if ! [[ "$selected_interface_number" =~ ^[0-9]+$ ]] ||
+        [ "$selected_interface_number" -lt 1 ] ||
+        [ "$selected_interface_number" -gt "${#interfaces[@]}" ]; then
+        echo "Invalid interface number."
+        exit 1
+    fi
+
+    selected_interface="${interfaces[$((selected_interface_number-1))]%%:*}"
+    selected_ip="${interfaces[$((selected_interface_number-1))]#*:}"
+    subnet="${selected_ip%.*}"
+}
+
+run_arp_scan() {
+    if [ "$auto_arp" = true ]; then
+        return
+    fi
+
+    if ! command -v arp-scan >/dev/null 2>&1; then
+        echo "arp-scan is not available. Skipping ARP scan."
+        return
+    fi
+
+    echo -e "\n\033[1;32m_________________________________________________________\033[0m\n"
+    echo -e "\033[0;32msudo arp-scan -I $selected_interface --localnet\033[0m"
+    sudo arp-scan -I "$selected_interface" --localnet
+    echo ""
+}
+
+discover_linux() {
+    echo "Scanning ..."
+    cmd="sudo nmap -sn -n -PR \"$subnet.0/24\" -oG - | awk '/Status: Up/{print \$2}' | sort -V | uniq | tee -a \"$tempfile\" >/dev/null"
+    eval "$cmd"
+}
+
+discover_macos() {
+    echo "Scanning ..."
+    sudo ping -c3 "${subnet}.255" &>/dev/null
+    arp -a | awk -v s="$subnet." '
+        $2 ~ "\\("s"[0-9]+\\)" {
+            gsub(/[()]/, "", $2)
+            print $2
+        }
+    ' | sort -t . -k1,1n -k2,2n -k3,3n -k4,4n | uniq > "$tempfile"
+    cmd="sudo ping -c3 \"${subnet}.255\"; arp -a | awk subnet filter"
+}
+
+discover_hosts() {
+    : > "$tempfile"
+
+    case "$OS_FAMILY" in
+        macos)
+            discover_macos
+            ;;
+        linux)
+            discover_linux
+            ;;
+    esac
+
+    echo ""
+    echo "Done."
+    echo ""
+    echo -e "\033[1;36mCommand executed:\033[0m"
+    echo "$cmd"
+    echo ""
+}
+
+print_hosts() {
+    echo -e "\033[1;33mScan PING of IP addresses and corresponding host names if available:\033[0m"
+    echo ""
+
+    counter=1
+    while IFS= read -r ip; do
+        host_name=""
+        if [ -f ~/.ssh/config ]; then
+            host_name=$(grep -B1 "$ip" ~/.ssh/config 2>/dev/null | grep -m1 "Host " | awk '{print $2}')
+        fi
+
+        if [ -n "$host_name" ]; then
+            echo "$counter- $ip - $host_name"
+        else
+            echo "$counter- $ip - Host name not found"
+        fi
+        ((counter++))
+    done < "$tempfile"
+}
+
+save_ips_prompt() {
+    echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
+    echo -e '\033[1;33mDo you want to save IPs in sweepIPs file? [N/s]: \033[0m'
+    read -n 1 save_ips
+    echo ""
+    save_ips=${save_ips:-N}
+    if [[ "$save_ips" =~ ^[sS]$ ]]; then
+        cp "$tempfile" sweepIPs
+        echo "IPs saved in sweepIPs."
+    else
+        echo "IPs not saved."
+    fi
+}
+
+expo_prompt() {
+    echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
+    read -p "Which number from the list to scan: " selected_number
+    echo ""
+    if ! [[ "$selected_number" =~ ^[0-9]+$ ]]; then
+        echo "Invalid number."
+        return
+    fi
+
+    ip_to_scan=$(sed "${selected_number}q;d" "$tempfile" | awk '{print $1}')
+    if [ -z "$ip_to_scan" ]; then
+        echo "No IP found for that number."
+        return
+    fi
+
+    read -n1 -p "$(echo -e '\033[1;33mExecute nmap expo to IP? [Y/n]: \033[0m')" execute_expo
+    echo ""
+    execute_expo=${execute_expo:-Y}
+
+    if [[ "$execute_expo" =~ ^[Yy]$ ]]; then
+        expo "$ip_to_scan"
+    else
+        echo -e "\033[1;33mExpo command was not executed.\033[0m"
+    fi
+}
+
+search_mac_linux() {
+    read -p "$(echo -e '\033[1;33mEnter the name to search in MAC addresses: \033[0m')" name
+    if [ -n "$name" ]; then
+        comando="macchanger -l | grep -i $name"
+        echo ""
+        echo -e "\033[1;32m$comando\033[0m"
+        echo ""
+        eval "$comando"
+    else
+        echo -e "\033[1;33mNo name entered. Exiting.\033[0m"
+    fi
+}
+
+search_mac_macos() {
+    read -p "$(echo -e '\033[1;33mEnter pattern to search in ARP table: \033[0m')" pattern
+    if [ -n "$pattern" ]; then
+        arp -a | grep -i "$pattern"
+    else
+        echo -e "\033[1;33mNo pattern entered. Exiting.\033[0m"
+    fi
+}
+
+search_mac_prompt() {
+    echo ""
+    echo -e "\033[1;33m*** Caution: This script is made for /24 ***\033[0m"
+    echo ""
+    read -n1 -p "$(echo -e '\033[1;33mDo you want to search for a MAC address? [Y/n]: \033[0m')" search_mac
+    echo ""
+    search_mac=${search_mac:-Y}
+
+    if [[ "$search_mac" =~ ^[Yy]$ ]]; then
+        case "$OS_FAMILY" in
+            macos)
+                search_mac_macos
+                ;;
+            linux)
+                search_mac_linux
+                ;;
+        esac
+    else
+        echo -e "\033[1;33mSearch canceled.\033[0m"
+    fi
+}
+
 auto_arp=false
 while getopts "a" opt; do
     case $opt in
@@ -89,162 +307,34 @@ while getopts "a" opt; do
     esac
 done
 
-
-
-
-
-
-# Get the list of interfaces and IPs
-interfaces_and_ips=($(show_interfaces))
-
-# Display the list of interfaces
-echo -e "Available interfaces and IPs:"
-echo ""
-for i in "${!interfaces_and_ips[@]}"; do
-    interface=$(echo "${interfaces_and_ips[$i]}" | cut -d: -f1)
-    ip=$(echo "${interfaces_and_ips[$i]}" | cut -d: -f2)
-    echo -e "$((i+1)) - \033[0;31m$interface\033[0m, \033[0;34m$ip\033[0m"
-done
+OS=$(detect_os)
+case "$OS" in
+    macos)
+        OS_FAMILY="macos"
+        ;;
+    debian|ubuntu|kali|centos|rhel|fedora|arch|linux)
+        OS_FAMILY="linux"
+        ;;
+    *)
+        echo "Unsupported operating system: $OS"
+        exit 1
+        ;;
+esac
 
 if [ "$auto_arp" = false ]; then
-    # Perform ARP scan automatically
-    echo -e "\n\033[1;32m_________________________________________________________\033[0m\n"
-    read -p "$(echo -e '\033[1;33mSelect the interface number for ARP scan: \033[0m')" arp_interface_number
-    echo ""
-    arp_interface=$(echo "${interfaces_and_ips[$((arp_interface_number-1))]}" | cut -d: -f1)
-    
-    # Echo the command being executed in green
-    echo -e "\033[0;32msudo arp-scan -I $arp_interface --localnet\033[0m"
-    
-    # Execute the ARP scan, display the output, and save it to arp-scan.txt
-#    sudo arp-scan -I "$arp_interface" --localnet | tee arp-scan.txt
-     sudo arp-scan -I "$arp_interface" --localnet 
-
-   
-    echo ""
-    selected_interface_number=$arp_interface_number
-else
-    # Ask the user to select an interface for network scan
-    read -p "Which interface number do you want to scan? " selected_interface_number
+    ensure_arp_scan
 fi
-
-# Extract the selected IP
-selected_ip=$(echo "${interfaces_and_ips[$((selected_interface_number-1))]}" | cut -d: -f2)
-subnet=$(echo "$selected_ip" | awk -F. '{print $1"."$2"."$3}')
+load_interfaces
+select_interface
+run_arp_scan
 
 echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
 
-tempfile=$(mktemp) # Create a temporary file
+tempfile=$(mktemp)
+trap 'rm -f "$tempfile"' EXIT
 
-
-
-
-
-
-# truncate tempfile
-: > "$tempfile"
-
-echo "Scanning ..."
-# guardar comando ejecutado
-cmd="sudo nmap -sn -n -PR \"$subnet.0/24\" -oG - | awk '/Status: Up/{print \$2}' | sort -V | uniq | tee -a \"$tempfile\" >/dev/null"
-
-# ejecutar comando
-eval "$cmd"
-
-echo ""
-echo "Done."
-echo ""
-
-# mostrar comando ejecutado
-echo -e "\033[1;36mCommand executed:\033[0m"
-echo "$cmd"
-echo ""
-
-echo -e "\033[1;33mScan PING of IP addresses and corresponding host names if available:\033[0m"
-echo ""
-
-counter=1
-while IFS= read -r ip; do
-    host_name=""
-    if [ -f ~/.ssh/config ]; then
-        host_name=$(grep -B1 "$ip" ~/.ssh/config 2>/dev/null | grep -m1 "Host " | awk '{print $2}')
-    fi
-
-    if [[ -n "$host_name" ]]; then
-        echo "$counter- $ip - $host_name"
-    else
-        echo "$counter- $ip - Host name not found"
-    fi
-    ((counter++))
-done < "$tempfile"
-
-
-echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
-
-
-
-
-
-
-
-# Ask user if they want to save the found IPs
-echo -e '\033[1;33mDo you want to save IPs in sweepIPs file? [N/s]: \033[0m'
-read -n 1 save_ips
-save_ips=${save_ips:-N}
-if [[ "$save_ips" == "s" ]]; then
-    cp $tempfile sweepIPs
-    echo "IPs saved in sweepIPs."
-else
-    echo "IPs not saved."
-fi
-echo -e "\n\033[1;34m_________________________________________________________\033[0m\n"
-
-
-
-
-
-
-
-
-
-# Ask for the number to scan
-read -p "Which number from the list to scan: " selected_number
-echo ""
-selected_ip=$(sed "${selected_number}q;d" $tempfile | awk '{print $1}')
-read -n1 -p "$(echo -e '\033[1;33mExecute nmap expo to IP? [Y/n]: \033[0m')" execute_expo; execute_expo=${execute_expo:-Y}
-
-if [[ $execute_expo =~ ^[Yy]$ ]]; then
-    expo $selected_ip
-else
-    echo "$(echo -e '\033[1;33mExpo command was not executed.\033[0m')"
-fi
-
-# Remove the temporary file
-rm $tempfile
-
-echo ""
-echo "$(echo -e '\033[1;33m*** Caution: This script is made for /24 ***\033[0m')"
-echo ""
-
-# Pregunta al usuario si desea buscar una dirección MAC
-read -n1 -p "$(echo -e '\033[1;33mDo you want to search for a MAC address? [Y/n]: \033[0m')" search_mac
-echo ""
-if [[ $search_mac =~ ^[Yy]$ ]] || [[ -z $search_mac ]]; then
-    # Pregunta el nombre para buscar
-    read -p "$(echo -e '\033[1;33mEnter the name to search in MAC addresses: \033[0m')" name
-    if [[ -n $name ]]; then
-        # Construye el comando
-        echo ""
-        comando="macchanger -l | grep -i $name"
-        echo""
-        # Muestra el comando
-        echo -e "\033[1;32m$comando\033[0m"
-        echo""
-        # Ejecuta el comando
-        eval $comando
-    else
-        echo -e "\033[1;33mNo name entered. Exiting.\033[0m"
-    fi
-else
-    echo -e "\033[1;33mSearch canceled.\033[0m"
-fi
+discover_hosts
+print_hosts
+save_ips_prompt
+expo_prompt
+search_mac_prompt

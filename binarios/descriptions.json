@@ -466,6 +466,17 @@
         "short_desc": "Instala y configura Chrony para sincronización de tiempo.",
         "detailed_desc": "sudo apt-get install chrony -f\nsudo systemctl restart chrony\nsudo systemctl status chrony"
     },
+    "sweep": {
+        "name": "sweep",
+        "short_desc": "Hace sweep de red en Linux o macOS y luego ofrece ejecutar expo.",
+        "detailed_desc": [
+            "Detecta automaticamente el sistema operativo.",
+            "En Linux usa ip, arp-scan y nmap para descubrir hosts de la red /24 seleccionada.",
+            "En macOS usa networksetup, ipconfig, arp-scan, ping y arp para descubrir hosts.",
+            "La opcion -a omite el ARP scan inicial y no intenta instalar arp-scan.",
+            "Puede guardar las IPs encontradas en sweepIPs y ejecutar expo sobre una IP seleccionada."
+        ]
+    },
     "sweepnet": {
         "name": "sweepnet",
         "short_desc": "Escanea una red completa usando sweep.",

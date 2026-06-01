@@ -349,7 +349,7 @@ nmap-html           nmap A -O -sV  nmap -A -O -sV -oX puerto.xml --stylesheet=ht
 ips                 hace un nmap simple a un archivo llamado ips.txt
 nombre_{IP}         Da el nombre de la maquina si es linux o windows                                   
 scanporty           python3 program que hace un escaneo y pregunta el numero de puertos.usa socket               
-sweep               Hace un sweep y despues pregunta si desea ejecutar expo
+sweep               Hace sweep en Linux/macOS, detecta el sistema y despues pregunta si desea ejecutar expo
 sweepold            solo hace el sweep normal de las ips
 nsweep_{192.168.1}  hace un nmap -sn en la red para buscar maquinas activas.   
 nsweep2             Otro que hace un nmap -sn                        
