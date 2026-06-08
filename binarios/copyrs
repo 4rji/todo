@@ -193,7 +193,7 @@ tar_supports_option() {
 }
 
 create_archive() {
-    local parent base safe_name timestamp probe_file
+    local parent base probe_file
     local tar_opts=()
 
     parent="$(cd "$(dirname "$source_path")" && pwd -P)" || fail "no pude leer el directorio origen."
@@ -203,10 +203,8 @@ create_archive() {
         fail "ruta origen no soportada: $source_path"
     fi
 
-    safe_name="$(printf '%s' "$base" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-    timestamp="$(date +%Y%m%d-%H%M%S)"
     temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/copyrs.XXXXXX")" || fail "no pude crear un directorio temporal."
-    archive_path="${temp_dir}/${safe_name}-${timestamp}.tar.gz"
+    archive_path="${temp_dir}/${base}.tar.gz"
     probe_file="${temp_dir}/.copyrs-tar-probe"
     : > "$probe_file"
 
