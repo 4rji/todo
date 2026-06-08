@@ -419,6 +419,7 @@ ssh-getkey          se descarga la llave para el script ssh-getpublic
 ssh-getpublic       Descarga la llave publica a la maquina.
 ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
 sshc                copia directorio o archivo por ssh, lo comprime y descomprime
+copyrs              Copies files or folders to an SSH config host selected with fzf; -z sends a tar.gz archive.
 sshp                ssh proxy D 1080 en background, completo, bashfun bash function
 sss                 Shows SSH service status, local IP, current user, and SSH port.
 

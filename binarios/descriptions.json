@@ -572,8 +572,16 @@
     },
     "copyrs": {
         "name": "copyrs",
-        "short_desc": "Transfers files to remote hosts using rsync over SSH.",
-        "detailed_desc": "The script reads the SSH configuration file (~/.ssh/config) to extract host details such as usernames, hostnames, and ports. It allows the user to select a host from the available options and transfers the specified file to the selected host using rsync. Usage: ./copyrs <filename>."
+        "short_desc": "Copies files or folders to an SSH config host selected with fzf.",
+        "detailed_desc": [
+            "Lists hosts from ~/.ssh/config and lets the user select a destination with fzf.",
+            "",
+            "Default mode copies the chosen file or folder with rsync over SSH.",
+            "The -z flag creates a temporary .tar.gz archive first, then copies that archive.",
+            "",
+            "Usage: ./copyrs [-z] <file|folder> [remote-path].",
+            "Default remote path: ~/."
+        ]
     },
     "ataquehttp": {
         "name": "ataquehttp",

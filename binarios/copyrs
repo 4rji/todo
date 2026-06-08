@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="${COPYRS_SSH_CONFIG:-$HOME/.ssh/config}"
+
+compress=0
+source_path=""
+remote_path="~/"
+temp_dir=""
+archive_path=""
+
+c_reset=$'\033[0m'
+c_bold=$'\033[1m'
+c_green=$'\033[32m'
+c_yellow=$'\033[33m'
+c_red=$'\033[31m'
+
+usage() {
+    cat <<EOF
+Uso:
+  $(basename "$0") [-z] <archivo|carpeta> [ruta-remota]
+
+Ejemplos:
+  $(basename "$0") archivo.txt
+  $(basename "$0") carpeta/
+  $(basename "$0") -z carpeta/
+  $(basename "$0") -z archivo.txt /tmp/
+
+Por defecto copia al home remoto: ~/
+Con -z crea un .tar.gz temporal y copia ese archivo al host elegido.
+EOF
+}
+
+fail() {
+    printf '%sError:%s %s\n' "$c_red" "$c_reset" "$*" >&2
+    exit 1
+}
+
+cleanup() {
+    if [[ -n "${temp_dir:-}" && -d "$temp_dir" ]]; then
+        rm -rf "$temp_dir"
+    fi
+}
+
+trap cleanup EXIT
+
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || fail "necesitas instalar '$1'."
+}
+
+parse_args() {
+    while (($#)); do
+        case "$1" in
+            -z)
+                compress=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                fail "flag no soportada: $1"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    if (( $# < 1 || $# > 2 )); then
+        usage >&2
+        exit 1
+    fi
+
+    source_path="$1"
+    remote_path="${2:-~/}"
+}
+
+normalize_source() {
+    if [[ "$source_path" == "/" ]]; then
+        fail "no copies / directamente."
+    fi
+
+    if [[ "$source_path" == */ ]]; then
+        source_path="${source_path%/}"
+    fi
+
+    if [[ ! -e "$source_path" && ! -L "$source_path" ]]; then
+        fail "no existe: $source_path"
+    fi
+}
+
+list_ssh_hosts() {
+    [[ -f "$CONFIG_FILE" ]] || fail "no existe $CONFIG_FILE"
+
+    awk '
+        function trim(s) {
+            sub(/^[ \t\r\n]+/, "", s)
+            sub(/[ \t\r\n]+$/, "", s)
+            return s
+        }
+        function clear_hosts(i) {
+            for (i in hosts) {
+                delete hosts[i]
+            }
+        }
+        function flush_hosts(i, alias, show_user, show_host, show_port) {
+            if (host_count == 0) {
+                return
+            }
+            show_user = (user != "" ? user : "-")
+            show_port = (port != "" ? port : "22")
+            for (i = 1; i <= host_count; i++) {
+                alias = hosts[i]
+                if (alias == "" || alias ~ /[*?]/) {
+                    continue
+                }
+                show_host = (hostname != "" ? hostname : alias)
+                printf "%s\t%s\t%s\t%s\n", alias, show_user, show_host, show_port
+            }
+        }
+        /^[ \t]*#/ {
+            next
+        }
+        {
+            line = $0
+            sub(/[ \t]+#.*/, "", line)
+            line = trim(line)
+            if (line == "") {
+                next
+            }
+
+            split(line, fields, /[ \t]+/)
+            key = tolower(fields[1])
+
+            if (key == "host") {
+                flush_hosts()
+                clear_hosts()
+                host_count = 0
+                hostname = ""
+                user = ""
+                port = ""
+                for (i = 2; i <= NF; i++) {
+                    hosts[++host_count] = fields[i]
+                }
+                next
+            }
+
+            if (host_count > 0 && key == "hostname") {
+                hostname = fields[2]
+                next
+            }
+            if (host_count > 0 && key == "user") {
+                user = fields[2]
+                next
+            }
+            if (host_count > 0 && key == "port") {
+                port = fields[2]
+                next
+            }
+        }
+        END {
+            flush_hosts()
+        }
+    ' "$CONFIG_FILE" | sort -u
+}
+
+select_host() {
+    local hosts selected
+
+    hosts="$(list_ssh_hosts)"
+    [[ -n "$hosts" ]] || fail "no encontre hosts utiles en $CONFIG_FILE"
+
+    selected="$(printf '%s\n' "$hosts" | fzf \
+        --prompt='Host SSH> ' \
+        --header='copyrs: elige el destino' \
+        --delimiter=$'\t' \
+        --with-nth=1,2,3,4)" || fail "no se eligio ningun host."
+
+    printf '%s\n' "$selected" | awk -F '\t' '{print $1}'
+}
+
+create_archive() {
+    local parent base safe_name timestamp
+
+    parent="$(cd "$(dirname "$source_path")" && pwd -P)" || fail "no pude leer el directorio origen."
+    base="$(basename "$source_path")"
+
+    if [[ -z "$base" || "$base" == "." ]]; then
+        fail "ruta origen no soportada: $source_path"
+    fi
+
+    safe_name="$(printf '%s' "$base" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/copyrs.XXXXXX")" || fail "no pude crear un directorio temporal."
+    archive_path="${temp_dir}/${safe_name}-${timestamp}.tar.gz"
+
+    printf '%s%sComprimiendo:%s %s -> %s\n' "$c_yellow" "$c_bold" "$c_reset" "$source_path" "$archive_path"
+    (
+        cd "$parent"
+        COPYFILE_DISABLE=1 tar -czf "$archive_path" -- "$base"
+    )
+}
+
+copy_with_rsync() {
+    local src="$1"
+    local host="$2"
+    local dest="$3"
+
+    printf '%s%sCopiando:%s %s -> %s:%s\n' "$c_green" "$c_bold" "$c_reset" "$src" "$host" "$dest"
+    rsync -avh --progress -e ssh -- "$src" "${host}:${dest}"
+}
+
+main() {
+    local host_choice
+
+    parse_args "$@"
+    normalize_source
+
+    need_cmd fzf
+    need_cmd rsync
+    need_cmd ssh
+    need_cmd tar
+
+    host_choice="$(select_host)"
+    printf '%s%sDestino:%s %s\n' "$c_green" "$c_bold" "$c_reset" "$host_choice"
+
+    if (( compress )); then
+        create_archive
+        copy_with_rsync "$archive_path" "$host_choice" "$remote_path"
+    else
+        copy_with_rsync "$source_path" "$host_choice" "$remote_path"
+    fi
+
+    printf '%s%sOK%s\n' "$c_green" "$c_bold" "$c_reset"
+}
+
+main "$@"
