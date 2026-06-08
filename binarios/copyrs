@@ -185,8 +185,16 @@ select_host() {
     printf '%s\n' "$selected" | awk -F '\t' '{print $1}'
 }
 
+tar_supports_option() {
+    local option="$1"
+    local probe_file="$2"
+
+    tar "$option" -cf /dev/null -- "$probe_file" >/dev/null 2>&1
+}
+
 create_archive() {
-    local parent base safe_name timestamp
+    local parent base safe_name timestamp probe_file
+    local tar_opts=()
 
     parent="$(cd "$(dirname "$source_path")" && pwd -P)" || fail "no pude leer el directorio origen."
     base="$(basename "$source_path")"
@@ -199,11 +207,18 @@ create_archive() {
     timestamp="$(date +%Y%m%d-%H%M%S)"
     temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/copyrs.XXXXXX")" || fail "no pude crear un directorio temporal."
     archive_path="${temp_dir}/${safe_name}-${timestamp}.tar.gz"
+    probe_file="${temp_dir}/.copyrs-tar-probe"
+    : > "$probe_file"
+
+    tar_supports_option "--disable-copyfile" "$probe_file" && tar_opts+=("--disable-copyfile")
+    tar_supports_option "--no-mac-metadata" "$probe_file" && tar_opts+=("--no-mac-metadata")
+    tar_supports_option "--no-xattrs" "$probe_file" && tar_opts+=("--no-xattrs")
+    rm -f "$probe_file"
 
     printf '%s%sComprimiendo:%s %s -> %s\n' "$c_yellow" "$c_bold" "$c_reset" "$source_path" "$archive_path"
     (
         cd "$parent"
-        COPYFILE_DISABLE=1 tar -czf "$archive_path" -- "$base"
+        COPYFILE_DISABLE=1 tar "${tar_opts[@]}" -czf "$archive_path" -- "$base"
     )
 }
 
