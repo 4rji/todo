@@ -87,6 +87,7 @@ wgett               Descarga archivos con wget, carpeta completa reescribiendo o
 wgetf               Descarga (FUNCTION) - HTTP minimo que hace GET via TCP - /dev/tcp, http only
 wgetraw             Descarga HTTP minimo que hace GET via TCP - /dev/tcp
 bajar               Downloads MP3 audio, best video, or streams a URL with mpv via yt-dlp.
+convertir           Transcribes audio with Whisper and converts video to MP3 before transcription.
 axe                 Downloads a URL with aria2c by default or axel, using configurable parallel connections.
 
 

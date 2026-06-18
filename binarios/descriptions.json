@@ -177,6 +177,19 @@
             "It prints a small colorized help message when arguments are missing or an option is invalid."
         ]
     },
+    "convertir": {
+        "name": "convertir",
+        "short_desc": "Transcribes audio with Whisper and converts video to MP3 before transcription.",
+        "detailed_desc": [
+            "Transcribes supported audio files with the Whisper CLI using the medium model, English language, and TXT output.",
+            "",
+            "Supported audio formats: wav, mp3, m4a, ogg, and flac.",
+            "Supported video formats: mov, mp4, mkv, and avi.",
+            "",
+            "For video input, it extracts audio to an MP3 with ffmpeg before running Whisper.",
+            "Passing i shows installation instructions for ffmpeg, a Python virtual environment, and Whisper."
+        ]
+    },
     "barrierinst": {
         "name": "barrierinst",
         "short_desc": "Installs Barrier via Flatpak and sets up a startup alias.",
