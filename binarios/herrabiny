@@ -94,9 +94,13 @@ echo    # (opcional) mueve a una nueva línea
 
 # Por defecto, si el usuario presiona Enter, considera 'n'
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Agregar el directorio /opt/4rji/bin al PATH en ~/.zshrc
-    echo 'export PATH=$PATH:/opt/4rji/bin' >> ~/.zshrc
-    echo "The directory /opt/4rji/bin has been added to your PATH in ~/.zshrc."
+    # Agregar el directorio al archivo modular de PATH sin duplicarlo.
+    zsh_path_file="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}/path.zsh"
+    mkdir -p "$(dirname "$zsh_path_file")"
+    touch "$zsh_path_file"
+    path_line='export PATH="$PATH:/opt/4rji/bin"'
+    grep -Fxq "$path_line" "$zsh_path_file" || printf '%s\n' "$path_line" >> "$zsh_path_file"
+    echo "The directory /opt/4rji/bin has been added to your PATH in $zsh_path_file."
 
     # Opcional: recargar ~/.zshrc para aplicar los cambios sin necesidad de reiniciar la terminal
     #source ~/.zshrc
@@ -134,13 +138,13 @@ respuesta=$(echo $respuesta | tr '[:upper:]' '[:lower:]')
 # Verifica la respuesta
 if [ "$respuesta" == "s" ]; then
     echo -e "${verde}Instalando todos los alias... ${reset}"
-    wget -O - https://raw.githubusercontent.com/4rji/4rji/main/alias.sh | bash 
-    #source alias.sh  # Ejecuta el script descargado
-
-    # Borrar archivos
-    #rm alias.sh
-
-    # Aquí colocas el código para ejecutar bashfun
+    if [[ -x /opt/4rji/bin/herralias ]]; then
+        /opt/4rji/bin/herralias
+    elif command -v herralias >/dev/null 2>&1; then
+        herralias
+    else
+        echo "herralias no está instalado." >&2
+    fi
 else
     echo ""
 fi
@@ -151,5 +155,4 @@ fi
 
 
 /opt/4rji/bin/todou
-
 

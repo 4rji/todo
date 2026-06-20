@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+ZSH_ALIASES_FILE="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}/aliases.zsh"
+
+add_zsh_alias() {
+    local definition="$1"
+    mkdir -p "$(dirname "$ZSH_ALIASES_FILE")"
+    touch "$ZSH_ALIASES_FILE"
+    grep -Fxq "$definition" "$ZSH_ALIASES_FILE" || printf '%s\n' "$definition" >> "$ZSH_ALIASES_FILE"
+}
 
 
 if [ "$1" == "-i" ]; then
@@ -87,7 +95,7 @@ elif [ "$1" == "" ]; then
     echo "-i para instalar"
     
     echo ""
-    echo "alias archivserv='cd ~/archivebox && docker-compose up'" >> ~/.zshrc
+    add_zsh_alias "alias archivserv='cd ~/archivebox && docker-compose up'"
     
     echo -e "\e[33mpara iniciar el servidor ir a cd ~/archivebox\e[0m"
     echo -e "\e[33mejecutar: docker-compose up (a veces con sudo, depende permisos)\e[0m"

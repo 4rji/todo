@@ -407,9 +407,13 @@ if [[ $mostrarPreguntas == true || $mostrarBina == true ]]; then
 
     # By default, if user presses Enter, consider 'n'
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Add binary directory to PATH in ~/.zshrc
-        echo "export PATH=\$PATH:${bin_dir}" >> ~/.zshrc
-        echo "Directory ${bin_dir} added to PATH in ~/.zshrc."
+        # Add binary directory to the modular PATH file.
+        zsh_path_file="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}/path.zsh"
+        mkdir -p "$(dirname "$zsh_path_file")"
+        touch "$zsh_path_file"
+        path_line="export PATH=\"\$PATH:${bin_dir}\""
+        grep -Fxq "$path_line" "$zsh_path_file" || printf '%s\n' "$path_line" >> "$zsh_path_file"
+        echo "Directory ${bin_dir} added to PATH in ${zsh_path_file}."
     else
         echo "No changes made to PATH."
     fi
@@ -431,7 +435,13 @@ if [[ $mostrarPreguntas == true || $mostrarBina == true ]]; then
     # Check response
     if [ "$respuesta" == "y" ]; then
         echo -e "${verde}Installing all aliases... ${reset}"
-        descargar_y_ejecutar https://raw.githubusercontent.com/4rji/4rji/main/alias.sh
+        if [[ -x "${bin_dir}/herralias" ]]; then
+            "${bin_dir}/herralias"
+        elif command -v herralias >/dev/null 2>&1; then
+            herralias
+        else
+            echo "herralias not found in ${bin_dir} or PATH." >&2
+        fi
     else
         echo ""
     fi

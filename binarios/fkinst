@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+ZSH_CONFIG_DIR="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}"
+ZSH_LOCAL_FILE="$ZSH_CONFIG_DIR/local.zsh"
+
+append_zsh_local() {
+    local line="$1"
+    mkdir -p "$ZSH_CONFIG_DIR"
+    touch "$ZSH_LOCAL_FILE"
+    grep -Fxq "$line" "$ZSH_LOCAL_FILE" || printf '%s\n' "$line" >> "$ZSH_LOCAL_FILE"
+}
+
 # Instalar thefuck
 pip install thefuck
 
@@ -9,7 +19,8 @@ pip3 show thefuck | grep Location
 # Crear un enlace simbólico para thefuck en /opt/4rji/bin/
 sudo ln -s ~/.local/bin/thefuck /opt/4rji/bin/thefuck
 
-# Agregar alias de thefuck al archivo .zshrc
-echo 'eval $(thefuck --alias)' >> ~/.zshrc
-echo 'eval $(thefuck --alias fk)' >> ~/.zshrc
+# Inicialización de thefuck para Zsh.
+append_zsh_local 'eval $(thefuck --alias)'
+append_zsh_local 'eval $(thefuck --alias fk)'
 
+echo "Configuración de thefuck agregada a $ZSH_LOCAL_FILE"

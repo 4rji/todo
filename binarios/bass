@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -u
+
+ZSH_CONFIG_DIR="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}"
+
+files=(
+    "aliases.zsh"
+    "exports.zsh"
+    "functions.zsh"
+    "path.zsh"
+    "local.zsh"
+    "secrets.zsh"
+)
+
+if ! command -v nano >/dev/null 2>&1; then
+    echo "Error: nano no está instalado." >&2
+    exit 1
+fi
+
+mkdir -p "$ZSH_CONFIG_DIR"
+
+while true; do
+    clear
+    echo "Archivos de configuración Zsh"
+    echo ""
+
+    for index in "${!files[@]}"; do
+        printf '  %d) %s\n' "$((index + 1))" "${files[index]}"
+    done
+
+    echo ""
+    echo "  q) Salir"
+    echo ""
+    printf 'Selecciona un archivo: '
+
+    IFS= read -rsn1 selection
+    echo ""
+
+    case "$selection" in
+        [1-6])
+            file_index=$((selection - 1))
+            nano "$ZSH_CONFIG_DIR/${files[file_index]}"
+            ;;
+        q|Q)
+            exit 0
+            ;;
+    esac
+done

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Instalador y configurador de bat + fzf + thefuck + zoxide
-# Detecta OS, instala, crea symlinks bat<->batcat, configura zshrc
+# Detecta OS, instala, crea symlinks bat<->batcat y configura Zsh modular.
 
 BOLD='\033[1m'
 RED='\033[1;31m'
@@ -11,7 +11,10 @@ BLUE='\033[1;34m'
 CYAN='\033[1;36m'
 NC='\033[0m'
 
-ZSHRC="${HOME}/.zshrc"
+ZSH_CONFIG_DIR="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}"
+ZSH_EXPORTS_FILE="$ZSH_CONFIG_DIR/exports.zsh"
+ZSH_FUNCTIONS_FILE="$ZSH_CONFIG_DIR/functions.zsh"
+ZSH_LOCAL_FILE="$ZSH_CONFIG_DIR/local.zsh"
 BAT_BIN=""
 
 # ─── Detectar OS ──────────────────────────────────────────────────────────────
@@ -52,9 +55,12 @@ info() { echo -e "${CYAN}→ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠ $*${NC}"; }
 err()  { echo -e "${RED}✘ $*${NC}"; }
 
-append_zshrc() {
-    local line="$1"
-    grep -qF "$line" "$ZSHRC" 2>/dev/null || echo "$line" >> "$ZSHRC"
+append_zsh_config() {
+    local file="$1"
+    local line="$2"
+    mkdir -p "$ZSH_CONFIG_DIR"
+    touch "$file"
+    grep -Fxq "$line" "$file" || printf '%s\n' "$line" >> "$file"
 }
 
 resolve_bat_bin() {
@@ -155,7 +161,7 @@ install_bat_theme() {
     curl -sLo "$themes_dir/tokyonight_night.tmTheme" \
         "https://raw.githubusercontent.com/folke/tokyonight.nvim/main/extras/sublime/tokyonight_night.tmTheme"
     "$BAT_BIN" cache --build
-    append_zshrc 'export BAT_THEME="tokyonight_night"'
+    append_zsh_config "$ZSH_EXPORTS_FILE" 'export BAT_THEME="tokyonight_night"'
     ok "Tema tokyonight_night configurado"
 }
 
@@ -172,13 +178,15 @@ install_fzf() {
     esac
     ok "fzf instalado"
 
-    append_zshrc '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh'
-    append_zshrc "export FZF_CTRL_T_OPTS=\"--preview 'bat -n --color=always --line-range :500 {}'\""
-    append_zshrc "export FZF_ALT_C_OPTS=\"--preview 'eza --tree --color=always {} | head -200'\""
+    append_zsh_config "$ZSH_LOCAL_FILE" '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh'
+    append_zsh_config "$ZSH_EXPORTS_FILE" "export FZF_CTRL_T_OPTS=\"--preview 'bat -n --color=always --line-range :500 {}'\""
+    append_zsh_config "$ZSH_EXPORTS_FILE" "export FZF_ALT_C_OPTS=\"--preview 'eza --tree --color=always {} | head -200'\""
 
     # _fzf_comprun
-    if ! grep -q '_fzf_comprun' "$ZSHRC" 2>/dev/null; then
-        cat >> "$ZSHRC" <<'EOF'
+    mkdir -p "$ZSH_CONFIG_DIR"
+    touch "$ZSH_FUNCTIONS_FILE"
+    if ! grep -q '^_fzf_comprun()' "$ZSH_FUNCTIONS_FILE" 2>/dev/null; then
+        cat >> "$ZSH_FUNCTIONS_FILE" <<'EOF'
 
 _fzf_comprun() {
   local command=$1
@@ -192,7 +200,7 @@ _fzf_comprun() {
 }
 EOF
     fi
-    ok "fzf configurado en $ZSHRC"
+    ok "fzf configurado en $ZSH_CONFIG_DIR"
 }
 
 install_thefuck() {
@@ -212,8 +220,8 @@ install_thefuck() {
             fi
             ;;
     esac
-    append_zshrc 'eval $(thefuck --alias)'
-    append_zshrc 'eval $(thefuck --alias fk)'
+    append_zsh_config "$ZSH_LOCAL_FILE" 'eval $(thefuck --alias)'
+    append_zsh_config "$ZSH_LOCAL_FILE" 'eval $(thefuck --alias fk)'
     ok "thefuck instalado (alias: fk)"
 }
 
@@ -234,7 +242,7 @@ install_zoxide() {
             fi
             ;;
     esac
-    append_zshrc 'eval "$(zoxide init zsh)"'
+    append_zsh_config "$ZSH_LOCAL_FILE" 'eval "$(zoxide init zsh)"'
     ok "zoxide instalado"
 }
 
