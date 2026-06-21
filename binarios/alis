@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+ZSH_CONFIG_DIR="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}"
+ALIASES_FILE="$ZSH_CONFIG_DIR/aliases.zsh"
 
 # Pide al usuario el nombre del alias y el comando a ejecutar
-echo -n "Ingresa el nombre del alias: "
-read alias_name
+read -r -p "Ingresa el nombre del alias: " alias_name
 
-echo -n "Ingresa el comando que quieres asignar al alias: "
-read command
-
-# Añade el alias al archivo .zshrc
-echo "alias $alias_name='$command'" >> ~/.zshrc
-
-# Verifica si el archivo aliaszsh existe
-if [ -f ~/.aliaszsh ]; then
-    # Si existe, agrega el nuevo alias al final del archivo
-    echo "echo \"alias $alias_name='$command'\" >> ~/.zshrc" >> ~/.aliaszsh
-else
-    # Si no existe, crea un nuevo archivo con el alias
-    echo "echo \"alias $alias_name='$command'\" >> ~/.zshrc" > ~/.aliaszsh
+if [[ ! "$alias_name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Nombre de alias inválido: usa letras, números, punto, guion o guion bajo." >&2
+    exit 1
 fi
 
-echo "Alias configurado con éxito."
+read -r -p "Ingresa el comando que quieres asignar al alias: " command
 
+mkdir -p "$ZSH_CONFIG_DIR"
+touch "$ALIASES_FILE"
+
+# %q conserva correctamente espacios y comillas y es válido en Zsh.
+printf -v alias_definition 'alias %s=%q' "$alias_name" "$command"
+printf '%s\n' "$alias_definition" >> "$ALIASES_FILE"
+
+# Conserva el instalador histórico, pero ahora apunta al archivo modular.
+printf "printf '%%s\\n' %q >> %q\n" "$alias_definition" "$ALIASES_FILE" >> "$HOME/.aliaszsh"
+
+echo "Alias configurado en $ALIASES_FILE."

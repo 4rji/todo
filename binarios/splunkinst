@@ -3,6 +3,7 @@ set -e
 
 SPLUNK_BIN="/opt/splunk/bin/splunk"
 SPLUNK_DIR="/opt/splunk"
+ZSH_ALIASES_FILE="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}/aliases.zsh"
 
 say() { echo -e "$*"; }
 
@@ -14,6 +15,13 @@ confirm_sn() {
     s|si|sí|y|yes) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+add_zsh_alias() {
+  local definition="$1"
+  mkdir -p "$(dirname "$ZSH_ALIASES_FILE")"
+  touch "$ZSH_ALIASES_FILE"
+  grep -Fxq "$definition" "$ZSH_ALIASES_FILE" || printf '%s\n' "$definition" >> "$ZSH_ALIASES_FILE"
 }
 
 say ""
@@ -35,8 +43,8 @@ fi
 # Aliases
 echo "alias splunkstart='sudo /opt/splunk/bin/splunk start'" >> ~/.bashrc
 echo "alias splunkstop='sudo /opt/splunk/bin/splunk stop'"  >> ~/.bashrc
-echo "alias splunkstart='sudo /opt/splunk/bin/splunk start'" >> ~/.zshrc
-echo "alias splunkstop='sudo /opt/splunk/bin/splunk stop'"  >> ~/.zshrc
+add_zsh_alias "alias splunkstart='sudo /opt/splunk/bin/splunk start'"
+add_zsh_alias "alias splunkstop='sudo /opt/splunk/bin/splunk stop'"
 
 say ""
 say "Added aliases:"

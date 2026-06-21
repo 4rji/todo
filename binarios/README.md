@@ -87,6 +87,7 @@ wgett               Descarga archivos con wget, carpeta completa reescribiendo o
 wgetf               Descarga (FUNCTION) - HTTP minimo que hace GET via TCP - /dev/tcp, http only
 wgetraw             Descarga HTTP minimo que hace GET via TCP - /dev/tcp
 bajar               Downloads MP3 audio, best video, or streams a URL with mpv via yt-dlp.
+convertir           Transcribes audio with Whisper and converts video to MP3 before transcription.
 axe                 Downloads a URL with aria2c by default or axel, using configurable parallel connections.
 
 
@@ -146,7 +147,7 @@ fastconfmac         Writes a styled Fastfetch config with a custom message and l
 searchinst          Instala searxng que es como google pero privado.
 lazydockerdinst     Instala lazydocker con go. instala go tambien
 instpowershell      Descarga nishang powershell modules
-openboxinst         Instala openbox que es un escritorio ligero, tambien instala chromium
+openboxinst         Desktop - Instala openbox que es un escritorio ligero, tambien instala chromium
 kiosinst            Installs an X11/Openbox Chromium kiosk that auto-starts on TTY1.
 nviminst            Instala neovim, nvchad, 
 nanoinst            Installs nano if needed and writes a simple ~/.nanorc editor configuration.

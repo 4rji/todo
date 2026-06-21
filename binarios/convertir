@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+
+# ============================================================
+#  🎙️  WHISPER TRANSCRIPTION SCRIPT
+#  Convierte audio/video a texto usando Whisper
+# ============================================================
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+show_banner() {
+    echo ""
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║     🎙️  WHISPER TRANSCRIPTION TOOL       ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+show_menu() {
+    show_banner
+    echo -e "${BOLD}USO:${NC}"
+    echo -e "  ${GREEN}./whisper.sh${NC}               → Muestra este menú"
+    echo -e "  ${GREEN}./whisper.sh i${NC}             → Instrucciones de instalación"
+    echo -e "  ${GREEN}./whisper.sh archivo.wav${NC}   → Transcribe WAV a TXT"
+    echo -e "  ${GREEN}./whisper.sh archivo.mp3${NC}   → Transcribe MP3 a TXT"
+    echo -e "  ${GREEN}./whisper.sh archivo.mov${NC}   → Convierte MOV → MP3 → TXT"
+    echo -e "  ${GREEN}./whisper.sh archivo.mp4${NC}   → Convierte MP4 → MP3 → TXT"
+    echo ""
+    echo -e "${BOLD}FORMATOS SOPORTADOS:${NC}"
+    echo -e "  Audio:  ${YELLOW}wav, mp3, m4a, ogg, flac${NC}"
+    echo -e "  Video:  ${YELLOW}mov, mp4, mkv, avi${NC}"
+    echo ""
+    echo -e "${BOLD}EJEMPLOS:${NC}"
+    echo -e "  ${CYAN}./whisper.sh entrevista.wav${NC}"
+    echo -e "  ${CYAN}./whisper.sh pelicula.mov${NC}"
+    echo -e "  ${CYAN}./whisper.sh podcast.mp3${NC}"
+    echo ""
+}
+
+show_instructions() {
+    show_banner
+    echo -e "${BOLD}${YELLOW}📦 INSTALACIÓN DE DEPENDENCIAS${NC}"
+    echo ""
+    echo -e "${BOLD}1) Instalar ffmpeg:${NC}"
+    echo -e "   ${CYAN}sudo apt install ffmpeg${NC}"
+    echo ""
+    echo -e "${BOLD}2) Crear entorno virtual:${NC}"
+    echo -e "   ${CYAN}virtualenv ~/.amigo${NC}"
+    echo ""
+    echo -e "${BOLD}3) Activar entorno virtual:${NC}"
+    echo -e "   ${CYAN}source ~/.amigo/bin/activate${NC}"
+    echo ""
+    echo -e "${BOLD}4) Instalar Whisper (elige uno):${NC}"
+    echo ""
+    echo -e "   ${GREEN}# Opción A - OpenAI Whisper (original):${NC}"
+    echo -e "   ${CYAN}pip install -U openai-whisper${NC}"
+    echo ""
+    echo -e "   ${GREEN}# Opción B - Faster Whisper (más rápido, recomendado):${NC}"
+    echo -e "   ${CYAN}pip install faster-whisper${NC}"
+    echo ""
+    echo -e "${BOLD}5) Agregar al PATH si es necesario:${NC}"
+    echo -e "   ${CYAN}cd ~/.local/bin${NC}"
+    echo ""
+    echo -e "${BOLD}${YELLOW}🔧 CÓMO USAR EL SCRIPT${NC}"
+    echo ""
+    echo -e "${BOLD}Dar permisos de ejecución (solo la primera vez):${NC}"
+    echo -e "   ${CYAN}chmod +x whisper.sh${NC}"
+    echo ""
+    echo -e "${BOLD}Convertir video MOV a MP3 manualmente:${NC}"
+    echo -e "   ${CYAN}ffmpeg -i ~/Downloads/movie.mov -acodec libmp3lame -q:a 4 movie.mp3${NC}"
+    echo ""
+    echo -e "${BOLD}Transcribir WAV a TXT:${NC}"
+    echo -e "   ${CYAN}whisper file.wav --model medium --language en --output_format txt${NC}"
+    echo ""
+    echo -e "${BOLD}Transcribir MP3 a TXT:${NC}"
+    echo -e "   ${CYAN}whisper file.mp3 --model medium --language en --output_format txt${NC}"
+    echo ""
+    echo -e "${BOLD}${YELLOW}💡 MODELOS DISPONIBLES${NC}"
+    echo ""
+    printf "  ${BOLD}%-12s %-10s %-10s %s${NC}\n" "Modelo" "Tamaño" "Velocidad" "Precisión"
+    echo "  ─────────────────────────────────────────────"
+    printf "  %-12s %-10s %-10s %s\n" "tiny"   "75MB"   "⚡⚡⚡⚡" "⭐⭐"
+    printf "  %-12s %-10s %-10s %s\n" "base"   "145MB"  "⚡⚡⚡"  "⭐⭐⭐"
+    printf "  %-12s %-10s %-10s %s\n" "small"  "466MB"  "⚡⚡"    "⭐⭐⭐⭐"
+    printf "  %-12s %-10s %-10s %s\n" "medium" "1.5GB"  "⚡"      "⭐⭐⭐⭐⭐ ← recomendado"
+    printf "  %-12s %-10s %-10s %s\n" "large"  "3GB"    "🐢"      "⭐⭐⭐⭐⭐+"
+    echo ""
+}
+
+transcribe_audio() {
+    local file="$1"
+    local name="${file%.*}"
+
+    echo -e "${BOLD}🎙️  Transcribiendo:${NC} $file"
+    echo -e "${YELLOW}   Modelo: medium | Idioma: en | Salida: txt${NC}"
+    echo ""
+
+    whisper "$file" --model medium --language en --output_format txt
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}${BOLD}✅ ¡Listo! Transcripción guardada en: ${name}.txt${NC}"
+    else
+        echo -e "${RED}${BOLD}❌ Error al transcribir. ¿Está Whisper instalado y activado?${NC}"
+        echo -e "${YELLOW}   Corre: ${CYAN}./whisper.sh i${YELLOW} para ver instrucciones${NC}"
+    fi
+}
+
+convert_and_transcribe() {
+    local file="$1"
+    local name="${file%.*}"
+    local mp3="${name}.mp3"
+
+    echo -e "${BOLD}🎬 Video detectado:${NC} $file"
+    echo -e "${YELLOW}   Paso 1/2: Convirtiendo a MP3...${NC}"
+    echo ""
+
+    ffmpeg -i "$file" -acodec libmp3lame -q:a 4 "$mp3" -y
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
+        echo -e "${YELLOW}   Instala con: ${CYAN}sudo apt install ffmpeg${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${GREEN}✅ Audio extraído: $mp3${NC}"
+    echo ""
+    echo -e "${YELLOW}   Paso 2/2: Transcribiendo con Whisper...${NC}"
+    echo ""
+
+    whisper "$mp3" --model medium --language en --output_format txt
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}${BOLD}✅ ¡Listo! Transcripción guardada en: ${name}.txt${NC}"
+    else
+        echo -e "${RED}${BOLD}❌ Error al transcribir. ¿Está Whisper instalado y activado?${NC}"
+        echo -e "${YELLOW}   Corre: ${CYAN}./whisper.sh i${YELLOW} para ver instrucciones${NC}"
+    fi
+}
+
+# ── MAIN ────────────────────────────────────────────────────
+
+if [ $# -eq 0 ]; then
+    show_menu
+    exit 0
+fi
+
+if [ "$1" = "i" ]; then
+    show_instructions
+    exit 0
+fi
+
+FILE="$1"
+if [ ! -f "$FILE" ]; then
+    echo -e "${RED}${BOLD}❌ Archivo no encontrado:${NC} $FILE"
+    echo ""
+    show_menu
+    exit 1
+fi
+
+EXT="${FILE##*.}"
+EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+case "$EXT" in
+    wav|mp3|m4a|ogg|flac)
+        transcribe_audio "$FILE"
+        ;;
+    mov|mp4|mkv|avi)
+        convert_and_transcribe "$FILE"
+        ;;
+    *)
+        echo -e "${RED}${BOLD}❌ Formato no soportado:${NC} .$EXT"
+        echo ""
+        show_menu
+        exit 1
+        ;;
+esac

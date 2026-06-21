@@ -1,11 +1,138 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-curl -O https://raw.githubusercontent.com/4rji/4rji/main/alias.sh
+readonly ZSH_CONFIG_DIR="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}"
+readonly ZSHRC="${ZSHRC:-$HOME/.zshrc}"
+readonly ALIAS_URL="${HERRALIAS_URL:-https://raw.githubusercontent.com/4rji/4rji/main/alias.sh}"
+readonly MANAGED_START="# >>> herralias: aliases administrados >>>"
+readonly MANAGED_END="# <<< herralias: aliases administrados <<<"
+readonly LOADER_START="# >>> configuración modular de zsh >>>"
+readonly LOADER_END="# <<< configuración modular de zsh <<<"
 
-source alias.sh  # Ejecuta el script descargado
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
 
-#borrar archivos
-rm alias.sh
+need_command() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'Error: falta el comando requerido: %s\n' "$1" >&2
+        exit 1
+    }
+}
 
-echo ""
-echo "Alias actualizados únicamente y se borro el archivo"
+marker_count() {
+    local marker="$1"
+    local file="$2"
+
+    awk -v marker="$marker" '$0 == marker { count++ } END { print count + 0 }' "$file"
+}
+
+create_zsh_structure() {
+    local file
+
+    mkdir -p "$ZSH_CONFIG_DIR"
+    for file in aliases.zsh exports.zsh functions.zsh path.zsh local.zsh secrets.zsh; do
+        touch "$ZSH_CONFIG_DIR/$file"
+    done
+
+    # Este archivo puede contener credenciales incluso si el umask es permisivo.
+    chmod 600 "$ZSH_CONFIG_DIR/secrets.zsh"
+}
+
+ensure_zsh_loader() {
+    local start_count end_count
+
+    touch "$ZSHRC"
+    start_count="$(marker_count "$LOADER_START" "$ZSHRC")"
+    end_count="$(marker_count "$LOADER_END" "$ZSHRC")"
+
+    if [[ "$start_count" -ne "$end_count" || "$start_count" -gt 1 ]]; then
+        printf 'Error: el bloque modular de %s está incompleto o duplicado; no se modificó.\n' "$ZSHRC" >&2
+        exit 1
+    fi
+
+    # El resto de ~/.zshrc queda intacto. Solo se agrega este bloque una vez.
+    if [[ "$start_count" -eq 0 ]]; then
+        cat >> "$ZSHRC" <<'EOF'
+
+# >>> configuración modular de zsh >>>
+for zsh_config_file in \
+    "$HOME/.config/zsh/path.zsh" \
+    "$HOME/.config/zsh/exports.zsh" \
+    "$HOME/.config/zsh/functions.zsh" \
+    "$HOME/.config/zsh/aliases.zsh" \
+    "$HOME/.config/zsh/local.zsh" \
+    "$HOME/.config/zsh/secrets.zsh"; do
+    [[ -r "$zsh_config_file" ]] && source "$zsh_config_file"
+done
+unset zsh_config_file
+# <<< configuración modular de zsh <<<
+EOF
+    fi
+}
+
+extract_aliases() {
+    local downloaded_script="$1"
+    local output_file="$2"
+
+    # alias.sh incluye un bloque delimitado. Extraemos sus datos sin ejecutarlo,
+    # ya que ejecutarlo modificaría ~/.zshrc.
+    if awk '
+        /^# ==== custom aliases \(managed block\) ====$/ { inside = 1; found_start = 1; next }
+        /^# ==== end managed block ====$/ { if (inside) found_end = 1; inside = 0; next }
+        inside { print }
+        END { if (!found_start || !found_end) exit 1 }
+    ' "$downloaded_script" > "$output_file"; then
+        return
+    fi
+
+    # Compatibilidad si el archivo remoto deja de publicar los delimitadores.
+    awk '/^[[:space:]]*alias[[:space:]]+/ { print }' "$downloaded_script" > "$output_file"
+    if [[ ! -s "$output_file" ]]; then
+        printf 'Error: no se encontraron aliases en %s.\n' "$ALIAS_URL" >&2
+        exit 1
+    fi
+}
+
+install_aliases() {
+    local aliases_file="$ZSH_CONFIG_DIR/aliases.zsh"
+    local downloaded_script="$tmp_dir/alias.sh"
+    local extracted_aliases="$tmp_dir/aliases"
+    local updated_file="$tmp_dir/aliases.zsh"
+    local start_count end_count
+
+    need_command curl
+    curl -fsSL "$ALIAS_URL" -o "$downloaded_script"
+    extract_aliases "$downloaded_script" "$extracted_aliases"
+
+    start_count="$(marker_count "$MANAGED_START" "$aliases_file")"
+    end_count="$(marker_count "$MANAGED_END" "$aliases_file")"
+    if [[ "$start_count" -ne "$end_count" || "$start_count" -gt 1 ]]; then
+        printf 'Error: el bloque administrado de %s está incompleto o duplicado; no se modificó.\n' "$aliases_file" >&2
+        exit 1
+    fi
+
+    # Conserva cualquier alias personal que esté fuera del bloque administrado.
+    awk -v start="$MANAGED_START" -v end="$MANAGED_END" '
+        $0 == start { inside = 1; next }
+        $0 == end { inside = 0; next }
+        !inside { print }
+    ' "$aliases_file" > "$updated_file"
+
+    if [[ -s "$updated_file" ]]; then
+        printf '\n' >> "$updated_file"
+    fi
+    {
+        printf '%s\n' "$MANAGED_START"
+        cat "$extracted_aliases"
+        printf '%s\n' "$MANAGED_END"
+    } >> "$updated_file"
+
+    mv "$updated_file" "$aliases_file"
+}
+
+create_zsh_structure
+ensure_zsh_loader
+install_aliases
+
+printf 'Aliases actualizados en %s/aliases.zsh\n' "$ZSH_CONFIG_DIR"
+printf 'Recarga la configuración con: source %s\n' "$ZSHRC"

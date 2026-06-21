@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+ZSH_ALIASES_FILE="${ZSH_CONFIG_DIR:-$HOME/.config/zsh}/aliases.zsh"
+
+add_zsh_alias() {
+    local definition="$1"
+    mkdir -p "$(dirname "$ZSH_ALIASES_FILE")"
+    touch "$ZSH_ALIASES_FILE"
+    grep -Fxq "$definition" "$ZSH_ALIASES_FILE" || printf '%s\n' "$definition" >> "$ZSH_ALIASES_FILE"
+}
+
 # Lista de paquetes a instalar
 paquetes=("docker")
 
@@ -97,7 +106,7 @@ if [ $opcion -eq 1 ]; then
 
     # Crear alias en zsh y bash
     echo -e "\033[1;32mSe ha creado el alias 'nessus' para iniciar el contenedor Docker de Nessus en zsh y bash.\033[0m"
-    echo -e "\033[1;34malias nessus='docker start nessus'\033[0m" >> ~/.zshrc
+    add_zsh_alias "alias nessus='docker start nessus'"
     echo -e "\033[1;34malias nessus='docker start nessus'\033[0m" >> ~/.bashrc
     
 elif [ $opcion -eq 2 ]; then
@@ -122,7 +131,7 @@ elif [ $opcion -eq 2 ]; then
 
     # Crear alias en zsh y bash
     echo -e "\033[1;32mSe ha creado el alias 'nessus' para iniciar Nessus en zsh y bash.\033[0m"
-    echo -e "\033[1;34malias nessus='systemctl start nessusd.service'\033[0m" >> ~/.zshrc
+    add_zsh_alias "alias nessus='systemctl start nessusd.service'"
     echo -e "\033[1;34malias nessus='systemctl start nessusd.service'\033[0m" >> ~/.bashrc
     
 else
