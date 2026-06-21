@@ -1,0 +1,8 @@
+#!/bin/zsh
+
+echo "=== Containers ==="
+du -hd1 ~/Library/Containers 2>/dev/null | sort -hr | head -30
+
+echo
+echo "=== Top directories ==="
+sudo find /System/Volumes/Data -maxdepth 3 -type d -exec du -sh {} + 2>/dev/null | sort -hr | head -50
