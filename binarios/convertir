@@ -29,6 +29,7 @@ show_menu() {
     echo -e "  ${GREEN}./whisper.sh archivo.mp3${NC}   → Transcribe MP3 a TXT"
     echo -e "  ${GREEN}./whisper.sh archivo.mov${NC}   → Convierte MOV → MP3 → TXT"
     echo -e "  ${GREEN}./whisper.sh archivo.mp4${NC}   → Convierte MP4 → MP3 → TXT"
+    echo -e "  ${GREEN}./whisper.sh -s archivo.mov${NC} → Convierte video a MP4 (máx calidad)"
     echo ""
     echo -e "${BOLD}FORMATOS SOPORTADOS:${NC}"
     echo -e "  Audio:  ${YELLOW}wav, mp3, m4a, ogg, flac${NC}"
@@ -38,6 +39,7 @@ show_menu() {
     echo -e "  ${CYAN}./whisper.sh entrevista.wav${NC}"
     echo -e "  ${CYAN}./whisper.sh pelicula.mov${NC}"
     echo -e "  ${CYAN}./whisper.sh podcast.mp3${NC}"
+    echo -e "  ${CYAN}./whisper.sh -s pelicula.mov${NC}"
     echo ""
 }
 
@@ -144,6 +146,31 @@ convert_and_transcribe() {
     fi
 }
 
+convert_to_best_format() {
+    local file="$1"
+    local name="${file%.*}"
+    local output="${name}_converted.mp4"
+
+    echo -e "${BOLD}🎬 Video detectado:${NC} $file"
+    echo -e "${YELLOW}   Convirtiendo a MP4 (H.264 + AAC, máxima calidad y compatibilidad)...${NC}"
+    echo ""
+
+    ffmpeg -i "$file" \
+        -c:v libx264 -crf 18 -preset slow \
+        -c:a aac -b:a 192k \
+        -movflags +faststart \
+        "$output" -y
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}${BOLD}✅ ¡Listo! Video guardado en: ${output}${NC}"
+    else
+        echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
+        echo -e "${YELLOW}   Instala con: ${CYAN}sudo apt install ffmpeg${NC}"
+        exit 1
+    fi
+}
+
 # ── MAIN ────────────────────────────────────────────────────
 
 if [ $# -eq 0 ]; then
@@ -153,6 +180,40 @@ fi
 
 if [ "$1" = "i" ]; then
     show_instructions
+    exit 0
+fi
+
+if [ "$1" = "-s" ]; then
+    if [ -z "$2" ]; then
+        echo -e "${RED}${BOLD}❌ Debes indicar un archivo de video con -s${NC}"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    FILE="$2"
+    if [ ! -f "$FILE" ]; then
+        echo -e "${RED}${BOLD}❌ Archivo no encontrado:${NC} $FILE"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    EXT="${FILE##*.}"
+    EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+    case "$EXT" in
+        mov|mp4|mkv|avi)
+            convert_to_best_format "$FILE"
+            ;;
+        *)
+            echo -e "${RED}${BOLD}❌ Formato no soportado con -s:${NC} .$EXT"
+            echo ""
+            show_menu
+            exit 1
+            ;;
+    esac
+
     exit 0
 fi
 
