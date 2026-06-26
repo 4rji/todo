@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# log-viewer.sh — interactive log viewer with optional grc colorization
+# Press a number to follow a log, Ctrl+C to return to the menu, q to quit.
+
+set -u
+
+# --- Log paths (edit if your layout differs) ---
+TACACS_LOG="/var/log/tac_plus_acct.log"
+SYSLOG="/var/log/syslog"
+RADIUS_LOG="/var/log/freeradius/radius.log"
+# Accounting detail files rotate daily and are per-NAS; glob catches them all.
+RADIUS_ACCT_GLOB="/var/log/freeradius/radacct/*/detail-*"
+
+# --- Detect grc once ---
+if command -v grc >/dev/null 2>&1; then
+    HAVE_GRC=1
+else
+    HAVE_GRC=0
+fi
+
+# follow_log "Label" path-or-glob [more paths...]
+# Ctrl+C breaks only the tail (subshell trap) and returns to the menu.
+follow_log() {
+    local label="$1"; shift
+
+    # Expand args into an existing-readable file list.
+    local files=() f
+    for f in "$@"; do
+        # word-splitting on globs is intentional here
+        for g in $f; do
+            [[ -e "$g" && -r "$g" ]] && files+=("$g")
+        done
+    done
+
+    if [[ "${#files[@]}" -eq 0 ]]; then
+        printf '\n[!] No readable files for: %s\n' "$label"
+        printf '    Checked: %s\n' "$*"
+        printf '    (radacct needs root — try: sudo %s)\n' "$0"
+        read -rsn1 -p "Press any key to return to the menu..."
+        return
+    fi
+
+    clear
+    printf '=== %s — Ctrl+C to go back ===\n' "$label"
+    printf 'Following: %s\n\n' "${files[*]}"
+
+    (
+        trap 'exit 0' INT
+        if [[ "$HAVE_GRC" -eq 1 ]]; then
+            grc tail -n 50 -f -- "${files[@]}"
+        else
+            tail -n 50 -f -- "${files[@]}"
+        fi
+    )
+}
+
+menu() {
+    clear
+    printf 'Log Viewer'
+    [[ "$HAVE_GRC" -eq 0 ]] && printf '  (grc not installed — plain output)'
+    printf '\n\n'
+    printf '  1) TACACS+ accounting   %s\n' "$TACACS_LOG"
+    printf '  2) Syslog               %s\n' "$SYSLOG"
+    printf '  3) FreeRADIUS auth      %s\n' "$RADIUS_LOG"
+    printf '  4) FreeRADIUS acct      %s\n' "$RADIUS_ACCT_GLOB"
+    printf '  q) Quit\n\n'
+}
+
+trap '' INT   # ignore Ctrl+C at the menu; only tail catches it
+
+while true; do
+    menu
+    read -rsn1 -p "Select: " choice
+    case "$choice" in
+        1) follow_log "TACACS+ accounting" "$TACACS_LOG" ;;
+        2) follow_log "Syslog"             "$SYSLOG" ;;
+        3) follow_log "FreeRADIUS auth"    "$RADIUS_LOG" ;;
+        4) follow_log "FreeRADIUS acct"    "$RADIUS_ACCT_GLOB" ;;
+        q|Q) printf '\nBye.\n'; exit 0 ;;
+        *) ;;
+    esac
+done
