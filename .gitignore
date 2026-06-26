@@ -3,3 +3,5 @@ nixos/.DS_Store
 binarios/backd.log
 binarios/.codex
 binarios/backde.log
+binarios/.atl/.skill-registry.cache.json
+binarios/.atl/skill-registry.md
