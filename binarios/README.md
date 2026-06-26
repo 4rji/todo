@@ -30,6 +30,7 @@ wazuhagent          Instala el agente en linux fedora/ubuntu
 wazuhinst           Instala wazuh. asistente. automatico
 wazuhinstdock       instala docker compose y wazuh en ubuntu 24
 crondir             Hace un dir y cat a los cron del sistema
+logs-check          Visor de TACACS, syslog y FreeRADIUS; filtra despues de ver logs y usa fzf si existe
 fwinst              Agrega servicios y puertos a firewall-cmd
 grubp               Crea una copia de grub, boot, efi y la guarda en /var/lib/os-system, restaura tambien
 

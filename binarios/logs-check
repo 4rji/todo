@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# log-viewer.sh — interactive log viewer with optional grc colorization
-# Press a number to follow a log, Ctrl+C to return to the menu, q to quit.
+# log-viewer.sh - interactive log viewer with optional grc colorization
+# Press a number to follow a log, Ctrl+C to filter/search or return to the menu, q to quit.
 
 set -u
 
@@ -18,10 +18,17 @@ else
     HAVE_GRC=0
 fi
 
+if command -v fzf >/dev/null 2>&1; then
+    HAVE_FZF=1
+else
+    HAVE_FZF=0
+fi
+
 # follow_log "Label" path-or-glob [more paths...]
 # Ctrl+C breaks only the tail (subshell trap) and returns to the menu.
 follow_log() {
     local label="$1"; shift
+    local filter
 
     # Expand args into an existing-readable file list.
     local files=() f
@@ -40,24 +47,58 @@ follow_log() {
         return
     fi
 
-    clear
-    printf '=== %s — Ctrl+C to go back ===\n' "$label"
-    printf 'Following: %s\n\n' "${files[*]}"
+    while true; do
+        clear
+        printf '=== %s - Ctrl+C to filter/search ===\n' "$label"
+        printf 'Following: %s\n\n' "${files[*]}"
 
-    (
-        trap 'exit 0' INT
-        if [[ "$HAVE_GRC" -eq 1 ]]; then
-            grc tail -n 50 -f -- "${files[@]}"
+        (
+            trap 'exit 0' INT
+            if [[ "$HAVE_GRC" -eq 1 ]]; then
+                grc tail -n 50 -f -- "${files[@]}"
+            else
+                tail -n 50 -f -- "${files[@]}"
+            fi
+        )
+
+        printf '\n'
+        if [[ "$HAVE_FZF" -eq 1 ]]; then
+            read -r -p "Filtro IP/texto, f=fzf recientes, Enter=menu: " filter
         else
-            tail -n 50 -f -- "${files[@]}"
+            read -r -p "Filtro IP/texto, Enter=menu: " filter
         fi
-    )
+
+        [[ -z "$filter" ]] && return
+
+        if [[ "$filter" =~ ^[Ff]$ ]]; then
+            if [[ "$HAVE_FZF" -eq 1 ]]; then
+                clear
+                printf '=== %s - fzf recientes ===\n' "$label"
+                printf 'Press Enter/Esc to return.\n\n'
+                tail -n 5000 -- "${files[@]}" | fzf --ansi --no-sort --reverse --prompt="$label> "
+                continue
+            fi
+
+            filter="f"
+        fi
+
+        clear
+        printf '=== %s - Ctrl+C to change filter/menu ===\n' "$label"
+        printf 'Following: %s\n' "${files[*]}"
+        printf 'Filter: %s\n\n' "$filter"
+
+        (
+            trap 'exit 0' INT
+            tail -n 200 -f -- "${files[@]}" | grep --line-buffered -i --color=always -F -- "$filter"
+        )
+    done
 }
 
 menu() {
     clear
     printf 'Log Viewer'
-    [[ "$HAVE_GRC" -eq 0 ]] && printf '  (grc not installed — plain output)'
+    [[ "$HAVE_GRC" -eq 0 ]] && printf '  (grc not installed - plain output)'
+    [[ "$HAVE_FZF" -eq 1 ]] && printf '  (fzf available)'
     printf '\n\n'
     printf '  1) TACACS+ accounting   %s\n' "$TACACS_LOG"
     printf '  2) Syslog               %s\n' "$SYSLOG"
