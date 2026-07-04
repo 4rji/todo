@@ -192,7 +192,7 @@ ufwinst             instala ufw y crea regla para puerto ssh
 xxelab              xxe lab docker instala 
 wginst              Instala, y usa el archivo .conf para hacer la conexion. todo ahi wireguard vpn.
 cowrie              Instala docker cowrie y  detiene con -t todos los contenedores, ssh honeypot
-instgithub          Instala github desktop en kali
+githubinst          Instala github desktop en kali
 pythonscritps       instala requerimientos y baje scritps del curso de python
 obsidianinst        Instala obsidian en deb, baja paquete e instala notas 
 zeroinst            Script para zero raspberry

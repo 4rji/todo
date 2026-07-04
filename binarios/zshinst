@@ -24,6 +24,7 @@ Ahora:
   bashfun
   herralias
   kittyinst
+  chsh -s $(which zsh)
 EOF
 }
 
