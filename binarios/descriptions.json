@@ -967,6 +967,21 @@
             "Each scan writes timestamped logs and prints an incident-response summary with detected infections and quarantine contents."
         ]
     },
+    "hardening_agent.sh": {
+        "name": "hardening_agent.sh",
+        "short_desc": "Collects Linux hardening state and sends or prints JSON reports for CCDC triage.",
+        "detailed_desc": [
+            "Collects Linux hardening evidence for CCDC-style triage.",
+            "",
+            "Checks system identity, users, processes, network sockets, services, scheduled tasks, file permissions, SSH keys, firewall rules, and persistence points.",
+            "",
+            "Modes: text prints a human-readable dump, local prints JSON, and send posts JSON to HARDEN_SERVER.",
+            "HARDEN_TOKEN sets the X-Auth-Token header; HARDEN_FIND_TIMEOUT limits expensive find scans.",
+            "",
+            "Each check section is base64-encoded in the JSON report.",
+            "Password hashes are not exported; only password status is reported when /etc/shadow is readable."
+        ]
+    },
     "cloudt": {
         "name": "cloudt",
         "short_desc": "Starts, stops, checks, and installs a Cloudflare Tunnel menu.",
