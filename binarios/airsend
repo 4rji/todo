@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-BIN_DIR="/opt/4rji/bin"
+set -e
 
-case "$(uname -s)" in
+sistema="$(uname -s)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$sistema" in
     Linux)
-        target="$BIN_DIR/airsend_amd"
+        binario="$script_dir/airsend_amd"
         ;;
     Darwin)
-        target="$BIN_DIR/airsend_mac"
+        binario="$script_dir/airsendm"
         ;;
     *)
-        echo "Sistema operativo no soportado: $(uname -s)" >&2
+        echo "Sistema operativo no soportado: $sistema" >&2
         exit 1
         ;;
 esac
 
-if [[ ! -x "$target" ]]; then
-    echo "No se encontro el ejecutable requerido: $target" >&2
+if [[ ! -x "$binario" ]]; then
+    echo "No se encontro el binario ejecutable: $binario" >&2
     exit 1
 fi
 
-exec "$target" "$@"
+exec "$binario" "$@"
