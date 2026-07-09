@@ -10,6 +10,7 @@ script for snmp netw07t
 
 
 ###-----Detecciones
+lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloaktools        Post-detection investigation checklist for decloak analysis
 decloak.py          File decloaking tool to identify possible rootkit-based content hiding
