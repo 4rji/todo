@@ -15,6 +15,7 @@ OPTIONS=(
   "vulnx — Map CVEs to affected products and versions"
   "ssh_fzf — SSH selector using fzf"
   "sitemirror — Download websites and create a local copy"
+  "lanwatchgo — Detect network changes and devices"
   "Quit"
 )
 
@@ -26,6 +27,7 @@ commands=(
   "go install github.com/projectdiscovery/cvemap/cmd/vulnx@latest"
   "go install github.com/4rji/binarios-go/ssh_fzf@latest"
   "go install github.com/4rji/binarios-go/sitemirror@latest"
+  "go install github.com/4rji/binarios-go/lanwatchgo@latest"
 )
 
 bins=(
@@ -36,6 +38,7 @@ bins=(
   "vulnx"
   "ssh_fzf"
   "sitemirror"
+  "lanwatchgo"
 )
 
 echo ""
@@ -87,6 +90,7 @@ case $idx in
   4) echo -e "  \033[36mMap CVEs to affected products and versions.\033[0m" ;;
   5) echo -e "  \033[36mInteractive SSH host selector using fzf.\033[0m" ;;
   6) echo -e "  \033[36mDownload websites and create a local copy.\033[0m" ;;
+  7) echo -e "  \033[36mDetect network changes and devices; run with lanwatchgo serve.\033[0m" ;;
 esac
 
 echo ""
@@ -97,6 +101,11 @@ echo_msg "$(printf '\033[1;35m%s\033[0m' 'Running')"
 printf "  \033[32mInstalling: %s\033[0m\n\n" "$bin"
 
 eval "$cmd"
+
+if (( idx == 7 )); then
+  echo ""
+  echo -e "  \033[36mPara ejecutarlo, usa: lanwatchgo serve 0.0.0.0\033[0m"
+fi
 
 echo ""
 echo "_________________________________________________________"
