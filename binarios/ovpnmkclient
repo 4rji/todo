@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Genera un .ovpn listo para importar, para un cliente del servidor OpenVPN community creado por ovpninst2
+# Uso: ovpnmkclient <nombre_cliente> <IP_o_dominio_publico_del_server> [puerto]
+
+SUDO="sudo"; [[ ${EUID:-0} -eq 0 ]] && SUDO=""
+
+PKI_DIR="/etc/openvpn/pki"
+EASYRSA="/usr/share/easy-rsa/easyrsa"
+SERVER_CONF="/etc/openvpn/server.conf"
+
+CLIENT_NAME="${1:-}"
+REMOTE_HOST="${2:-}"
+PORT="${3:-}"
+
+if [[ -z "$CLIENT_NAME" || -z "$REMOTE_HOST" ]]; then
+  echo "Uso: $0 <nombre_cliente> <IP_o_dominio_publico> [puerto]"
+  exit 1
+fi
+
+[[ -x "$EASYRSA" ]] || { echo "easyrsa no encontrado en $EASYRSA"; exit 1; }
+[[ -d "$PKI_DIR" ]] || { echo "No existe $PKI_DIR, corre ovpninst2 primero"; exit 1; }
+
+if [[ -z "$PORT" ]]; then
+  PORT=$($SUDO awk '/^port /{print $2}' "$SERVER_CONF" 2>/dev/null || true)
+  PORT="${PORT:-1194}"
+fi
+PROTO=$($SUDO awk '/^proto /{print $2}' "$SERVER_CONF" 2>/dev/null || true)
+PROTO="${PROTO:-udp}"
+
+if [[ ! -f "${PKI_DIR}/issued/${CLIENT_NAME}.crt" || ! -f "${PKI_DIR}/private/${CLIENT_NAME}.key" ]]; then
+  echo "[*] Generando certificado para $CLIENT_NAME"
+  (cd /etc/openvpn && $SUDO "$EASYRSA" build-client-full "$CLIENT_NAME" nopass)
+fi
+
+OUT_FILE="./${CLIENT_NAME}.ovpn"
+
+echo "[*] Escribiendo $OUT_FILE"
+{
+  echo "client"
+  echo "dev tun"
+  echo "proto ${PROTO}"
+  echo "remote ${REMOTE_HOST} ${PORT}"
+  echo "resolv-retry infinite"
+  echo "nobind"
+  echo "persist-key"
+  echo "persist-tun"
+  echo "remote-cert-tls server"
+  echo "verb 3"
+  echo ""
+  echo "<ca>"
+  $SUDO cat "${PKI_DIR}/ca.crt"
+  echo "</ca>"
+  echo ""
+  echo "<cert>"
+  $SUDO awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "${PKI_DIR}/issued/${CLIENT_NAME}.crt"
+  echo "</cert>"
+  echo ""
+  echo "<key>"
+  $SUDO cat "${PKI_DIR}/private/${CLIENT_NAME}.key"
+  echo "</key>"
+} > "$OUT_FILE"
+
+chmod 600 "$OUT_FILE"
+echo "[*] Listo: $OUT_FILE"

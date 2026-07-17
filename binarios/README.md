@@ -207,6 +207,7 @@ neofetchinst        Instala y personaliza neofetch para ppg1
 kittyinst           Instala kitty en Linux/macOS y baja su configuracion
 ovpninst            Instala OpenvpnServer para webadmin, 4rjiDocs
 ovpninst2           Instala OpenVPN community (easy-rsa) con PKI, server.conf y nftables NAT/gateway completo
+ovpnmkclient        Genera un .ovpn listo para un cliente del servidor creado por ovpninst2, uso: ovpnmkclient nombre IP_publica
 xrayinst            instala xray. no es mi script.
 xrayinst2           Descarga el archivo de configuracion a b1 
 fx11inst            Instala firefox en docker para acceder remotamente

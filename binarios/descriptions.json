@@ -1023,5 +1023,24 @@
             "Successful hosts are printed in green with their command output below.",
             "Any SSH error or non-zero remote command exit is printed as 'host offline' in red."
         ]
+    },
+    "ovpnmkclient": {
+        "name": "ovpnmkclient",
+        "short_desc": "Genera un .ovpn listo para importar para un cliente del servidor OpenVPN community creado por ovpninst2.",
+        "detailed_desc": [
+            "Este script crea el certificado/key de un nuevo cliente con easy-rsa (si no existe todavia) y arma un archivo .ovpn con la CA, el cert y la key embebidos, listo para importar en Windows (OpenVPN Connect/GUI), routers, Linux o macOS.",
+            "",
+            "Uso: ovpnmkclient <nombre_cliente> <IP_o_dominio_publico_del_server> [puerto]",
+            "",
+            "Ejemplo: ovpnmkclient client03 10.10.65.214",
+            "",
+            "Eso va a:",
+            "1. Generar el certificado/key nuevo para client03 con easy-rsa (build-client-full client03 nopass).",
+            "2. Armar ./client03.ovpn con todo embebido, listo para importar en Windows Connect/GUI, router, o lo que sea.",
+            "",
+            "Solo cambia client03 por el nombre que quieras (tiene que ser unico, no puede repetir uno ya generado), y el segundo argumento es la IP donde escucha el server. Si necesitas otro puerto que no sea el 1194 default, pasalo como tercer argumento: ovpnmkclient client03 10.10.65.214 1194",
+            "",
+            "Despues transferi ese .ovpn a la maquina/router que lo va a usar (por ejemplo con scp, USB, o pegandolo a mano) e importalo con el cliente OpenVPN correspondiente."
+        ]
     }
 }
