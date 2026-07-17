@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ZSHRC="$HOME/.zshrc"
+OHMYZSH_DIR="$HOME/.oh-my-zsh"
+OHMYZSH_CUSTOM="${ZSH_CUSTOM:-$OHMYZSH_DIR/custom}"
+THEME_DIR="$OHMYZSH_CUSTOM/themes/powerlevel10k"
+AUTO_DIR="$OHMYZSH_CUSTOM/plugins/zsh-autosuggestions"
+SYNTAX_DIR="$OHMYZSH_CUSTOM/plugins/zsh-syntax-highlighting"
+
+show_help() {
+  cat <<'EOF'
+Corre:
+  exec zsh
+
+Luego:
+  p10k configure
+
+Ahora:
+  zshinst2
+  neofinst
+  nanoinst
+  tmuxinst
+  bashfun
+  herralias
+  kittyinst
+  chsh -s $(which zsh)
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    show_help
+    exit 0
+    ;;
+esac
+
+msg() { printf '\n[+] %s\n' "$1"; }
+warn() { printf '\n[!] %s\n' "$1"; }
+is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Falta comando: $1"
+    exit 1
+  }
+}
+
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return
+  fi
+  local b
+  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [[ -x "$b" ]] && { printf '%s\n' "$b"; return; }
+  done
+  return 1
+}
+
+ensure_brew() {
+  local brew_bin
+  if brew_bin="$(find_brew)"; then
+    eval "$("$brew_bin" shellenv)"
+    return
+  fi
+
+  msg "Homebrew no está. Lo instalo."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  brew_bin="$(find_brew)" || {
+    echo "No pude encontrar brew después de instalarlo. Abrí otra terminal y volvé a correr el script."
+    exit 1
+  }
+  eval "$("$brew_bin" shellenv)"
+}
+
+brew_install() {
+  local pkg="$1"
+  if brew list --formula "$pkg" >/dev/null 2>&1; then
+    warn "$pkg ya está instalado con brew"
+  else
+    msg "Instalando $pkg con brew"
+    brew install "$pkg"
+  fi
+}
+
+find_zsh_bin() {
+  if is_macos && command -v brew >/dev/null 2>&1; then
+    local brew_zsh brew_prefix
+
+    brew_prefix="$(brew --prefix 2>/dev/null || true)"
+    if [[ -n "$brew_prefix" && -x "$brew_prefix/bin/zsh" ]]; then
+      printf '%s\n' "$brew_prefix/bin/zsh"
+      return
+    fi
+
+    brew_zsh="$(brew --prefix zsh 2>/dev/null || true)"
+    if [[ -n "$brew_zsh" && -x "$brew_zsh/bin/zsh" ]]; then
+      printf '%s\n' "$brew_zsh/bin/zsh"
+      return
+    fi
+  fi
+
+  command -v zsh
+}
+
+ensure_shell_registered() {
+  local shell_path="$1"
+
+  [[ -r /etc/shells ]] || {
+    warn "No puedo leer /etc/shells. Si chsh falla, agregá manualmente: $shell_path"
+    return
+  }
+
+  if grep -Fxq "$shell_path" /etc/shells; then
+    return
+  fi
+
+  warn "$shell_path no está en /etc/shells. Lo agrego con sudo para que chsh funcione."
+  if command -v sudo >/dev/null 2>&1; then
+    printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null || \
+      warn "No pude agregar $shell_path a /etc/shells. Ejecutá: echo '$shell_path' | sudo tee -a /etc/shells"
+  else
+    warn "sudo no está disponible. Ejecutá como root: echo '$shell_path' >> /etc/shells"
+  fi
+}
+
+need_cmd curl
+
+if is_macos; then
+  ensure_brew
+  brew_install zsh
+  brew_install git
+else
+  need_cmd git
+  need_cmd zsh
+fi
+
+msg "Instalando Oh My Zsh si no existe"
+if [[ ! -d "$OHMYZSH_DIR" ]]; then
+  RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+else
+  warn "Oh My Zsh ya existe"
+fi
+
+mkdir -p "$OHMYZSH_CUSTOM/themes" "$OHMYZSH_CUSTOM/plugins"
+
+msg "Instalando powerlevel10k"
+if [[ ! -d "$THEME_DIR" ]]; then
+  git clone https://github.com/romkatv/powerlevel10k.git "$THEME_DIR"
+else
+  warn "powerlevel10k ya existe"
+fi
+
+msg "Instalando zsh-autosuggestions"
+if [[ ! -d "$AUTO_DIR" ]]; then
+  git clone https://github.com/zsh-users/zsh-autosuggestions "$AUTO_DIR"
+else
+  warn "zsh-autosuggestions ya existe"
+fi
+
+msg "Instalando zsh-syntax-highlighting"
+if [[ ! -d "$SYNTAX_DIR" ]]; then
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$SYNTAX_DIR"
+else
+  warn "zsh-syntax-highlighting ya existe"
+fi
+
+msg "Respaldando ~/.zshrc"
+[[ -f "$ZSHRC" ]] && cp "$ZSHRC" "${ZSHRC}.bak.$(date +%s)"
+
+msg "Escribiendo ~/.zshrc funcional"
+cat > "$ZSHRC" <<'EOF'
+[[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
+
+export ZSH="$HOME/.oh-my-zsh"
+
+ZSH_THEME="powerlevel10k/powerlevel10k"
+
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting sudo)
+
+source $ZSH/oh-my-zsh.sh
+
+export PATH=$PATH:/opt/4rji/bin
+
+[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+EOF
+
+msg "Cambiando shell por defecto a zsh"
+ZSH_BIN="$(find_zsh_bin)"
+echo "[+] Usando zsh: $ZSH_BIN"
+
+if is_macos; then
+  ensure_shell_registered "$ZSH_BIN"
+fi
+
+if chsh -s "$ZSH_BIN"; then
+  echo "[+] Ejecutado: chsh -s $ZSH_BIN"
+else
+  warn "chsh falló. Ejecutá manualmente: chsh -s $ZSH_BIN"
+fi
+
+msg "Listo"
+echo "Corre:"
+echo "  exec zsh"
+echo
+echo "Luego:"
+echo "  p10k configure"
+echo
+echo "Ahora:"
+echo "  zshinst2"
+echo "  neofinst"
+echo "  nanoinst"
+echo "  tmuxinst"
+echo "  bashfun"
+echo "  herralias"
+echo "  kittyinst"

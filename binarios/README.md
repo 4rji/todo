@@ -200,6 +200,7 @@ obsidianinst        Instala obsidian en deb, baja paquete e instala notas
 zeroinst            Script para zero raspberry
 zshinst             Configura zsh con todo, Oh My Zsh, powerlevel10k y plugins; compatible Linux/macOS
 zshinst1            antes zshinst, Instala la zsh h-my-zsh powerlevel10k
+zshinstmac          Version macOS (Apple Silicon): instala zsh y git con brew (instala Homebrew si falta), Oh My Zsh, powerlevel10k y plugins
 zshinst2            Instala la configuracion de barra terminal .p10k.zsh, 
 tmuxinst            Archivos para la configuracion de tmux, lo instala. con B
 neofetchinst        Instala y personaliza neofetch para ppg1
