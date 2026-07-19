@@ -73,7 +73,7 @@ show_instructions() {
     echo -e "   ${CYAN}chmod +x whisper.sh${NC}"
     echo ""
     echo -e "${BOLD}Convertir video MOV a MP3 manualmente:${NC}"
-    echo -e "   ${CYAN}ffmpeg -i ~/Downloads/movie.mov -acodec libmp3lame -q:a 4 movie.mp3${NC}"
+    echo -e "   ${CYAN}ffmpeg -i ~/Downloads/movie.mov -vn -acodec libmp3lame -q:a 0 movie.mp3${NC}"
     echo ""
     echo -e "${BOLD}Transcribir WAV a TXT:${NC}"
     echo -e "   ${CYAN}whisper file.wav --model medium --language en --output_format txt${NC}"
@@ -121,7 +121,7 @@ convert_and_transcribe() {
     echo -e "${YELLOW}   Paso 1/2: Convirtiendo a MP3...${NC}"
     echo ""
 
-    ffmpeg -i "$file" -acodec libmp3lame -q:a 4 "$mp3" -y
+    ffmpeg -i "$file" -vn -acodec libmp3lame -q:a 0 "$mp3" -y
 
     if [ $? -ne 0 ]; then
         echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
