@@ -1,0 +1,120 @@
+---
+name: todo
+description: >
+  Document scripts in ~/GitHub/todo/binarios by doing both required catalog updates: a short English one-line README.md entry and a structured descriptions.json entry.
+  Trigger: when the user asks to document, describe, catalog, or add metadata for a script in todo/binarios, especially when they say to do both README.md and descriptions.json.
+license: Apache-2.0
+metadata:
+  author: gentleman-programming
+  version: "1.0"
+---
+
+## When to Use
+
+Use this skill when working in `~/GitHub/todo/binarios` and the user asks to:
+
+- Create a short English description for a script.
+- Add or update a `README.md` one-line entry.
+- Add or update a structured `descriptions.json` entry.
+- “Do both things” for a script: README + descriptions catalog.
+
+## Critical Patterns
+
+1. **Inspect the script first.** Do not guess what it does. Read the target script and derive the description from real behavior.
+2. **Keep `README.md` short.** Add one concise English line for the script.
+3. **Use the structured catalog schema.** Add an entry like:
+
+   ```json
+   "scriptname": {
+     "name": "scriptname",
+     "short_desc": "Short English description.",
+     "detailed_desc": [
+       "Readable detail line one.",
+       "",
+       "Readable detail line two.",
+       "Readable detail line three."
+     ]
+   }
+   ```
+
+4. **Make `detailed_desc` readable.** Prefer short lines and blank string separators (`""`) between logical sections so rendered Details views are not one dense paragraph.
+5. **Preserve existing entries.** Do not reformat or rewrite unrelated `descriptions.json` entries.
+6. **Treat untracked scripts as evidence only.** If the script is untracked, inspect it but do not modify it unless the user explicitly asks.
+7. **Do not build.** This repo convention says never build after changes.
+
+## Workflow
+
+1. Confirm the target script exists and inspect it:
+
+   ```bash
+   ls -la <script>
+   sed -n '1,220p' <script>
+   ```
+
+2. Check whether the script is already documented:
+
+   ```bash
+   rg -n "^<script>|\"<script>\"" README.md descriptions.json
+   ```
+
+3. Edit `README.md` with a short English one-liner.
+
+4. Edit `descriptions.json` with:
+   - `name`: exact script name.
+   - `short_desc`: short English summary.
+   - `detailed_desc`: readable array with short lines and blank separators when useful.
+
+5. Validate JSON and semantic catalog changes:
+
+   ```bash
+   python3 -m json.tool descriptions.json >/tmp/descriptions-json-check
+   python3 - <<'PY'
+   import json, subprocess
+   from pathlib import Path
+   cur = json.loads(Path('descriptions.json').read_text())
+   head = json.loads(subprocess.check_output(['git', 'show', 'HEAD:binarios/descriptions.json']))
+   cur_keys = set(cur)
+   head_keys = set(head)
+   print('added', sorted(cur_keys - head_keys))
+   print('removed', sorted(head_keys - cur_keys))
+   print('changed_existing', [k for k in sorted(cur_keys & head_keys) if cur[k] != head[k]])
+   PY
+   ```
+
+6. If the target is a shell script and was inspected or documented, validate syntax only:
+
+   ```bash
+   bash -n <script>
+   ```
+
+## Output Style
+
+Report briefly:
+
+- Files changed.
+- What was added.
+- Validation performed.
+- Explicitly say no build was run.
+
+## Example Copy Style
+
+README one-liner:
+
+```text
+gpslogs             Logs Wi-Fi scan results with GPS coordinates to timestamped CSV files.
+```
+
+Readable `detailed_desc` style:
+
+```json
+"detailed_desc": [
+  "Logs nearby Wi-Fi networks together with live GPS data.",
+  "",
+  "Default interface: wlan1.",
+  "Output folder: $HOME/wifi-gps-logs.",
+  "",
+  "Before recording, it checks required commands and verifies the wireless interface.",
+  "When stopped, it prints a final summary with the output file path."
+]
+```
+
