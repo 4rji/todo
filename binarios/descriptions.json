@@ -1046,5 +1046,15 @@
             "",
             "Despues transferi ese .ovpn a la maquina/router que lo va a usar (por ejemplo con scp, USB, o pegandolo a mano) e importalo con el cliente OpenVPN correspondiente."
         ]
+    },
+    "voces": {
+        "name": "voces",
+        "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
+        "detailed_desc": [
+            "Runs /opt/4rji/bin/voces_mac on macOS and /opt/4rji/bin/voces_amd on Linux.",
+            "",
+            "It checks that the selected executable exists and is executable before handing off all supplied arguments.",
+            "Unsupported operating systems and missing platform executables produce an error message."
+        ]
     }
 }
