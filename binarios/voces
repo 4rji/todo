@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bin_dir="/opt/4rji/bin"
+
+case "$(uname -s)" in
+  Darwin)
+    target="${bin_dir}/voces_mac"
+    ;;
+  Linux)
+    target="${bin_dir}/voces_amd"
+    ;;
+  *)
+    printf 'voces: sistema no soportado: %s\n' "$(uname -s)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -x "$target" ]]; then
+  printf 'voces: no se encontro ejecutable: %s\n' "$target" >&2
+  exit 1
+fi
+
+exec "$target" "$@"

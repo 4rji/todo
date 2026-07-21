@@ -84,6 +84,7 @@ pwdc                Copia el directorio actual con pwd y xclip
 grubp               Crea una copia de grub, boot, efi y la guarda en /var/lib/os-system, restaura tambien
 mk                  Crea markitdown de los archivos ./mk file
 mann                Wrapper que usa mannm en macOS y mann_amd en Linux desde /opt/4rji/bin
+voces               Wrapper que usa voces_mac en macOS y voces_amd en Linux desde /opt/4rji/bin
 
 ###------descargar_cosas
 wgett               Descarga archivos con wget, carpeta completa reescribiendo o no
