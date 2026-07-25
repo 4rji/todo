@@ -467,6 +467,7 @@ littlearp           Version de python de arp, no detecta tan bien como arp-scan
 hashin              Muestra md5  y sha256sum hashes
 virust              Usa la API de virustotal para ver ips.txt o IP su uso. 
 snifferip           Sniffer paquetes red que captura las cabeceras IP en dirección IP especifica (windows).
+curls               Envia pruebas HTTP/HTTPS con curl a rutas web comunes de una IPv4 autorizada.
 ataquehttp          HTTP DoS Test Tool de goldeneye, descomprime en tmp y de ahi dice como ejecutarlo.
 inundacion          hping3 un ataque de inundacion flood para pruebas de carga, pregunta por dos ataques
 metas               Script que inicia metasploit con base de datos

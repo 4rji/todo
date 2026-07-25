@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+set -u
+
+usage() {
+    printf 'Uso: %s IP[:PUERTO] [http|https]\n' "${0##*/}" >&2
+    printf 'Ejemplo: %s 192.168.88.10 https\n' "${0##*/}" >&2
+}
+
+if (( $# < 1 || $# > 2 )); then
+    usage
+    exit 2
+fi
+
+target=$1
+scheme=${2:-https}
+
+if [[ $scheme != "http" && $scheme != "https" ]]; then
+    printf 'Error: el protocolo debe ser http o https.\n' >&2
+    usage
+    exit 2
+fi
+
+if [[ $target =~ ^([0-9.]+)(:([0-9]+))?$ ]]; then
+    host=${BASH_REMATCH[1]}
+    port=${BASH_REMATCH[3]:-}
+else
+    printf 'Error: el destino debe tener el formato IP o IP:PUERTO.\n' >&2
+    exit 2
+fi
+
+IFS=. read -r octet1 octet2 octet3 octet4 extra <<< "$host"
+if [[ -n ${extra:-} || -z ${octet4:-} ]]; then
+    printf 'Error: "%s" no es una direccion IPv4 valida.\n' "$host" >&2
+    exit 2
+fi
+
+for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+    if [[ ! $octet =~ ^[0-9]{1,3}$ ]] || (( 10#$octet > 255 )); then
+        printf 'Error: "%s" no es una direccion IPv4 valida.\n' "$host" >&2
+        exit 2
+    fi
+done
+
+if [[ -n $port ]] && { [[ ! $port =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); }; then
+    printf 'Error: "%s" no es un puerto valido.\n' "$port" >&2
+    exit 2
+fi
+
+command -v curl >/dev/null 2>&1 || {
+    printf 'Error: curl no esta instalado.\n' >&2
+    exit 127
+}
+
+paths=(
+    "/wp-login.php"
+    "/phpmyadmin/"
+    "/admin.php"
+    "/shell.php"
+    "/.env"
+    "/../../../../etc/passwd"
+)
+
+base_url="${scheme}://${target}"
+errors=0
+
+printf 'Destino: %s\n' "$base_url"
+printf 'Ejecuta estas pruebas solamente contra sistemas autorizados.\n\n'
+
+for path in "${paths[@]}"; do
+    printf '%-30s ' "$path"
+    if ! curl \
+        --silent \
+        --show-error \
+        --insecure \
+        --path-as-is \
+        --connect-timeout 5 \
+        --max-time 15 \
+        --output /dev/null \
+        --write-out 'HTTP %{http_code} | %{size_download} bytes | %{time_total}s\n' \
+        "${base_url}${path}"; then
+        ((errors++))
+    fi
+done
+
+if (( errors > 0 )); then
+    printf '\n%s prueba(s) tuvieron errores de conexion.\n' "$errors" >&2
+    exit 1
+fi
