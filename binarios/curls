@@ -1,89 +1,123 @@
 #!/usr/bin/env bash
 
-set -u
+# Controlled HTTP load test for systems you own or are authorized to test.
+set -euo pipefail
+
+DEFAULT_RATE=200      # Requests per second (hey uses one worker, so this is total rate)
+DEFAULT_DURATION=30   # Seconds
+MAX_RATE=500
+MAX_DURATION=30
+TOOL="c"
+PATH_NAME="/zeek-test"
 
 usage() {
-    printf 'Uso: %s IP[:PUERTO] [http|https]\n' "${0##*/}" >&2
-    printf 'Ejemplo: %s 192.168.88.10 https\n' "${0##*/}" >&2
+    cat >&2 <<'EOF'
+Usage: zeek-load-test.sh IP[:PORT] [http|https] [options]
+
+Options:
+  --tool c|y|p       c = curl, y = hey, p = httperf (HTTP only)
+  --path /PATH       Safe test endpoint (default: /zeek-test)
+  --rate NUMBER      Requests per second; maximum 500 (default: 200)
+  --duration NUMBER  Test length in seconds; maximum 30 (default: 30)
+  -h, --help         Show this help
+
+Examples:
+  ./zeek-load-test.sh 192.168.88.10
+  ./zeek-load-test.sh 192.168.88.10:8080 http --tool p
+  ./zeek-load-test.sh 192.168.88.10 https --tool y --rate 75 --path /zeek-test
+EOF
 }
 
-if (( $# < 1 || $# > 2 )); then
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
     usage
-    exit 2
+    exit 0
 fi
+
+[[ $# -ge 1 ]] || { usage; exit 2; }
 
 target=$1
-scheme=${2:-https}
+shift
+scheme="https"
+rate=$DEFAULT_RATE
+duration=$DEFAULT_DURATION
 
-if [[ $scheme != "http" && $scheme != "https" ]]; then
-    printf 'Error: el protocolo debe ser http o https.\n' >&2
-    usage
-    exit 2
+if [[ ${1:-} == "http" || ${1:-} == "https" ]]; then
+    scheme=$1
+    shift
 fi
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tool) TOOL=${2:-}; shift 2 ;;
+        --path) PATH_NAME=${2:-}; shift 2 ;;
+        --rate) rate=${2:-}; shift 2 ;;
+        --duration) duration=${2:-}; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'Error: unknown option: %s\n' "$1" >&2; usage; exit 2 ;;
+    esac
+done
+
+[[ $TOOL =~ ^(c|y|p)$ ]] || { echo 'Error: --tool must be c, y, or p.' >&2; exit 2; }
+[[ $PATH_NAME == /* ]] || { echo 'Error: --path must start with /.' >&2; exit 2; }
+[[ $rate =~ ^[0-9]+$ ]] && (( rate >= 1 && rate <= MAX_RATE )) || {
+    printf 'Error: --rate must be between 1 and %s.\n' "$MAX_RATE" >&2; exit 2;
+}
+[[ $duration =~ ^[0-9]+$ ]] && (( duration >= 1 && duration <= MAX_DURATION )) || {
+    printf 'Error: --duration must be between 1 and %s.\n' "$MAX_DURATION" >&2; exit 2;
+}
 
 if [[ $target =~ ^([0-9.]+)(:([0-9]+))?$ ]]; then
     host=${BASH_REMATCH[1]}
     port=${BASH_REMATCH[3]:-}
 else
-    printf 'Error: el destino debe tener el formato IP o IP:PUERTO.\n' >&2
+    echo 'Error: target must be an IPv4 address, optionally followed by :PORT.' >&2
     exit 2
 fi
 
-IFS=. read -r octet1 octet2 octet3 octet4 extra <<< "$host"
-if [[ -n ${extra:-} || -z ${octet4:-} ]]; then
-    printf 'Error: "%s" no es una direccion IPv4 valida.\n' "$host" >&2
-    exit 2
-fi
-
-for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
-    if [[ ! $octet =~ ^[0-9]{1,3}$ ]] || (( 10#$octet > 255 )); then
-        printf 'Error: "%s" no es una direccion IPv4 valida.\n' "$host" >&2
-        exit 2
-    fi
+IFS=. read -r o1 o2 o3 o4 extra <<< "$host"
+[[ -z ${extra:-} && -n ${o4:-} ]] || { echo 'Error: invalid IPv4 address.' >&2; exit 2; }
+for octet in "$o1" "$o2" "$o3" "$o4"; do
+    [[ $octet =~ ^[0-9]{1,3}$ ]] && (( 10#$octet <= 255 )) || {
+        echo 'Error: invalid IPv4 address.' >&2; exit 2;
+    }
 done
 
 if [[ -n $port ]] && { [[ ! $port =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); }; then
-    printf 'Error: "%s" no es un puerto valido.\n' "$port" >&2
+    echo 'Error: invalid port.' >&2
     exit 2
 fi
 
-command -v curl >/dev/null 2>&1 || {
-    printf 'Error: curl no esta instalado.\n' >&2
-    exit 127
-}
-
-paths=(
-    "/wp-login.php"
-    "/phpmyadmin/"
-    "/admin.php"
-    "/shell.php"
-    "/.env"
-    "/../../../../etc/passwd"
-)
-
 base_url="${scheme}://${target}"
-errors=0
+url="${base_url}${PATH_NAME}"
+requests=$(( rate * duration ))
 
-printf 'Destino: %s\n' "$base_url"
-printf 'Ejecuta estas pruebas solamente contra sistemas autorizados.\n\n'
+printf 'Target: %s\n' "$url"
+printf 'Controlled load: %s requests/sec for %ss (%s requests maximum)\n' "$rate" "$duration" "$requests"
+printf 'Run this only against systems you own or are explicitly authorized to test.\n\n'
 
-for path in "${paths[@]}"; do
-    printf '%-30s ' "$path"
-    if ! curl \
-        --silent \
-        --show-error \
-        --insecure \
-        --path-as-is \
-        --connect-timeout 5 \
-        --max-time 15 \
-        --output /dev/null \
-        --write-out 'HTTP %{http_code} | %{size_download} bytes | %{time_total}s\n' \
-        "${base_url}${path}"; then
-        ((errors++))
-    fi
-done
-
-if (( errors > 0 )); then
-    printf '\n%s prueba(s) tuvieron errores de conexion.\n' "$errors" >&2
-    exit 1
-fi
+case "$TOOL" in
+    c)
+        command -v curl >/dev/null 2>&1 || { echo 'Error: curl is not installed.' >&2; exit 127; }
+        interval=$(awk "BEGIN { printf \"%.3f\", 1 / $rate }")
+        for ((i = 1; i <= requests; i++)); do
+            curl --silent --show-error --insecure \
+                --connect-timeout 5 --max-time 10 \
+                --output /dev/null \
+                --write-out "Request ${i}: HTTP %{http_code} | %{time_total}s\\n" \
+                "$url" || true
+            sleep "$interval"
+        done
+        ;;
+    y)
+        command -v hey >/dev/null 2>&1 || { echo 'Error: hey is not installed. Install it with: brew install hey' >&2; exit 127; }
+        # One worker makes -q an overall rate limit, rather than a per-worker limit.
+        hey -q "$rate" -c 1 -z "${duration}s" "$url"
+        ;;
+    p)
+        [[ $scheme == "http" ]] || { echo 'Error: httperf mode supports HTTP only. Use curl or hey for HTTPS.' >&2; exit 2; }
+        command -v httperf >/dev/null 2>&1 || { echo 'Error: httperf is not installed.' >&2; exit 127; }
+        httperf_args=(--server "$host" --uri "$PATH_NAME" --rate "$rate" --num-conn "$requests" --num-call 1 --timeout 10)
+        [[ -n $port ]] && httperf_args+=(--port "$port")
+        httperf "${httperf_args[@]}"
+        ;;
+esac
