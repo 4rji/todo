@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
 
-# Controlled HTTP load test for systems you own or are authorized to test.
+# HTTP route checks and controlled load tests for authorized systems.
 set -euo pipefail
 
 DEFAULT_RATE=200      # Requests per second (hey uses one worker, so this is total rate)
 DEFAULT_DURATION=30   # Seconds
 MAX_RATE=500
 MAX_DURATION=30
-TOOL="c"
+TOOL=""
 PATH_NAME="/zeek-test"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: zeek-load-test.sh IP[:PORT] [http|https] [options]
+Uso: curls IP[:PUERTO] [http|https] (-c|-y|-p) [opciones]
 
-Options:
-  --tool c|y|p       c = curl, y = hey, p = httperf (HTTP only)
-  --path /PATH       Safe test endpoint (default: /zeek-test)
-  --rate NUMBER      Requests per second; maximum 500 (default: 200)
-  --duration NUMBER  Test length in seconds; maximum 30 (default: 30)
-  -h, --help         Show this help
+Herramientas:
+  -c                 Prueba con curl rutas web comunes
+  -y                 Prueba de carga controlada con hey
+  -p                 Prueba de carga con httperf (solo HTTP)
 
-Examples:
-  ./zeek-load-test.sh 192.168.88.10
-  ./zeek-load-test.sh 192.168.88.10:8080 http --tool p
-  ./zeek-load-test.sh 192.168.88.10 https --tool y --rate 75 --path /zeek-test
+Opciones para -y y -p:
+  --path /RUTA       Endpoint de prueba (predeterminado: /zeek-test)
+  --rate NUMERO      Solicitudes por segundo; maximo 500 (predeterminado: 200)
+  --duration NUMERO  Duracion en segundos; maximo 30 (predeterminado: 30)
+  --tool c|y|p       Forma compatible de seleccionar la herramienta
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  ./curls 192.168.88.10 -c
+  ./curls 192.168.88.10:8080 http -p
+  ./curls 192.168.88.10 https -y --rate 75 --path /zeek-test
 EOF
 }
 
@@ -48,6 +53,9 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -c) TOOL="c"; shift ;;
+        -y) TOOL="y"; shift ;;
+        -p) TOOL="p"; shift ;;
         --tool) TOOL=${2:-}; shift 2 ;;
         --path) PATH_NAME=${2:-}; shift 2 ;;
         --rate) rate=${2:-}; shift 2 ;;
@@ -57,7 +65,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ $TOOL =~ ^(c|y|p)$ ]] || { echo 'Error: --tool must be c, y, or p.' >&2; exit 2; }
+[[ $TOOL =~ ^(c|y|p)$ ]] || {
+    echo 'Error: selecciona una herramienta con -c, -y o -p.' >&2
+    usage
+    exit 2
+}
 [[ $PATH_NAME == /* ]] || { echo 'Error: --path must start with /.' >&2; exit 2; }
 [[ $rate =~ ^[0-9]+$ ]] && (( rate >= 1 && rate <= MAX_RATE )) || {
     printf 'Error: --rate must be between 1 and %s.\n' "$MAX_RATE" >&2; exit 2;
@@ -88,32 +100,63 @@ if [[ -n $port ]] && { [[ ! $port =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$p
 fi
 
 base_url="${scheme}://${target}"
-url="${base_url}${PATH_NAME}"
-requests=$(( rate * duration ))
-
-printf 'Target: %s\n' "$url"
-printf 'Controlled load: %s requests/sec for %ss (%s requests maximum)\n' "$rate" "$duration" "$requests"
-printf 'Run this only against systems you own or are explicitly authorized to test.\n\n'
 
 case "$TOOL" in
     c)
-        command -v curl >/dev/null 2>&1 || { echo 'Error: curl is not installed.' >&2; exit 127; }
-        interval=$(awk "BEGIN { printf \"%.3f\", 1 / $rate }")
-        for ((i = 1; i <= requests; i++)); do
-            curl --silent --show-error --insecure \
-                --connect-timeout 5 --max-time 10 \
+        command -v curl >/dev/null 2>&1 || {
+            printf 'Error: curl no esta instalado.\n' >&2
+            exit 127
+        }
+        paths=(
+            "/wp-login.php"
+            "/phpmyadmin/"
+            "/admin.php"
+            "/shell.php"
+            "/.env"
+            "/../../../../etc/passwd"
+        )
+        errors=0
+
+        printf 'Destino: %s\n' "$base_url"
+        printf 'Ejecuta estas pruebas solamente contra sistemas autorizados.\n\n'
+
+        for path in "${paths[@]}"; do
+            printf '%-30s ' "$path"
+            if ! curl \
+                --silent \
+                --show-error \
+                --insecure \
+                --path-as-is \
+                --connect-timeout 5 \
+                --max-time 15 \
                 --output /dev/null \
-                --write-out "Request ${i}: HTTP %{http_code} | %{time_total}s\\n" \
-                "$url" || true
-            sleep "$interval"
+                --write-out 'HTTP %{http_code} | %{size_download} bytes | %{time_total}s\n' \
+                "${base_url}${path}"; then
+                errors=$((errors + 1))
+            fi
         done
+
+        if (( errors > 0 )); then
+            printf '\n%s prueba(s) tuvieron errores de conexion.\n' "$errors" >&2
+            exit 1
+        fi
         ;;
     y)
+        url="${base_url}${PATH_NAME}"
+        requests=$(( rate * duration ))
+        printf 'Target: %s\n' "$url"
+        printf 'Controlled load: %s requests/sec for %ss (%s requests maximum)\n' "$rate" "$duration" "$requests"
+        printf 'Run this only against systems you own or are explicitly authorized to test.\n\n'
         command -v hey >/dev/null 2>&1 || { echo 'Error: hey is not installed. Install it with: brew install hey' >&2; exit 127; }
         # One worker makes -q an overall rate limit, rather than a per-worker limit.
         hey -q "$rate" -c 1 -z "${duration}s" "$url"
         ;;
     p)
+        url="${base_url}${PATH_NAME}"
+        requests=$(( rate * duration ))
+        printf 'Target: %s\n' "$url"
+        printf 'Controlled load: %s requests/sec for %ss (%s requests maximum)\n' "$rate" "$duration" "$requests"
+        printf 'Run this only against systems you own or are explicitly authorized to test.\n\n'
         [[ $scheme == "http" ]] || { echo 'Error: httperf mode supports HTTP only. Use curl or hey for HTTPS.' >&2; exit 2; }
         command -v httperf >/dev/null 2>&1 || { echo 'Error: httperf is not installed.' >&2; exit 127; }
         httperf_args=(--server "$host" --uri "$PATH_NAME" --rate "$rate" --num-conn "$requests" --num-call 1 --timeout 10)
