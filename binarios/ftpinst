@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#
+# install-ftp-demo.sh — vsftpd SIN cifrado (FTP plano, puerto 21)
+#
+# PROPÓSITO: laboratorio / demo. Las credenciales viajan en texto claro
+# para poder capturarlas con Wireshark y demostrar por qué FTP es inseguro.
+# NO usar en producción ni en redes no controladas.
+#
+# Uso:
+#   sudo ./install-ftp-demo.sh                 # user=demo pass=demo123
+#   sudo ./install-ftp-demo.sh -u alice -p Passw0rd
+#
+set -euo pipefail
+
+FTP_USER="demo"
+FTP_PASS="demo123"
+FTP_HOME="/srv/ftp-demo"
+CONF="/etc/vsftpd.conf"
+PASV_MIN=40000
+PASV_MAX=40010
+
+log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -u|--user) FTP_USER="$2"; shift 2 ;;
+    -p|--pass) FTP_PASS="$2"; shift 2 ;;
+    -h|--help) sed -n '3,14p' "$0"; exit 0 ;;
+    *) die "argumento desconocido: $1" ;;
+  esac
+done
+
+[[ $EUID -eq 0 ]] || die "requiere root"
+[[ "$FTP_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "usuario inválido"
+
+# ---------------------------------------------------------------- paquete
+log "instalando vsftpd"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq vsftpd >/dev/null
+
+# ---------------------------------------------------------------- usuario
+if id -u "$FTP_USER" >/dev/null 2>&1; then
+  log "usuario $FTP_USER ya existe"
+else
+  log "creando usuario $FTP_USER (shell /bin/bash para que PAM lo acepte)"
+  useradd -m -d "$FTP_HOME" -s /bin/bash "$FTP_USER"
+fi
+chpasswd <<< "$FTP_USER:$FTP_PASS"
+install -d -o "$FTP_USER" -g "$FTP_USER" "$FTP_HOME"
+echo "captura esto con wireshark - $(date -Is)" > "$FTP_HOME/README.txt"
+chown "$FTP_USER:$FTP_USER" "$FTP_HOME/README.txt"
+
+# ---------------------------------------------------------------- config
+[[ -f "$CONF" && ! -f "${CONF}.orig" ]] && cp -a "$CONF" "${CONF}.orig"
+log "escribiendo $CONF (sin SSL, sin chroot)"
+cat > "$CONF" <<EOF
+# demo Wireshark — FTP EN TEXTO CLARO — generado $(date -Is)
+listen=YES
+listen_ipv6=NO
+background=NO
+
+anonymous_enable=NO
+local_enable=YES
+write_enable=YES
+local_umask=022
+use_localtime=YES
+connect_from_port_20=YES
+
+# sin jaula: mantiene la demo simple, sin el fallo de writable-chroot
+chroot_local_user=NO
+
+# TLS deliberadamente DESACTIVADO — este es el punto de la demo
+ssl_enable=NO
+
+# pasivo, por si el cliente lo pide
+pasv_enable=YES
+pasv_min_port=$PASV_MIN
+pasv_max_port=$PASV_MAX
+
+# log de protocolo: verás USER/PASS también aquí
+xferlog_enable=YES
+log_ftp_protocol=YES
+vsftpd_log_file=/var/log/vsftpd.log
+EOF
+
+# ---------------------------------------------------------------- firewall
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  log "ufw activo: abriendo 21 y ${PASV_MIN}-${PASV_MAX}"
+  ufw allow 21/tcp >/dev/null
+  ufw allow "${PASV_MIN}:${PASV_MAX}/tcp" >/dev/null
+fi
+
+# ---------------------------------------------------------------- servicio
+log "reiniciando servicio"
+systemctl enable vsftpd >/dev/null 2>&1 || true
+systemctl restart vsftpd
+sleep 1
+systemctl is-active --quiet vsftpd || {
+  echo "--- config-test en foreground ---"
+  /usr/sbin/vsftpd "$CONF" || true
+  die "vsftpd no arrancó (ver mensaje 500 OOPS arriba)"
+}
+
+# ---------------------------------------------------------------- resumen
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+cat <<EOF
+
+$(log 'listo — FTP plano activo')
+  host      : ${IP:-127.0.0.1}
+  usuario   : $FTP_USER
+  password  : $FTP_PASS
+  puerto    : 21 (control, texto claro)
+  pasivo    : ${PASV_MIN}-${PASV_MAX}
+
+Generar tráfico:
+  ftp ${IP:-127.0.0.1}            # login interactivo
+  # o:  curl -v ftp://$FTP_USER:$FTP_PASS@${IP:-127.0.0.1}/README.txt
+
+Capturar en Wireshark:
+  interfaz : la de tu LAN;  si cliente y servidor son el MISMO host, usa 'lo'
+  filtro   : tcp.port == 21
+  ver creds: aplica 'ftp'  →  clic derecho en un paquete  →  Follow > TCP Stream
+             USER y PASS aparecen en claro. Aísla con: ftp.request.command=="PASS"
+
+Restaurar: sudo cp ${CONF}.orig $CONF && sudo systemctl restart vsftpd
+EOF
