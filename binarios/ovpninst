@@ -1,39 +1,111 @@
 #!/usr/bin/env bash
 
-# Clear the screen
-clear
+set -Eeuo pipefail
 
-echo -e "\e[96m_________________________________________________________\e[0m"
-echo ""
-echo -e "\e[93mDo you want to install OpenVPN Server? (y/n)\e[0m"
-echo ""
-echo -e "\e[96m_________________________________________________________\e[0m"
-read -p "" yn
+readonly REPO_KEY_URL="https://packages.openvpn.net/as-repo-public.asc"
+readonly REPO_KEY_FILE="/etc/apt/keyrings/as-repository.asc"
+readonly REPO_FILE="/etc/apt/sources.list.d/openvpn-as-repo.list"
 
-case $yn in
-    [Yy]* )
-        echo -e "\e[92mUpdating system and installing required packages...\e[0m"
-        apt update && apt -y install ca-certificates wget net-tools gnupg
-        
-        echo -e "\e[95mAdding the OpenVPN repository...\e[0m"
-        wget https://as-repository.openvpn.net/as-repo-public.asc -qO /etc/apt/trusted.gpg.d/as-repository.asc
-        echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/as-repository.asc] http://as-repository.openvpn.net/as/debian bookworm main" > /etc/apt/sources.list.d/openvpn-as-repo.list
-        
-        echo -e "\e[92mUpdating system and installing OpenVPN AS...\e[0m"
-        apt update && apt -y install openvpn-as
-        echo -e "\e[32mOpenVPN Server has been installed successfully.\e[0m"
-        ;;
-    [Nn]* )
-        echo -e "\e[91mInstallation cancelled by user.\e[0m"
-        ;;
-    * )
-        echo -e "\e[91mPlease answer yes or no.\e[0m"
+error() {
+    echo -e "\e[91mERROR: $*\e[0m" >&2
+    exit 1
+}
+
+on_error() {
+    local exit_code=$?
+    echo -e "\e[91mInstallation failed on line $1 (exit code: ${exit_code}).\e[0m" >&2
+    exit "$exit_code"
+}
+
+trap 'on_error $LINENO' ERR
+
+[[ -r /etc/os-release ]] || error "Could not detect the operating system."
+# shellcheck disable=SC1091
+source /etc/os-release
+
+case "${ID:-}:${VERSION_ID:-}" in
+    ubuntu:22.04) repo_suite="jammy" ;;
+    ubuntu:24.04) repo_suite="noble" ;;
+    ubuntu:26.04) repo_suite="resolute" ;;
+    debian:12)    repo_suite="bookworm" ;;
+    debian:13)    repo_suite="trixie" ;;
+    *)
+        error "Unsupported system: ${PRETTY_NAME:-unknown}. OpenVPN Access Server supports Debian 12/13 and Ubuntu 22.04/24.04/26.04 LTS."
         ;;
 esac
 
+architecture="$(dpkg --print-architecture)"
+case "${ID}:${architecture}" in
+    ubuntu:amd64|ubuntu:arm64|debian:amd64) ;;
+    *) error "Unsupported architecture for ${PRETTY_NAME}: ${architecture}." ;;
+esac
+
+clear 2>/dev/null || true
+
+echo -e "\e[96m_________________________________________________________\e[0m"
+echo ""
+echo -e "\e[93mDo you want to install OpenVPN Access Server on ${PRETTY_NAME}? (y/n)\e[0m"
+echo ""
+echo -e "\e[96m_________________________________________________________\e[0m"
+read -r yn
+
+case "$yn" in
+    [Yy]*) ;;
+    [Nn]*)
+        echo -e "\e[91mInstallation cancelled by user.\e[0m"
+        exit 0
+        ;;
+    *) error "Please answer yes or no." ;;
+esac
+
+# Use sudo internally when the script is not already running as root.
+if (( EUID == 0 )); then
+    SUDO=()
+else
+    command -v sudo >/dev/null 2>&1 || error "sudo is required. Install it or run this script as root."
+    sudo -v || error "Could not obtain sudo privileges."
+    SUDO=(sudo)
+fi
+
+# Disable a stale repository entry left by an older ovpninst run. It is
+# recreated below after the current signing key and repository tools exist.
+"${SUDO[@]}" install -d -m 0755 /etc/apt/sources.list.d
+"${SUDO[@]}" install -m 0644 /dev/null "$REPO_FILE"
+
+echo -e "\e[92mUpdating the package index...\e[0m"
+"${SUDO[@]}" apt-get update
+
+echo -e "\e[92mRepairing interrupted packages and unmet dependencies...\e[0m"
+if ! "${SUDO[@]}" dpkg --configure -a; then
+    echo -e "\e[93mSome packages still need dependencies; apt will repair them next.\e[0m"
+fi
+"${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get --fix-broken install -y
+
+echo -e "\e[92mInstalling repository tools...\e[0m"
+"${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ca-certificates wget net-tools gnupg
+
+echo -e "\e[95mAdding the OpenVPN Access Server repository for ${repo_suite}/${architecture}...\e[0m"
+"${SUDO[@]}" install -d -m 0755 /etc/apt/keyrings
+wget "$REPO_KEY_URL" -qO- | "${SUDO[@]}" tee "$REPO_KEY_FILE" >/dev/null
+"${SUDO[@]}" chmod 0644 "$REPO_KEY_FILE"
+printf 'deb [arch=%s signed-by=%s] http://packages.openvpn.net/as/debian %s main\n' \
+    "$architecture" "$REPO_KEY_FILE" "$repo_suite" | "${SUDO[@]}" tee "$REPO_FILE" >/dev/null
+
+echo -e "\e[92mInstalling OpenVPN Access Server...\e[0m"
+"${SUDO[@]}" apt-get update
+if ! "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y openvpn-as; then
+    echo -e "\e[93mThe first installation attempt failed; repairing dependencies and trying once more...\e[0m"
+    if ! "${SUDO[@]}" dpkg --configure -a; then
+        echo -e "\e[93mdpkg could not finish yet; apt will repair the remaining dependencies.\e[0m"
+    fi
+    "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get --fix-broken install -y
+    "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y openvpn-as
+fi
+
+echo -e "\e[32mOpenVPN Access Server has been installed successfully.\e[0m"
 echo -e "\e[96m_________________________________________________________\e[0m"
 echo ""
 echo -e "\e[95mADVISORY: This script should be used for authorized penetration testing and/or educational purposes only. Any misuse of this software will not be the responsibility of the author or of any other collaborator. Use it at your own computers and/or with the computer owner's permission.\e[0m"
 echo ""
 echo -e "\e[96m_________________________________________________________\e[0m"
-
