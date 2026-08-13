@@ -18,15 +18,15 @@ mkdir -p /opt/4rji/
 # Usar la función mktem para crear un directorio temporal
 mktem "download"
 
-# Descargar el archivo
-git clone --depth 1 https://github.com/4rji/archivos-b.git
+# Descargar la base de datos desde el commit indicado
+curl --fail --location \
+    --output GeoLite2-City.mmdb.gz \
+    https://raw.githubusercontent.com/wp-statistics/GeoLite2-City/a1a4edef893a465c59eea87fc13ee812b04b8536/GeoLite2-City.mmdb.gz
 
-# Extraer el archivo en el directorio de destino
-tar -xzvf archivos-b/GEYO-locacion.tar.gz
-
-sudo mv GeoLite2-City_20240726/GeoLite2-City.mmdb /opt/4rji
+# Descomprimir la base de datos en el directorio de destino
+gzip --decompress GeoLite2-City.mmdb.gz
+sudo mv GeoLite2-City.mmdb /opt/4rji/
 
 
 
 echo "Descarga y extracción completada en /opt/4rji/"
-
