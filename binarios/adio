@@ -76,18 +76,32 @@ done
 
 # Verificación de argumento
 if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <filename>"
+  echo "Uso: $0 <archivo>"
   exit 1
 fi
 
-# Verificar si el archivo existe
-if [ ! -f "$1" ]; then
-    echo "El archivo especificado no existe."
+target="$1"
+
+# Rechazar enlaces simbólicos: seguirlos borraría el destino real, no el enlace
+if [ -L "$target" ]; then
+    echo "Error: '$target' es un enlace simbólico. Abortado por seguridad."
     exit 1
 fi
 
-# Aplicar el comando 'scrub'
-scrub -p dod "$1"
+# Verificar que sea un archivo regular existente
+if [ ! -f "$target" ]; then
+    echo "El archivo especificado no existe o no es un archivo regular."
+    exit 1
+fi
 
-# Aplicar el comando 'shred'
-shred -zun 10 -v "$1"
+# Aviso: en SSD/NVMe y FS con journaling o copia-en-escritura (btrfs/ZFS/ext4),
+# sobrescribir NO garantiza borrado físico. Para eso, usar cifrado de disco.
+echo -e "\033[1;33mBorrado seguro IRREVERSIBLE de:\033[0m $target"
+
+# scrub (patrón DoD). Si falla, seguir igual con shred.
+scrub -p dod "$target" || echo "Aviso: scrub falló, continúo con shred."
+
+# shred: 10 pasadas + ceros (-z) + eliminar el archivo (-u)
+shred -zun 10 -v "$target"
+
+echo -e "\033[1;32mListo:\033[0m '$target' borrado de forma segura."

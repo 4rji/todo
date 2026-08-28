@@ -75,41 +75,44 @@ done
 
 # Verificación de argumento
 if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <directory>"
+  echo "Uso: $0 <directorio>"
   exit 1
 fi
 
-# Verificar si el directorio existe
-if [ ! -d "$1" ]; then
+target="$1"
+
+# Rechazar enlaces simbólicos: recorrerlos borraría archivos fuera del objetivo
+if [ -L "$target" ]; then
+    echo "Error: '$target' es un enlace simbólico. Abortado por seguridad."
+    exit 1
+fi
+
+# Verificar que el directorio exista
+if [ ! -d "$target" ]; then
     echo "El directorio especificado no existe."
     exit 1
 fi
 
-# Definir una función recursiva para aplicar scrub a los archivos en el directorio actual y sus subdirectorios
-apply_scrub_recursive() {
-  for file in "$1"/*; do
-    if [ -f "$file" ]; then
-      scrub -p dod "$file"
-    elif [ -d "$file" ]; then
-      apply_scrub_recursive "$file"  # llamada recursiva para aplicar scrub a los subdirectorios
-    fi
-  done
-}
+# Aviso: en SSD/NVMe y FS con journaling o copia-en-escritura (btrfs/ZFS/ext4),
+# sobrescribir NO garantiza borrado físico. Para eso, usar cifrado de disco.
+echo -e "\033[1;33mBorrado seguro IRREVERSIBLE del directorio:\033[0m $target"
 
-# Aplicar el comando 'scrub' a todos los archivos en el directorio y sus subdirectorios
-apply_scrub_recursive "$1"
-
-# Aplicar el comando 'shred' a todos los archivos dentro del directorio y sus subdirectorios
-for file in "$1"/*; do
-  if [ -f "$file" ]; then
+# Recorrer con find en vez de globbing manual:
+#  - incluye archivos ocultos (.dotfiles) que '*' omitiría
+#  - -type f procesa solo archivos regulares (ignora symlinks, no los sigue)
+#  - -print0 / read -d '' soporta nombres con espacios y saltos de línea
+find "$target" -type f -print0 | while IFS= read -r -d '' file; do
+    # scrub (patrón DoD); si falla, seguir con shred igual
+    scrub -p dod "$file" || echo "Aviso: scrub falló en '$file'."
+    # shred: 10 pasadas + ceros (-z) + eliminar (-u)
     shred -zun 10 -v "$file"
-  fi
 done
 
-# Borrar el directorio después de ejecutar los comandos
-rm -rf "$1"
+# Eliminar directorios vacíos, symlinks y metadatos restantes
+rm -rf "$target"
 
+echo -e "\033[1;32mListo:\033[0m '$target' borrado de forma segura."
 
 # Ejecutar el script con el directorio como argumento
-# ./secure-delete.sh /path/to/directory
-# ./secure-delete.sh /home/user/Downloads
+# ./adios /path/to/directory
+# ./adios /home/user/Downloads
