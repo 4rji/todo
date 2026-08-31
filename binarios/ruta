@@ -12,10 +12,10 @@ echo -e "\033[33mFile path:\033[0m"
 echo -e "\033[34m$filepath\033[0m"
 
 if command -v pbcopy &>/dev/null; then
-  echo "$filepath" | pbcopy
+  printf '%s' "$filepath" | pbcopy
   echo -e "\033[92mFile path '$filename' se ha copiado en el portapapeles.\033[0m"
 elif command -v xclip &>/dev/null; then
-  echo "$filepath" | xclip -selection clipboard
+  printf '%s' "$filepath" | xclip -selection clipboard
   echo ""
   echo -e "\033[92mLa siguiente ruta '$filename' ha sido copiada en el portapapeles.\033[0m"
 else
