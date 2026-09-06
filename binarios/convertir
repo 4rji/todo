@@ -30,6 +30,8 @@ show_menu() {
     echo -e "  ${GREEN}./convertir archivo.mov${NC}   → Convierte MOV → MP3 → TXT"
     echo -e "  ${GREEN}./convertir archivo.mp4${NC}   → Convierte MP4 → MP3 → TXT"
     echo -e "  ${GREEN}./convertir -s archivo.mov${NC} → Convierte video a MP4 (máx calidad)"
+    echo -e "  ${GREEN}./convertir -t archivo.mp4${NC} → Transcribe con marcas de tiempo (SRT + búsqueda)"
+    echo -e "  ${GREEN}./convertir -r salida.json${NC} → JSON de Whisper → Markdown con timestamps (RAG)"
     echo ""
     echo -e "${BOLD}FORMATOS SOPORTADOS:${NC}"
     echo -e "  Audio:  ${YELLOW}wav, mp3, m4a, ogg, flac${NC}"
@@ -40,6 +42,8 @@ show_menu() {
     echo -e "  ${CYAN}./convertir pelicula.mov${NC}"
     echo -e "  ${CYAN}./convertir podcast.mp3${NC}"
     echo -e "  ${CYAN}./convertir -s pelicula.mov${NC}"
+    echo -e "  ${CYAN}./convertir -t charla.mp4${NC}"
+    echo -e "  ${CYAN}grep -i 'firewall' charla.busqueda.txt${NC}   ${YELLOW}# → [00:12:34] ...${NC}"
     echo ""
 }
 
@@ -149,7 +153,7 @@ convert_and_transcribe() {
 convert_to_best_format() {
     local file="$1"
     local name="${file%.*}"
-    local output="${name}_converted.mp4"
+    local output="${name}.mp4"
 
     echo -e "${BOLD}🎬 Video detectado:${NC} $file"
     echo -e "${YELLOW}   Convirtiendo a MP4 (H.264 + AAC, máxima calidad y compatibilidad)...${NC}"
@@ -168,6 +172,137 @@ convert_to_best_format() {
         echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
         echo -e "${YELLOW}   Instala con: ${CYAN}sudo apt install ffmpeg${NC}"
         exit 1
+    fi
+}
+
+transcribe_with_timestamps() {
+    local file="$1"
+    local name="${file%.*}"
+    local ext="${file##*.}"
+    ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+    local audio="$file"
+
+    # Si es video, extraer audio primero
+    case "$ext" in
+        mov|mp4|mkv|avi)
+            audio="${name}.mp3"
+            echo -e "${BOLD}🎬 Video detectado:${NC} $file"
+            echo -e "${YELLOW}   Paso 1/3: Extrayendo audio a MP3...${NC}"
+            echo ""
+            ffmpeg -i "$file" -vn -acodec libmp3lame -q:a 0 "$audio" -y
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
+                echo -e "${YELLOW}   Instala con: ${CYAN}sudo apt install ffmpeg${NC}"
+                exit 1
+            fi
+            echo ""
+            echo -e "${GREEN}✅ Audio extraído: $audio${NC}"
+            echo ""
+            ;;
+    esac
+
+    local srt="${name}.srt"
+    local flat="${name}.busqueda.txt"
+
+    echo -e "${BOLD}🎙️  Transcribiendo con marcas de tiempo:${NC} $audio"
+    echo -e "${YELLOW}   Paso 2/3: Whisper → SRT (modelo medium, idioma en)${NC}"
+    echo ""
+
+    whisper "$audio" --model medium --language en --output_format srt
+
+    if [ $? -ne 0 ] || [ ! -f "$srt" ]; then
+        echo -e "${RED}${BOLD}❌ Error al transcribir. ¿Está Whisper instalado y activado?${NC}"
+        echo -e "${YELLOW}   Corre: ${CYAN}./convertir i${YELLOW} para ver instrucciones${NC}"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${YELLOW}   Paso 3/3: Generando archivo de búsqueda plano...${NC}"
+
+    # Convertir SRT a formato plano grep-friendly: [HH:MM:SS] texto
+    awk '
+        /-->/            { split($1, a, ","); ts=a[1]; next }
+        /^[0-9]+[\r]?$/  { next }
+        NF               { gsub(/\r$/, ""); print "[" ts "] " $0 }
+    ' "$srt" > "$flat"
+
+    echo ""
+    echo -e "${GREEN}${BOLD}✅ ¡Listo!${NC}"
+    echo -e "${GREEN}   Subtítulos (para players): ${srt}${NC}"
+    echo -e "${GREEN}   Búsqueda (grep):           ${flat}${NC}"
+    echo ""
+    echo -e "${BOLD}Buscar un tema y ver el momento exacto:${NC}"
+    echo -e "   ${CYAN}grep -i 'palabra' ${flat}${NC}"
+}
+
+json_to_markdown_rag() {
+    local json="$1"
+    local intervalo="${2:-45}"
+    local name="${json%.*}"
+    local base
+    base="$(basename "$name")"
+    local out="${name}.md"
+
+    if [ ! -f "$json" ]; then
+        echo -e "${RED}${BOLD}❌ JSON no encontrado:${NC} $json"
+        return 1
+    fi
+
+    echo -e "${BOLD}📝 JSON de Whisper → Markdown para RAG:${NC} $json"
+    echo -e "${YELLOW}   Intervalo por párrafo: ${intervalo}s | Salida: ${out}${NC}"
+    echo ""
+
+    INTERVALO="$intervalo" TITULO="$base" python3 - "$json" "$out" <<'PYEOF'
+import json, os, sys
+
+json_path = sys.argv[1]
+out_path  = sys.argv[2]
+intervalo = float(os.environ.get("INTERVALO", "45"))
+titulo    = os.environ.get("TITULO", "")
+
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+segments = data.get("segments", [])
+
+def marca(seg_start):
+    total = int(seg_start)
+    return "[%02d:%02d] " % (total // 60, total % 60)
+
+parrafos = []
+buf = []
+p_start = None
+
+for seg in segments:
+    text = (seg.get("text") or "").strip()
+    start = seg.get("start", 0) or 0
+    if p_start is None:
+        p_start = start
+    if text:
+        buf.append(text)
+    if start - p_start >= intervalo:
+        if buf:
+            parrafos.append(marca(p_start) + " ".join(buf))
+        buf = []
+        p_start = None
+
+# Último párrafo: se escribe aunque no llegue al intervalo
+if buf and p_start is not None:
+    parrafos.append(marca(p_start) + " ".join(buf))
+
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write("# " + titulo + "\n\n")
+    f.write("\n\n".join(parrafos))
+    if parrafos:
+        f.write("\n")
+PYEOF
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}${BOLD}✅ Markdown guardado en: ${out}${NC}"
+    else
+        echo -e "${RED}${BOLD}❌ Error al generar el Markdown desde:${NC} $json"
+        echo -e "${YELLOW}   ¿El JSON tiene la lista \"segments\"? ¿Está python3 disponible?${NC}"
+        return 1
     fi
 }
 
@@ -213,6 +348,72 @@ if [ "$1" = "-s" ]; then
             exit 1
             ;;
     esac
+
+    exit 0
+fi
+
+if [ "$1" = "-t" ]; then
+    if [ -z "$2" ]; then
+        echo -e "${RED}${BOLD}❌ Debes indicar un archivo con -t${NC}"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    FILE="$2"
+    if [ ! -f "$FILE" ]; then
+        echo -e "${RED}${BOLD}❌ Archivo no encontrado:${NC} $FILE"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    EXT="${FILE##*.}"
+    EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+    case "$EXT" in
+        wav|mp3|m4a|ogg|flac|mov|mp4|mkv|avi)
+            transcribe_with_timestamps "$FILE"
+            ;;
+        *)
+            echo -e "${RED}${BOLD}❌ Formato no soportado con -t:${NC} .$EXT"
+            echo ""
+            show_menu
+            exit 1
+            ;;
+    esac
+
+    exit 0
+fi
+
+if [ "$1" = "-r" ]; then
+    if [ -z "$2" ]; then
+        echo -e "${RED}${BOLD}❌ Debes indicar un archivo JSON con -r${NC}"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    FILE="$2"
+    if [ ! -f "$FILE" ]; then
+        echo -e "${RED}${BOLD}❌ Archivo no encontrado:${NC} $FILE"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    EXT="${FILE##*.}"
+    EXT=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+
+    if [ "$EXT" != "json" ]; then
+        echo -e "${RED}${BOLD}❌ -r espera un archivo .json de Whisper:${NC} .$EXT"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    # Intervalo opcional como 3er argumento (por defecto 45)
+    json_to_markdown_rag "$FILE" "$3"
 
     exit 0
 fi
