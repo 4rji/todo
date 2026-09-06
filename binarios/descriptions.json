@@ -179,7 +179,7 @@
     },
     "convertir": {
         "name": "convertir",
-        "short_desc": "Transcribes audio with Whisper and converts video to MP3 before transcription.",
+        "short_desc": "Transcribes audio/video with Whisper, plus timestamped SRT/search and Whisper-JSON to Markdown for RAG.",
         "detailed_desc": [
             "Transcribes supported audio files with the Whisper CLI using the medium model, English language, and TXT output.",
             "",
@@ -187,7 +187,10 @@
             "Supported video formats: mov, mp4, mkv, and avi.",
             "",
             "For video input, it extracts audio to an MP3 with ffmpeg before running Whisper.",
-            "Passing i shows installation instructions for ffmpeg, a Python virtual environment, and Whisper."
+            "Passing i shows installation instructions for ffmpeg, a Python virtual environment, and Whisper.",
+            "-s file: re-encodes a video to MP4 (H.264 + AAC, high quality) saved with the same base name.",
+            "-t file: transcribes with timestamps, producing an SRT plus a grep-friendly .busqueda.txt where each line is '[HH:MM:SS] text' to find the exact moment a topic is spoken.",
+            "-r file.json [interval]: converts a Whisper JSON (the one with the 'segments' list) into a timestamped Markdown for RAG indexing. It groups consecutive segments into paragraphs, each starting with '[MM:SS] ' and closing once at least 'interval' seconds (default 45) have elapsed. Output is a UTF-8 .md with the same base name as the JSON."
         ]
     },
     "barrierinst": {
