@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+
+set -u
+
+INSTALL_DIR="/usr/local/bin"
+SBOM_FILE="sbom.json"
+
+# ─────────────────────────────────────────────
+# Colors
+# ─────────────────────────────────────────────
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info()  { echo -e "${BLUE}[+]${NC} $1"; }
+ok()    { echo -e "${GREEN}[✓]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[✗]${NC} $1"; }
+
+# Print to stderr so command substitutions and SBOM output stay clean.
+show_command() {
+    printf '+ ' >&2
+    printf '%q ' "$@" >&2
+    printf '\n' >&2
+}
+
+run_command() {
+    show_command "$@"
+    "$@"
+}
+
+# ─────────────────────────────────────────────
+# OS / Architecture
+# ─────────────────────────────────────────────
+
+detect_platform() {
+    OS="$(run_command uname -s)"
+    ARCH="$(run_command uname -m)"
+
+    case "$OS" in
+        Darwin)
+            PLATFORM="macOS"
+
+            case "$ARCH" in
+                arm64)
+                    SNYK_BINARY="snyk-macos-arm64"
+                    ;;
+                *)
+                    error "Unsupported macOS architecture: $ARCH"
+                    exit 1
+                    ;;
+            esac
+            ;;
+
+        Linux)
+            PLATFORM="Linux"
+
+            case "$ARCH" in
+                x86_64|amd64)
+                    SNYK_BINARY="snyk-linux"
+                    ;;
+                *)
+                    error "Unsupported Linux architecture: $ARCH"
+                    exit 1
+                    ;;
+            esac
+            ;;
+
+        *)
+            error "Unsupported OS: $OS"
+            exit 1
+            ;;
+    esac
+
+    ok "Detected: $PLATFORM / $ARCH"
+}
+
+# ─────────────────────────────────────────────
+# Requirements
+# ─────────────────────────────────────────────
+
+check_basic_tools() {
+    if ! command -v curl >/dev/null 2>&1; then
+        error "curl is required."
+        exit 1
+    fi
+}
+
+# ─────────────────────────────────────────────
+# Install Snyk
+# ─────────────────────────────────────────────
+
+install_snyk() {
+    info "Installing Snyk CLI..."
+
+    TMP_DIR="$(run_command mktemp -d)"
+    run_command cd "$TMP_DIR" || exit 1
+
+    run_command curl -fsSLO \
+        "https://downloads.snyk.io/cli/stable/${SNYK_BINARY}"
+
+    run_command curl -fsSLO \
+        "https://downloads.snyk.io/cli/stable/${SNYK_BINARY}.sha256"
+
+    info "Verifying Snyk checksum..."
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        run_command sha256sum -c "${SNYK_BINARY}.sha256"
+    elif command -v shasum >/dev/null 2>&1; then
+        run_command shasum -a 256 -c "${SNYK_BINARY}.sha256"
+    else
+        warn "No SHA256 utility found. Skipping checksum verification."
+    fi
+
+    run_command chmod +x "$SNYK_BINARY"
+
+    run_command sudo mkdir -p "$INSTALL_DIR"
+    run_command sudo mv "$SNYK_BINARY" "$INSTALL_DIR/snyk"
+
+    run_command cd - >/dev/null || exit 1
+    run_command rm -rf "$TMP_DIR"
+
+    ok "Snyk installed."
+}
+
+# ─────────────────────────────────────────────
+# Install Grype
+# ─────────────────────────────────────────────
+
+install_grype() {
+    info "Installing Grype..."
+
+    printf ' + curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b %q\n' "$INSTALL_DIR" >&2
+    curl -sSfL https://get.anchore.io/grype |
+        sudo sh -s -- -b "$INSTALL_DIR"
+
+    ok "Grype installed."
+}
+
+# ─────────────────────────────────────────────
+# Install Syft
+# ─────────────────────────────────────────────
+
+install_syft() {
+    info "Installing Syft..."
+
+    printf ' + curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b %q\n' "$INSTALL_DIR" >&2
+    curl -sSfL https://get.anchore.io/syft |
+        sudo sh -s -- -b "$INSTALL_DIR"
+
+    ok "Syft installed."
+}
+
+# ─────────────────────────────────────────────
+# Check / Install
+# ─────────────────────────────────────────────
+
+ensure_tools() {
+
+    for tool in snyk grype syft; do
+
+        if command -v "$tool" >/dev/null 2>&1; then
+            ok "$tool found: $(command -v "$tool")"
+            continue
+        fi
+
+        warn "$tool is not installed."
+
+        read -r -p "Install $tool? [Y/n]: " answer
+        answer="${answer:-Y}"
+
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            case "$tool" in
+                snyk)
+                    install_snyk
+                    ;;
+                grype)
+                    install_grype
+                    ;;
+                syft)
+                    install_syft
+                    ;;
+            esac
+        else
+            warn "$tool skipped."
+        fi
+
+    done
+}
+
+# ─────────────────────────────────────────────
+# Scans
+# ─────────────────────────────────────────────
+
+run_snyk() {
+
+    if ! command -v snyk >/dev/null 2>&1; then
+        error "Snyk is not installed."
+        return
+    fi
+
+    echo
+    info "Running Snyk..."
+    echo "────────────────────────────────────────"
+
+    run_command snyk test
+
+    echo
+}
+
+run_grype() {
+
+    if ! command -v grype >/dev/null 2>&1; then
+        error "Grype is not installed."
+        return
+    fi
+
+    echo
+    info "Running Grype filesystem scan..."
+    echo "────────────────────────────────────────"
+
+    run_command grype .
+
+    echo
+}
+
+run_sbom() {
+
+    if ! command -v syft >/dev/null 2>&1; then
+        error "Syft is not installed."
+        return
+    fi
+
+    if ! command -v grype >/dev/null 2>&1; then
+        error "Grype is not installed."
+        return
+    fi
+
+    echo
+    info "Generating CycloneDX SBOM..."
+    echo "────────────────────────────────────────"
+
+    printf '+ syft . -o cyclonedx-json > %q\n' "$SBOM_FILE" >&2
+    syft . -o cyclonedx-json > "$SBOM_FILE"
+
+    ok "SBOM created: $SBOM_FILE"
+
+    echo
+    info "Scanning SBOM with Grype..."
+    echo "────────────────────────────────────────"
+
+    run_command grype "sbom:$SBOM_FILE"
+
+    echo
+}
+
+run_all() {
+
+    echo
+    info "Running complete vulnerability workflow"
+    echo
+
+    run_snyk
+    run_grype
+    run_sbom
+}
+
+# ─────────────────────────────────────────────
+# Menu
+# ─────────────────────────────────────────────
+
+menu() {
+
+    while true; do
+
+        echo
+        echo "========================================="
+        echo " Vulnerability Scanner"
+        echo "========================================="
+        echo
+        echo "1) Snyk scan"
+        echo "2) Grype filesystem scan"
+        echo "3) Generate SBOM + scan with Grype"
+        echo "4) Run ALL"
+        echo "5) Show tool versions"
+        echo "0) Exit"
+        echo
+
+        read -r -p "Select option: " choice
+
+        case "$choice" in
+            1)
+                run_snyk
+                ;;
+            2)
+                run_grype
+                ;;
+            3)
+                run_sbom
+                ;;
+            4)
+                run_all
+                ;;
+            5)
+                echo
+                command -v snyk >/dev/null && run_command snyk --version
+                command -v grype >/dev/null && run_command grype version
+                command -v syft >/dev/null && run_command syft version
+                ;;
+            0)
+                exit 0
+                ;;
+            *)
+                error "Invalid option."
+                ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
+
+detect_platform
+check_basic_tools
+ensure_tools
+
+echo
+info "Scanning directory:"
+run_command pwd
+
+menu

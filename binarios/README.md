@@ -10,6 +10,7 @@ script for snmp netw07t
 
 
 ###-----Detecciones
+cvesinst            Installs Snyk, Grype, and Syft and provides an interactive vulnerability scanning menu.
 lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloaktools        Post-detection investigation checklist for decloak analysis

@@ -1,4 +1,18 @@
 {
+    "cvesinst": {
+        "name": "cvesinst",
+        "short_desc": "Installs Snyk, Grype, and Syft and provides an interactive vulnerability scanning menu.",
+        "detailed_desc": [
+            "Supports macOS arm64 and Linux x86_64/amd64 and requires curl.",
+            "Prompts to install missing Snyk, Grype, and Syft tools into /usr/local/bin using sudo.",
+            "",
+            "The menu runs snyk test or a Grype filesystem scan in the current directory.",
+            "It can also generate a CycloneDX SBOM with Syft in sbom.json and scan it with Grype.",
+            "",
+            "Additional options run all scans, show tool versions, or exit.",
+            "Commands are printed before execution."
+        ]
+    },
     "contrawp_o": {
         "name": "contrawp_o",
         "short_desc": "Realiza fuerza bruta contra el panel de administración de Joomla.",
