@@ -1,0 +1,57 @@
+ ### En cada servidor
+
+  - auditd: registrar comandos root y cambios en usuarios, sudo, SSH, cron, systemd y webroots.
+    Documentación
+
+  - acct: respaldo ligero para consultar procesos ejecutados con lastcomm.
+  - rsyslog: enviar logs a otra máquina mediante TCP/TLS y cola en disco; Red Team no podrá borrar
+    toda la evidencia local. Configuración fiable
+
+  - aide y debsums: detectar cambios en binarios y archivos, creando la baseline después del
+    análisis inicial.
+
+  - Herramientas operativas: jq, lsof, tcpdump, tshark y sysstat.
+
+  Paquete base aproximado:
+
+  auditd audispd-plugins acct rsyslog aide debsums jq lsof tcpdump tshark sysstat
+
+  ### En una VM dedicada
+
+  - Wazuh Manager y un agente en cada servidor. Centraliza logs, integridad de archivos, inventario
+    y eventos de auditd. No instalaría el manager en máquinas con servicios puntuados. Wazuh FIM
+
+  - Suricata en modo IDS pasivo, con suricata-update y EVE JSON. Es útil para detectar explotación
+    web, scanning, C2 y tráfico extraño. Suricata EVE
+
+  - Zeek solamente si tienen un puerto SPAN/TAP y estudiantes que ya sepan analizar conn.log,
+    dns.log y http.log.
+
+  Configuraría alertas de alta señal para:
+
+  - Cambios en authorized_keys, usuarios, grupos y sudoers.
+  - Escrituras en cron, unidades systemd y /etc/ld.so.preload.
+  - Cambios PHP dentro de /var/www.
+  - Ejecuciones root realizadas por usuarios interactivos.
+  - Procesos lanzados por Apache/PHP.
+  - Ejecuciones desde /tmp o /dev/shm.
+  - Nuevos puertos escuchando y conexiones salientes inesperadas.
+  - Detención de auditd, Wazuh o rsyslog.
+
+  Evitaría inicialmente:
+
+  - IPS inline.
+  - Bloqueos automáticos de Wazuh, Fail2ban o CrowdSec.
+  - Wazuh, Zeek, Falco y osquery todos simultáneamente.
+  - La auditoría Linux Audit de osquery junto con auditd, porque compiten por el socket audit
+    netlink. Advertencia oficial
+
+  Falco es una buena opción adicional para detección eBPF en tiempo real, especialmente con
+  contenedores, pero solamente después de probar consumo y compatibilidad del kernel. Falco
+
+  Para tu laboratorio crearía un script separado, por ejemplo bluehavi, que instale esta
+  telemetría, y un redhavi-detect-check que compruebe no solo que limpiaron el ataque, sino que
+  encontraron eventos en auditd o Wazuh.
+
+  Importante: las reglas NCCDC 2026 responsabilizan al equipo si un firewall o IPS rompe el
+  scoring; además, los scripts propios deben publicarse, declararse y congelarse con anticipación
