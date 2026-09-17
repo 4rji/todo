@@ -1,4 +1,16 @@
 {
+    "scan_folders": {
+        "name": "scan_folders",
+        "short_desc": "Analiza carpetas y repositorios Git en busca de secretos y datos sensibles; genera informes y permite ampliar el analisis con ClamAV, SBOM y CVEs.",
+        "detailed_desc": [
+            "Realiza un analisis de seguridad de una carpeta local con inventario de archivos, tipos MIME, busqueda de secretos con expresiones regulares y TruffleHog, y Gitleaks si esta disponible.",
+            "Usa scan_folders -t /ruta/carpeta -o /ruta/informes para elegir el objetivo y la salida; agrega -g para analizar un repositorio Git ya clonado, incluido su historial.",
+            "Recopila metadatos con ExifTool, extrae texto de PDF y lista el contenido de archivos comprimidos sin extraerlos. No ejecuta los archivos analizados y desactiva la verificacion de secretos en TruffleHog.",
+            "La opcion --full agrega ClamAV, generacion de SBOM con Syft, analisis de vulnerabilidades con Grype e inspeccion de firmware con Binwalk.",
+            "Usa --check-tools para comprobar dependencias o --install-tools para instalar las que falten; la instalacion automatica de paquetes del sistema admite Debian/Ubuntu.",
+            "Por defecto analiza ftp1.digi.com/support/documentation junto al script y guarda informes en review, en una subcarpeta con fecha UTC. Incluye SUMMARY.md, registros y herramientas faltantes; las coincidencias requieren revision y no son hallazgos confirmados."
+        ]
+    },
     "cvesinst": {
         "name": "cvesinst",
         "short_desc": "Installs Snyk, Grype, and Syft and provides an interactive vulnerability scanning menu.",

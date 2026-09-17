@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+set -u
+set -o pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+TARGET="$SCRIPT_DIR/ftp1.digi.com/support/documentation"
+REPORT_ROOT="$SCRIPT_DIR/review"
+FULL=0 GIT_MODE=0 CHECK_ONLY=0 INSTALL=0
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  RESET=$'\033[0m'; BOLD=$'\033[1m'; BLUE=$'\033[34m'
+  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'
+else
+  RESET=''; BOLD=''; BLUE=''; GREEN=''; YELLOW=''; RED=''
+fi
+
+usage() {
+  cat <<EOF
+${BOLD}Public Folder and Git Repository Security Triage${RESET}
+
+Usage: ./scan_public_folder.sh [options]
+
+  -t, --target PATH     Directory to scan
+  -o, --output PATH     Root directory for timestamped reports
+  -g, --git             Scan a cloned Git repository, including history
+      --full            Add ClamAV, Syft/Grype, and Binwalk
+      --check-tools     Check required tools and exit
+      --install-tools   Install missing tools, verify, and exit
+  -h, --help            Show this help
+
+Examples:
+  ./scan_public_folder.sh
+  ./scan_public_folder.sh -g -t /path/to/cloned-repository
+  ./scan_public_folder.sh --check-tools --full
+  ./scan_public_folder.sh --install-tools
+
+Secret verification is disabled. Target files are never executed or extracted.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    -t|--target) [[ $# -ge 2 ]] || exit 2; TARGET="$2"; shift 2 ;;
+    -o|--output) [[ $# -ge 2 ]] || exit 2; REPORT_ROOT="$2"; shift 2 ;;
+    -g|--git) GIT_MODE=1; shift ;;
+    --full) FULL=1; shift ;;
+    --check-tools) CHECK_ONLY=1; shift ;;
+    --install-tools) INSTALL=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+has() { command -v "$1" >/dev/null 2>&1; }
+required_tools() {
+  printf '%s\n' find sort xargs file rg sha256sum pdftotext 7z trufflehog exiftool
+  [[ $GIT_MODE -eq 1 ]] && printf '%s\n' git
+  [[ $FULL -eq 1 ]] && printf '%s\n' clamscan syft grype binwalk
+}
+
+tool_status() {
+  local failed=0 tool
+  printf '%bTool check%b\n' "$BOLD$BLUE" "$RESET"
+  while IFS= read -r tool; do
+    if has "$tool"; then
+      printf '  %b[OK]%b      %-12s %s\n' "$GREEN" "$RESET" "$tool" "$(command -v "$tool")"
+    else
+      printf '  %b[MISSING]%b %-12s required\n' "$RED" "$RESET" "$tool"
+      failed=1
+    fi
+  done < <(required_tools | sort -u)
+  if has gitleaks; then
+    printf '  %b[OK]%b      %-12s %s (optional)\n' "$GREEN" "$RESET" gitleaks "$(command -v gitleaks)"
+  else
+    printf '  %b[MISSING]%b %-12s optional\n' "$YELLOW" "$RESET" gitleaks
+  fi
+  return "$failed"
+}
+
+official_installer() {
+  local name="$1" url="$2" temp
+  temp="$(mktemp "/tmp/${name}-install.XXXXXX")" || return 1
+  printf '%b[INSTALL]%b %s\n' "$BLUE" "$RESET" "$name"
+  curl -fsSL "$url" -o "$temp" || { rm -f -- "$temp"; return 1; }
+  sh "$temp" -b "$USER_BIN"
+  local result=$?
+  rm -f -- "$temp"
+  return "$result"
+}
+
+install_tools() {
+  USER_BIN="$HOME/.local/bin"
+  mkdir -p -- "$USER_BIN"
+  export PATH="$USER_BIN:$PATH"
+
+  if has apt-get; then
+    local -a packages=() elevate=()
+    has file || packages+=(file)
+    has rg || packages+=(ripgrep)
+    has pdftotext || packages+=(poppler-utils)
+    has 7z || packages+=(p7zip-full)
+    has exiftool || packages+=(libimage-exiftool-perl)
+    [[ $GIT_MODE -eq 0 ]] || has git || packages+=(git)
+    if [[ $FULL -eq 1 ]]; then
+      has clamscan || packages+=(clamav)
+      has binwalk || packages+=(binwalk)
+    fi
+    if ((${#packages[@]})); then
+      if [[ $(id -u) -ne 0 ]]; then
+        has sudo || { echo "sudo is required for APT packages." >&2; return 1; }
+        elevate=(sudo)
+      fi
+      printf '%b[INSTALL]%b APT: %s\n' "$BLUE" "$RESET" "${packages[*]}"
+      "${elevate[@]}" apt-get update || return 1
+      "${elevate[@]}" apt-get install -y "${packages[@]}" || return 1
+    fi
+  else
+    printf '%b[WARN]%b Automatic system packages support Debian/Ubuntu only.\n' "$YELLOW" "$RESET"
+  fi
+
+  has curl || { echo "curl is required for official installers." >&2; return 1; }
+  has trufflehog || official_installer trufflehog \
+    https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh || return 1
+
+  if ! has gitleaks; then
+    if has go; then
+      printf '%b[INSTALL]%b gitleaks via Go\n' "$BLUE" "$RESET"
+      GOBIN="$USER_BIN" go install github.com/gitleaks/gitleaks/v8@latest || return 1
+    else
+      printf '%b[WARN]%b gitleaks is optional and Go is unavailable.\n' "$YELLOW" "$RESET"
+    fi
+  fi
+
+  if [[ $FULL -eq 1 ]]; then
+    has syft || official_installer syft https://raw.githubusercontent.com/anchore/syft/main/install.sh || return 1
+    has grype || official_installer grype https://raw.githubusercontent.com/anchore/grype/main/install.sh || return 1
+  fi
+
+  printf '\nIf needed, add this to your shell configuration:\n'
+  printf '  export PATH="$HOME/.local/bin:$PATH"\n\n'
+  tool_status
+}
+
+if [[ $INSTALL -eq 1 ]]; then install_tools; exit $?; fi
+if [[ $CHECK_ONLY -eq 1 ]]; then tool_status; exit $?; fi
+
+[[ -d "$TARGET" ]] || { echo "Target does not exist: $TARGET" >&2; exit 1; }
+TARGET="$(cd -- "$TARGET" && pwd -P)"
+if [[ $GIT_MODE -eq 1 ]]; then
+  has git || { echo "Git mode requires git. Run: $0 -g --install-tools" >&2; exit 1; }
+  git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "Git mode requires a cloned working tree: $TARGET" >&2; exit 1;
+  }
+fi
+
+mkdir -p -- "$REPORT_ROOT"
+REPORT_ROOT="$(cd -- "$REPORT_ROOT" && pwd -P)"
+case "$REPORT_ROOT/" in "$TARGET/"*) echo "Output cannot be inside target." >&2; exit 1;; esac
+RUN_ID="$(date -u +'%Y%m%dT%H%M%SZ')"
+REPORT_DIR="$REPORT_ROOT/$RUN_ID"; mkdir -p -- "$REPORT_DIR"
+LOG="$REPORT_DIR/scan.log"; MISSING="$REPORT_DIR/missing-tools.txt"
+: > "$LOG"; : > "$MISSING"
+
+log() {
+  local level="$1" color="$2"; shift 2
+  printf '%s [%s] %s\n' "$(date -u +'%FT%TZ')" "$level" "$*" >> "$LOG"
+  printf '%b[%s]%b %s\n' "$color" "$level" "$RESET" "$*"
+}
+info() { log INFO "$BLUE" "$@"; }
+ok() { log OK "$GREEN" "$@"; }
+warn() { log WARN "$YELLOW" "$@"; }
+missing() { printf '%s\n' "$1" >> "$MISSING"; warn "Skipped: $1 is not installed"; }
+lines() { [[ -s "$1" ]] && wc -l < "$1" | tr -d ' ' || printf 0; }
+
+info "Target: $TARGET"
+info "Mode: $([[ $GIT_MODE -eq 1 ]] && echo Git || echo folder), $([[ $FULL -eq 1 ]] && echo full || echo standard)"
+info "Creating inventory"
+find "$TARGET" -type f -printf '%s\t%TY-%Tm-%TdT%TH:%TM:%TS%Tz\t%p\n' | sort -nr > "$REPORT_DIR/inventory.tsv"
+find "$TARGET" -type f -printf '%f\n' | sort > "$REPORT_DIR/filenames.txt"
+find "$TARGET" -type f \( -iname '*.pem' -o -iname '*.key' -o -iname '*.p12' -o \
+  -iname '*.pfx' -o -iname '*.env' -o -iname '*.bak' -o -iname '*.sql' -o \
+  -iname '*.bin' -o -iname '*.exe' -o -iname '*.zip' -o -iname '*.7z' -o \
+  -iname '*.tar*' \) -print > "$REPORT_DIR/high-interest-files.txt"
+
+if has file; then
+  find "$TARGET" -type f -print0 | xargs -0 -r file --mime-type --separator $'\t' > "$REPORT_DIR/mime-types.tsv" 2>> "$LOG" || true
+else missing file; fi
+
+if has rg; then
+  rg -i '(password|secret|credential|private|backup|internal|confidential|draft|debug|manufactur|firmware|certificate|altium|bom|gerber|schematic)' "$REPORT_DIR/filenames.txt" > "$REPORT_DIR/suspicious-names.txt" || true
+  info "Searching readable content"
+  rg -a -i -n --no-messages '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|password[[:space:]]*[:=]|api[_-]?key[[:space:]]*[:=]|client[_-]?secret|authorization:[[:space:]]*bearer|mongodb(\+srv)?:|postgres(ql)?://|mysql://|AKIA[0-9A-Z]{16})' "$TARGET" > "$REPORT_DIR/regex-findings.txt" || true
+else missing rg; fi
+
+if has trufflehog; then
+  if [[ $GIT_MODE -eq 1 ]]; then
+    info "Scanning complete Git history with TruffleHog (verification disabled)"
+    trufflehog git "file://$TARGET" --no-verification --json > "$REPORT_DIR/trufflehog-git.jsonl" 2>> "$LOG" || true
+  else
+    info "Scanning filesystem with TruffleHog (verification disabled)"
+    trufflehog filesystem "$TARGET" --no-verification --json > "$REPORT_DIR/trufflehog.jsonl" 2>> "$LOG" || true
+  fi
+else missing trufflehog; fi
+
+if has gitleaks; then
+  info "Running Gitleaks"
+  if gitleaks --help 2>&1 | grep -qE '^[[:space:]]+git[[:space:]]'; then
+    if [[ $GIT_MODE -eq 1 ]]; then source_kind=git; else source_kind=dir; fi
+    gitleaks "$source_kind" "$TARGET" --no-banner --report-format json \
+      --report-path "$REPORT_DIR/gitleaks.json" >> "$LOG" 2>&1 || true
+  elif [[ $GIT_MODE -eq 1 ]]; then
+    gitleaks detect --source "$TARGET" --no-banner --report-format json \
+      --report-path "$REPORT_DIR/gitleaks.json" >> "$LOG" 2>&1 || true
+  else
+    gitleaks detect --no-git --source "$TARGET" --no-banner --report-format json \
+      --report-path "$REPORT_DIR/gitleaks.json" >> "$LOG" 2>&1 || true
+  fi
+else missing gitleaks; fi
+
+if has exiftool; then
+  info "Extracting metadata"; exiftool -r -csv "$TARGET" > "$REPORT_DIR/metadata.csv" 2>> "$LOG" || true
+else missing exiftool; fi
+
+if has pdftotext && has sha256sum; then
+  info "Extracting PDF text"; mkdir -p -- "$REPORT_DIR/pdf-text"; : > "$REPORT_DIR/pdf-text-map.tsv"
+  while IFS= read -r -d '' pdf; do
+    id="$(printf %s "$pdf" | sha256sum | cut -d' ' -f1)"
+    printf '%s.txt\t%s\n' "$id" "$pdf" >> "$REPORT_DIR/pdf-text-map.tsv"
+    pdftotext -layout "$pdf" "$REPORT_DIR/pdf-text/$id.txt" 2>> "$LOG" || true
+  done < <(find "$TARGET" -type f -iname '*.pdf' -print0)
+  has rg && rg -i -n --no-messages '(confidential|internal use|do not distribute|password|private key|username|employee|jira|confluence|/home/|C:\\Users\\)' "$REPORT_DIR/pdf-text" > "$REPORT_DIR/pdf-sensitive.txt" || true
+else has pdftotext || missing pdftotext; has sha256sum || missing sha256sum; fi
+
+if has 7z; then
+  info "Listing archives without extraction"; : > "$REPORT_DIR/archive-listings.txt"
+  while IFS= read -r -d '' archive; do
+    printf '\nFILE: %s\n' "$archive" >> "$REPORT_DIR/archive-listings.txt"
+    7z l -slt -- "$archive" >> "$REPORT_DIR/archive-listings.txt" 2>> "$LOG" || true
+  done < <(find "$TARGET" -type f \( -iname '*.zip' -o -iname '*.7z' -o -iname '*.tar*' \) -print0)
+  has rg && rg -i '(\.pem|\.key|\.p12|\.pfx|\.env|id_rsa|credential|password|private|backup|\.git/)' "$REPORT_DIR/archive-listings.txt" > "$REPORT_DIR/suspicious-archive-content.txt" || true
+else missing 7z; fi
+
+if [[ $FULL -eq 1 ]]; then
+  if has clamscan; then info "Running ClamAV"; clamscan -r -i --alert-encrypted=yes --log="$REPORT_DIR/clamav.log" "$TARGET" >> "$LOG" 2>&1 || true; else missing clamscan; fi
+  if has syft; then
+    info "Generating SBOM"; syft "dir:$TARGET" -o json > "$REPORT_DIR/sbom.json" 2>> "$LOG" || true
+    if has grype && [[ -s "$REPORT_DIR/sbom.json" ]]; then info "Scanning SBOM"; grype "sbom:$REPORT_DIR/sbom.json" -o json > "$REPORT_DIR/vulnerabilities.json" 2>> "$LOG" || true; else has grype || missing grype; fi
+  else missing syft; has grype || missing grype; fi
+  if has binwalk; then
+    info "Inspecting firmware"; : > "$REPORT_DIR/binwalk.txt"
+    while IFS= read -r -d '' item; do printf '\nFILE: %s\n' "$item" >> "$REPORT_DIR/binwalk.txt"; binwalk "$item" >> "$REPORT_DIR/binwalk.txt" 2>> "$LOG" || true; done < <(find "$TARGET" -type f \( -iname '*.bin' -o -iname '*.img' -o -iname '*.rom' -o -iname '*.fw' -o -iname '*.hex' \) -print0)
+  else missing binwalk; fi
+fi
+
+sort -u "$MISSING" -o "$MISSING"
+{
+  printf '# Scan summary\n\n- Run: `%s`\n- Target: `%s`\n- Type: `%s`\n- Profile: `%s`\n' "$RUN_ID" "$TARGET" "$([[ $GIT_MODE -eq 1 ]] && echo 'Git repository' || echo folder)" "$([[ $FULL -eq 1 ]] && echo full || echo standard)"
+  printf -- '- Files: `%s`\n- Suspicious names: `%s`\n- High-interest files: `%s`\n- Regex matches: `%s`\n- PDF matches: `%s`\n- Archive matches: `%s`\n' "$(lines "$REPORT_DIR/inventory.tsv")" "$(lines "$REPORT_DIR/suspicious-names.txt")" "$(lines "$REPORT_DIR/high-interest-files.txt")" "$(lines "$REPORT_DIR/regex-findings.txt")" "$(lines "$REPORT_DIR/pdf-sensitive.txt")" "$(lines "$REPORT_DIR/suspicious-archive-content.txt")"
+  printf '\nMatches are triage leads, not confirmed findings. Do not test credentials.\n'
+  [[ ! -s "$MISSING" ]] || { printf '\n## Missing tools\n\n```text\n'; cat "$MISSING"; printf '```\n'; }
+} > "$REPORT_DIR/SUMMARY.md"
+ok "Scan finished"
+printf '\n%bReport:%b %s\n' "$BOLD" "$RESET" "$REPORT_DIR"
