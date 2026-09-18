@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -uo pipefail
 
 # Verifies that the vulnerable configurations planted by redhavi-fedora have
@@ -380,6 +380,4 @@ main() {
     print_summary
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
-fi
+main "$@"

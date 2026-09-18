@@ -1089,6 +1089,29 @@
             "Prints a final score and returns status 1 when findings remain; it never cleans or modifies the system."
         ]
     },
+    "redhavi-check-federo-shc": {
+        "name": "redhavi-check-federo-shc",
+        "short_desc": "Fedora cleanup checker source adapted for shc compilation.",
+        "detailed_desc": [
+            "Standalone source copy of redhavi-check-fedora with /bin/bash and a direct main invocation for shc.",
+            "Requires Fedora and root access; performs 16 read-only checks and prints detailed findings and a score.",
+            "",
+            "Compile on a compatible Linux system: shc -r -f redhavi-check-federo-shc -o redhavi-check-federo.bin",
+            "This file is readable Bash source, not a compiled binary. Distribute only the resulting binary to students."
+        ]
+    },
+    "redhavi-check-shc": {
+        "name": "redhavi-check-shc",
+        "short_desc": "Linux cleanup checker source adapted for shc compilation.",
+        "detailed_desc": [
+            "Standalone source copy of redhavi-check with /bin/bash and a direct main invocation for shc.",
+            "Requires root and verifies lab accounts, cron persistence, SSH keys, PHP files, and insecure packages.",
+            "Supports Debian, Ubuntu, Kali, CentOS, RHEL, Oracle Linux, Fedora, and Arch with OS-specific scoring.",
+            "",
+            "Compile on a compatible Linux system: shc -r -f redhavi-check-shc -o redhavi-check.bin",
+            "This file is readable Bash source, not a compiled binary. Distribute only the resulting binary to students."
+        ]
+    },
     "voces": {
         "name": "voces",
         "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
