@@ -1076,6 +1076,19 @@
             "Despues transferi ese .ovpn a la maquina/router que lo va a usar (por ejemplo con scp, USB, o pegandolo a mano) e importalo con el cliente OpenVPN correspondiente."
         ]
     },
+    "redhavi-check-fedora": {
+        "name": "redhavi-check-fedora",
+        "short_desc": "Checks whether the Fedora CCDC lab misconfigurations have been removed.",
+        "detailed_desc": [
+            "Performs a read-only cleanup verification for systems prepared with redhavi-fedora.",
+            "It refuses to run on non-Fedora systems and requires root access for complete results.",
+            "",
+            "Checks the ccdc and splunk accounts, administrative group membership, root cron persistence, root SSH keys, and immutable web files.",
+            "It also scans PHP files for shell_exec and checks insecure RPM packages and services.",
+            "",
+            "Prints a final score and returns status 1 when findings remain; it never cleans or modifies the system."
+        ]
+    },
     "voces": {
         "name": "voces",
         "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",

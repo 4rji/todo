@@ -762,6 +762,7 @@ mailinst            Instala mail server en fedora 21. baja archivos de conf y to
 redhavi             Instala misconfiguraciones en linux.
 redhavi-fedora      Para CCDC, prepara misconfiguraciones de laboratorio con dry-run por defecto
 redhavi-check       Checa las malconfiguraciones
+redhavi-check-fedora Checks whether the Fedora CCDC lab misconfigurations have been removed.
 redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
 
 
