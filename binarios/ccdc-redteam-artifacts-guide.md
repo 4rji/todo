@@ -195,7 +195,7 @@ The Windows checker evaluates accounts, scheduled tasks, registry persistence, t
 
 ## 9. Install the optional Apollo1 scheduled-task artifact
 
-Use this only on a disposable Windows VM in the isolated exercise network. The helper downloads `apollo1.exe` once, stores it at `C:\\ProgramData\\redhavi\\apollo1.exe`, and creates the visible scheduled task `Redhavi-Apollo1`. The task runs as `SYSTEM` every three minutes. If the previous process is still running, Task Scheduler does not start a duplicate instance.
+Use this only on a disposable Windows VM in the isolated exercise network. The helper downloads `apollo1.exe` once, stores it at `C:\ProgramData\redhavi\apollo1.exe`, and creates the visible scheduled task `Redhavi-Apollo1`. The task runs as `SYSTEM` every three minutes. If the previous process is still running, Task Scheduler does not start a duplicate instance.
 
 On the lab server at `172.16.101.77`, place `apollo1.exe` in a dedicated directory and serve that directory on TCP port `8087`:
 
@@ -211,13 +211,13 @@ Keep that terminal open during installation. Permit port `8087` only on the isol
 On the Windows exercise VM, open Windows PowerShell as Administrator in the directory containing `redhavi-apolloWin.ps1` and run:
 
 ```powershell
-.\\redhavi-apolloWin.ps1
+.\redhavi-apolloWin.ps1
 ```
 
 The default download URL is `http://172.16.101.77:8087/apollo1.exe`. A different address or interval can be supplied explicitly:
 
 ```powershell
-.\\redhavi-apolloWin.ps1 `
+.\redhavi-apolloWin.ps1 `
     -DownloadUrl 'http://172.16.101.77:8087/apollo1.exe' `
     -IntervalMinutes 3
 ```
@@ -225,7 +225,7 @@ The default download URL is `http://172.16.101.77:8087/apollo1.exe`. A different
 When a trusted SHA-256 value is available, require it during installation:
 
 ```powershell
-.\\redhavi-apolloWin.ps1 -ExpectedSha256 'REPLACE_WITH_64_HEX_CHARACTERS'
+.\redhavi-apolloWin.ps1 -ExpectedSha256 'REPLACE_WITH_64_HEX_CHARACTERS'
 ```
 
 The task begins automatically about one minute after installation. To launch it immediately for a test and inspect its execution information:
@@ -241,7 +241,7 @@ Get-ScheduledTaskInfo -TaskName 'Redhavi-Apollo1'
 To remove both the scheduled task and the installed executable:
 
 ```powershell
-.\\redhavi-apolloWin.ps1 -Remove
+.\redhavi-apolloWin.ps1 -Remove
 ```
 
 This optional artifact does not change the existing `redhaviwin.ps1` state marker. The current `redhavi-checkWin.ps1` checker does not score Apollo1 cleanup.
@@ -319,7 +319,7 @@ Green means no recent check-in. It can also mean a stopped VM, a network problem
 
 The Linux and Windows checkers explicitly report infrastructure errors. The Fedora checker has fewer such distinctions; inspect its messages as well as the score. A passing rubric is not a comprehensive guarantee that the system is uncompromised.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
