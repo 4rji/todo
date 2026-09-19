@@ -1076,6 +1076,20 @@
             "Despues transferi ese .ovpn a la maquina/router que lo va a usar (por ejemplo con scp, USB, o pegandolo a mano) e importalo con el cliente OpenVPN correspondiente."
         ]
     },
+    "redhavi-apolloWin.ps1": {
+        "name": "redhavi-apolloWin.ps1",
+        "short_desc": "Downloads apollo1.exe and schedules it to run periodically on Windows.",
+        "detailed_desc": [
+            "Downloads apollo1.exe from the configured HTTP URL into the Redhavi ProgramData directory.",
+            "Optionally verifies an expected SHA-256 hash before installing the executable.",
+            "",
+            "Creates a visible Windows scheduled task that runs as SYSTEM every three minutes by default.",
+            "Repeated instances are skipped when a previous invocation is still running.",
+            "",
+            "Run from an elevated Windows PowerShell 5.1 session.",
+            "Use -Remove to delete both the scheduled task and the installed executable."
+        ]
+    },
     "redhavi-checkWin.ps1": {
         "name": "redhavi-checkWin.ps1",
         "short_desc": "Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.",

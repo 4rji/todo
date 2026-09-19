@@ -765,6 +765,7 @@ redhavi-check       Checa las malconfiguraciones
 redhavi-check-fedora Checks whether the Fedora CCDC lab misconfigurations have been removed.
 redhavi-check-federo-shc Provides the Fedora cleanup checker source adapted for shc compilation.
 redhavi-check-shc   Provides the Linux cleanup checker source adapted for shc compilation.
+redhavi-apolloWin.ps1 Downloads apollo1.exe and schedules it to run every three minutes on Windows.
 redhavi-checkWin-ps2exe.ps1 Builds an elevated x64 Windows checker executable with PS2EXE.
 redhavi-checkWin.ps1 Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.
 redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
