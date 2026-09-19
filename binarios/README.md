@@ -760,9 +760,9 @@ vcen                Para manejar las maquinas en el vcenter desde cli linux, vmw
 vcenterinst         Descarga govc para vcenter vmware, variables adentro del script. 
 mailinst            Instala mail server en fedora 21. baja archivos de conf y todo.
 redhavi             Instala misconfiguraciones en linux.
-redhavi-fedora      Para CCDC, prepara misconfiguraciones de laboratorio con dry-run por defecto
+redhavi-fedora      Seeds Fedora CCDC lab misconfigurations and a three-minute dashboard check-in timer.
 redhavi-check       Checa las malconfiguraciones
-redhavi-check-fedora Checks whether the Fedora CCDC lab misconfigurations have been removed.
+redhavi-check-fedora Checks Fedora CCDC cleanup, including the dashboard check-in timer.
 redhavi-check-federo-shc Provides the Fedora cleanup checker source adapted for shc compilation.
 redhavi-check-shc   Provides the Linux cleanup checker source adapted for shc compilation.
 redhavi-apolloWin.ps1 Downloads apollo1.exe and schedules it to run every three minutes on Windows.

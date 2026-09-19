@@ -1128,14 +1128,27 @@
             "Uso: redhavi-monitor --port 8081 --bind 0.0.0.0 [--payload archivo.sh] [--clean-threshold 240] [--no-auto-discover]."
         ]
     },
+    "redhavi-fedora": {
+        "name": "redhavi-fedora",
+        "short_desc": "Seeds Fedora CCDC lab misconfigurations and a three-minute dashboard check-in timer.",
+        "detailed_desc": [
+            "Prepares an authorized Fedora CCDC lab with intentionally vulnerable users, packages, web content, cron persistence, and root SSH access.",
+            "It runs as a dry-run by default and requires --apply to change the system.",
+            "",
+            "Installs redhavi-canary.service and redhavi-canary.timer to call the dashboard check-in endpoint every three minutes.",
+            "CANARY_URL changes the endpoint and CANARY_INTERVAL changes the interval in minutes.",
+            "",
+            "Use --yes with --apply to skip the interactive LAB confirmation on an authorized disposable machine."
+        ]
+    },
     "redhavi-check-fedora": {
         "name": "redhavi-check-fedora",
-        "short_desc": "Checks whether the Fedora CCDC lab misconfigurations have been removed.",
+        "short_desc": "Checks Fedora CCDC cleanup, including the dashboard check-in timer.",
         "detailed_desc": [
             "Performs a read-only cleanup verification for systems prepared with redhavi-fedora.",
             "It refuses to run on non-Fedora systems and requires root access for complete results.",
             "",
-            "Checks the ccdc and splunk accounts, administrative group membership, root cron persistence, root SSH keys, and immutable web files.",
+            "Checks the ccdc and splunk accounts, administrative group membership, root cron persistence, the Redhavi systemd canary timer, root SSH keys, and immutable web files.",
             "It also scans PHP files for shell_exec and checks insecure RPM packages and services.",
             "",
             "Prints a final score and returns status 1 when findings remain; it never cleans or modifies the system."
@@ -1146,7 +1159,7 @@
         "short_desc": "Fedora cleanup checker source adapted for shc compilation.",
         "detailed_desc": [
             "Standalone source copy of redhavi-check-fedora with /bin/bash and a direct main invocation for shc.",
-            "Requires Fedora and root access; performs 16 read-only checks and prints detailed findings and a score.",
+            "Requires Fedora and root access; performs 17 read-only checks, including the Redhavi systemd canary timer, and prints detailed findings and a score.",
             "",
             "Compile on a compatible Linux system: shc -r -f redhavi-check-federo-shc -o redhavi-check-federo.bin",
             "This file is readable Bash source, not a compiled binary. Distribute only the resulting binary to students."

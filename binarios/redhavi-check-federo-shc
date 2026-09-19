@@ -7,8 +7,10 @@ set -uo pipefail
 TOTAL_CHECKS=0
 PASSED_CHECKS=0
 FEDORA_ID="unknown"
-EXPECTED_CHECKS=16
+EXPECTED_CHECKS=17
 ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     GREEN=$'\033[32m'
@@ -172,6 +174,38 @@ check_cron() {
         bad "Root's crontab still contains the download from 10.5.8.11."
     else
         ok "The redhavi-fedora cron job was not found."
+    fi
+}
+
+check_canary_timer() {
+    local artifact
+    local artifacts=()
+    local unit
+
+    section "Dashboard check-in persistence"
+
+    for unit in "$CANARY_SERVICE" "$CANARY_TIMER"; do
+        if command -v systemctl >/dev/null 2>&1; then
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                artifacts+=("active:$unit")
+            fi
+            if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+                artifacts+=("enabled:$unit")
+            fi
+        fi
+
+        for artifact in \
+            "/etc/systemd/system/$unit" \
+            "/usr/lib/systemd/system/$unit" \
+            "/lib/systemd/system/$unit"; do
+            [ ! -e "$artifact" ] || artifacts+=("file:$artifact")
+        done
+    done
+
+    if [ "${#artifacts[@]}" -gt 0 ]; then
+        bad "The Redhavi dashboard timer still has artifacts: ${artifacts[*]}"
+    else
+        ok "The Redhavi dashboard service and timer were removed."
     fi
 }
 
@@ -373,6 +407,7 @@ main() {
 
     check_users
     check_cron
+    check_canary_timer
     check_root_ssh
     check_web
     check_packages

