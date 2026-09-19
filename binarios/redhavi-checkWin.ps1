@@ -64,8 +64,13 @@ function Invoke-Check {
 
 function Stop-Verification {
     param([Parameter(Mandatory)][string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor Red
-    exit 2
+    throw "FATAL::$Message"
+}
+
+function Set-VerificationResult {
+    param([Parameter(Mandatory)][ValidateSet(0, 1, 2)][int]$Code)
+    $global:LASTEXITCODE = $Code
+    [Environment]::ExitCode = $Code
 }
 
 function Read-ScenarioState {
@@ -137,7 +142,7 @@ function Assert-LabUserClean {
     try {
         $user = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
     } catch {
-        Throw-CheckError "Could not query user $Name: $($_.Exception.Message)"
+        Throw-CheckError "Could not query user ${Name}: $($_.Exception.Message)"
     }
     if (-not $user) {
         return
@@ -153,7 +158,7 @@ function Assert-LabUserClean {
         $isAdministrator = [bool](Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
             Where-Object { $_.SID -eq $user.SID })
     } catch {
-        Throw-CheckError "Could not query group membership for $Name: $($_.Exception.Message)"
+        Throw-CheckError "Could not query group membership for ${Name}: $($_.Exception.Message)"
     }
     if ($isAdministrator) {
         $reasons.Add("the account is still a member of $administrators")
@@ -293,7 +298,7 @@ function Assert-KeyRemoved {
         if ($_.Exception.Message -eq "the exact lab SSH key is still present") {
             throw
         }
-        Throw-CheckError "Could not read $Path: $($_.Exception.Message)"
+        Throw-CheckError "Could not read ${Path}: $($_.Exception.Message)"
     }
 }
 
@@ -306,7 +311,7 @@ function Assert-FileNotReadOnly {
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     } catch {
-        Throw-CheckError "Could not inspect $Path: $($_.Exception.Message)"
+        Throw-CheckError "Could not inspect ${Path}: $($_.Exception.Message)"
     }
     if ([bool]($item.Attributes -band [IO.FileAttributes]::ReadOnly)) {
         throw "$Path still has the ReadOnly attribute"
@@ -330,7 +335,7 @@ function Assert-WebShellRemoved {
         if ($_.Exception.Message.StartsWith("shell_exec is still present")) {
             throw
         }
-        Throw-CheckError "Could not inspect $Path: $($_.Exception.Message)"
+        Throw-CheckError "Could not inspect ${Path}: $($_.Exception.Message)"
     }
 }
 
@@ -347,7 +352,7 @@ function Assert-FeatureDisabled {
     }
 }
 
-function Show-SummaryAndExit {
+function Show-SummaryAndSetResult {
     if ($script:TotalChecks -ne $script:ExpectedChecks) {
         Stop-Verification "Internal error: $($script:TotalChecks) checks ran; expected $($script:ExpectedChecks)."
     }
@@ -364,67 +369,82 @@ function Show-SummaryAndExit {
 
     if ($script:ErrorChecks -gt 0) {
         Write-Host "Verification encountered infrastructure errors." -ForegroundColor Yellow
-        exit 2
+        Set-VerificationResult 2
+        return
     }
     if ($script:FailedChecks -gt 0) {
         Write-Host "The system still contains scenario artifacts." -ForegroundColor Red
-        exit 1
+        Set-VerificationResult 1
+        return
     }
 
     Write-Host "The system is completely clean." -ForegroundColor Green
-    exit 0
+    Set-VerificationResult 0
 }
 
-Assert-RequiredCommands
-$state = Read-ScenarioState
-$indexPath = [string]$state.index_path
-$authorizedKeys = [string]$state.authorized_keys
-$rootKeyBlob = [string]$state.root_key_blob
-$taskName = [string]$state.task_name
-$refreshUrl = [string]$state.refresh_url
-$canaryTaskName = [string]$state.canary_task_name
-$runKeyPath = [string]$state.run_key_path
-$runValueName = [string]$state.run_value_name
-$canaryUrl = [string]$state.canary_url
-$canaryScript = [string]$state.canary_script
+function Invoke-RedhaviCheck {
+    Assert-RequiredCommands
+    $state = Read-ScenarioState
+    $indexPath = [string]$state.index_path
+    $authorizedKeys = [string]$state.authorized_keys
+    $rootKeyBlob = [string]$state.root_key_blob
+    $taskName = [string]$state.task_name
+    $refreshUrl = [string]$state.refresh_url
+    $canaryTaskName = [string]$state.canary_task_name
+    $runKeyPath = [string]$state.run_key_path
+    $runValueName = [string]$state.run_value_name
+    $canaryUrl = [string]$state.canary_url
+    $canaryScript = [string]$state.canary_script
 
-Write-Host ""
-Write-Host "=== Redhavi Windows Cleanup Verification ===" -ForegroundColor Cyan
-Write-Host "State marker: $StateFile"
-Write-Host ""
+    Write-Host ""
+    Write-Host "=== Redhavi Windows Cleanup Verification ===" -ForegroundColor Cyan
+    Write-Host "State marker: $StateFile"
+    Write-Host ""
 
-Invoke-Check "user_ccdc" "ccdc was removed or is disabled without administrative privileges" {
-    Assert-LabUserClean "ccdc"
-}
-Invoke-Check "user_splunk" "splunk was removed or is disabled without administrative privileges" {
-    Assert-LabUserClean "splunk"
-}
-Invoke-Check "scheduled_task" "the persistence task was removed" {
-    Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath
-}
-Invoke-Check "registry_run" "the registry Run persistence was removed" {
-    Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl $canaryScript
-}
-Invoke-Check "canary_task" "the three-minute canary task and script were removed" {
-    Assert-NoPeriodicCanary $canaryTaskName $canaryScript
-}
-Invoke-Check "ssh_lab_key" "the exact lab SSH key was removed" {
-    Assert-KeyRemoved $authorizedKeys $rootKeyBlob
-}
-Invoke-Check "ssh_readonly" "authorized_keys no longer has the ReadOnly lock" {
-    Assert-FileNotReadOnly $authorizedKeys
-}
-Invoke-Check "webshell" "the shell_exec payload was removed" {
-    Assert-WebShellRemoved $indexPath
-}
-Invoke-Check "web_readonly" "index.php no longer has the ReadOnly lock" {
-    Assert-FileNotReadOnly $indexPath
-}
-Invoke-Check "feature_telnet" "TelnetClient is disabled" {
-    Assert-FeatureDisabled "TelnetClient"
-}
-Invoke-Check "feature_tftp" "TFTP is disabled" {
-    Assert-FeatureDisabled "TFTP"
+    Invoke-Check "user_ccdc" "ccdc was removed or is disabled without administrative privileges" {
+        Assert-LabUserClean "ccdc"
+    }
+    Invoke-Check "user_splunk" "splunk was removed or is disabled without administrative privileges" {
+        Assert-LabUserClean "splunk"
+    }
+    Invoke-Check "scheduled_task" "the persistence task was removed" {
+        Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath
+    }
+    Invoke-Check "registry_run" "the registry Run persistence was removed" {
+        Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl $canaryScript
+    }
+    Invoke-Check "canary_task" "the three-minute canary task and script were removed" {
+        Assert-NoPeriodicCanary $canaryTaskName $canaryScript
+    }
+    Invoke-Check "ssh_lab_key" "the exact lab SSH key was removed" {
+        Assert-KeyRemoved $authorizedKeys $rootKeyBlob
+    }
+    Invoke-Check "ssh_readonly" "authorized_keys no longer has the ReadOnly lock" {
+        Assert-FileNotReadOnly $authorizedKeys
+    }
+    Invoke-Check "webshell" "the shell_exec payload was removed" {
+        Assert-WebShellRemoved $indexPath
+    }
+    Invoke-Check "web_readonly" "index.php no longer has the ReadOnly lock" {
+        Assert-FileNotReadOnly $indexPath
+    }
+    Invoke-Check "feature_telnet" "TelnetClient is disabled" {
+        Assert-FeatureDisabled "TelnetClient"
+    }
+    Invoke-Check "feature_tftp" "TFTP is disabled" {
+        Assert-FeatureDisabled "TFTP"
+    }
+
+    Show-SummaryAndSetResult
 }
 
-Show-SummaryAndExit
+try {
+    Invoke-RedhaviCheck
+} catch {
+    $message = $_.Exception.Message
+    if ($message.StartsWith("FATAL::")) {
+        $message = $message.Substring(7)
+    }
+    Write-Host "[ERROR] $message" -ForegroundColor Red
+    Set-VerificationResult 2
+}

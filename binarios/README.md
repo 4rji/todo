@@ -768,6 +768,7 @@ redhavi-check-shc   Provides the Linux cleanup checker source adapted for shc co
 redhavi-checkWin.ps1 Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.
 redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
 redhaviwin.ps1      Provisions a Windows CCDC lab with persistence and a three-minute HTTP canary.
+redhavi-monitor     Servidor canary CCDC: marca rojo/verde por IP segun sigan haciendo check-in.
 
 
 

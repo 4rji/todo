@@ -1089,6 +1089,18 @@
             "Prints an eleven-item score and returns status 1 for remaining findings or status 2 for verification errors."
         ]
     },
+    "redhavi-monitor": {
+        "name": "redhavi-monitor",
+        "short_desc": "Servidor canary CCDC: rastrea check-ins por IP y las marca rojo (sucia) o verde (limpia).",
+        "detailed_desc": [
+            "Servidor HTTP en Python (solo stdlib) que sirve un canary en /checkin y registra la IP de cada maquina que lo descarga.",
+            "Mientras una IP siga haciendo check-in (backdoor/cron malicioso) queda en ROJO; si deja de pedir por mas del umbral (default 240s = 4 min) pasa a VERDE; si vuelve a pedir vuelve a ROJO.",
+            "",
+            "Dashboard web con auto-refresh que deja agregar/quitar IPs a mano y auto-descubre las que hacen check-in. Estado persistido en JSON entre reinicios.",
+            "",
+            "Uso: redhavi-monitor --port 8081 --bind 0.0.0.0 [--payload archivo.sh] [--clean-threshold 240] [--no-auto-discover]."
+        ]
+    },
     "redhavi-check-fedora": {
         "name": "redhavi-check-fedora",
         "short_desc": "Checks whether the Fedora CCDC lab misconfigurations have been removed.",
