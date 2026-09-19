@@ -11,8 +11,8 @@ $ErrorActionPreference = "Stop"
 
 # Cleanup verifier for systems prepared with redhaviwin.ps1.
 # It does not modify the system; it only checks the scenario's exact artifacts.
-$script:ScenarioVersion = 3
-$script:ExpectedChecks = 10
+$script:ScenarioVersion = 5
+$script:ExpectedChecks = 11
 $script:TotalChecks = 0
 $script:PassedChecks = 0
 $script:FailedChecks = 0
@@ -82,7 +82,8 @@ function Read-ScenarioState {
     $requiredProperties = @(
         "scenario", "version", "status", "expected_checks", "index_path",
         "authorized_keys", "root_key_blob", "task_name", "refresh_url",
-        "run_key_path", "run_value_name", "canary_url"
+        "canary_task_name", "canary_interval",
+        "run_key_path", "run_value_name", "canary_url", "canary_script"
     )
     foreach ($property in $requiredProperties) {
         if (-not ($state.PSObject.Properties.Name -contains $property)) {
@@ -208,33 +209,63 @@ function Assert-NoRegistryPersistence {
     param(
         [Parameter(Mandatory)][string]$KeyPath,
         [Parameter(Mandatory)][string]$ValueName,
-        [Parameter(Mandatory)][string]$CanaryUrl
+        [Parameter(Mandatory)][string]$CanaryUrl,
+        [Parameter(Mandatory)][string]$CanaryScript
     )
 
-    if (-not (Test-Path -Path $KeyPath)) {
-        return
-    }
-    try {
-        $properties = Get-ItemProperty -Path $KeyPath -ErrorAction Stop
-    } catch {
-        Throw-CheckError "Could not inspect registry key ${KeyPath}: $($_.Exception.Message)"
-    }
-
     $matches = New-Object System.Collections.Generic.List[string]
-    foreach ($property in $properties.PSObject.Properties) {
-        if ($property.Name -like "PS*") {
-            continue
+    if (Test-Path -Path $KeyPath) {
+        try {
+            $properties = Get-ItemProperty -Path $KeyPath -ErrorAction Stop
+        } catch {
+            Throw-CheckError "Could not inspect registry key ${KeyPath}: $($_.Exception.Message)"
         }
-        $value = [string]$property.Value
-        $isNamedValue = $property.Name -eq $ValueName
-        $hasScenarioAction = $value.Contains($CanaryUrl)
-        if ($isNamedValue -or $hasScenarioAction) {
-            $matches.Add($property.Name)
+
+        foreach ($property in $properties.PSObject.Properties) {
+            if ($property.Name -like "PS*") {
+                continue
+            }
+            $value = [string]$property.Value
+            $isNamedValue = $property.Name -eq $ValueName
+            $hasScenarioAction = $value.Contains($CanaryScript) -or $value.Contains($CanaryUrl)
+            if ($isNamedValue -or $hasScenarioAction) {
+                $matches.Add($property.Name)
+            }
         }
     }
 
     if ($matches.Count -gt 0) {
         throw "registry persistence was found in ${KeyPath}: $($matches -join ', ')"
+    }
+}
+
+function Assert-NoPeriodicCanary {
+    param(
+        [Parameter(Mandatory)][string]$TaskName,
+        [Parameter(Mandatory)][string]$CanaryScript
+    )
+
+    $matches = New-Object System.Collections.Generic.List[string]
+    try {
+        $tasks = @(Get-ScheduledTask -ErrorAction Stop)
+    } catch {
+        Throw-CheckError "Could not enumerate scheduled tasks: $($_.Exception.Message)"
+    }
+    foreach ($task in $tasks) {
+        $actionText = ($task.Actions | ForEach-Object {
+            $execute = if ($_.PSObject.Properties.Name -contains "Execute") { [string]$_.Execute } else { "" }
+            $arguments = if ($_.PSObject.Properties.Name -contains "Arguments") { [string]$_.Arguments } else { "" }
+            "$execute $arguments"
+        }) -join " "
+        if ($task.TaskName -eq $TaskName -or $actionText.Contains($CanaryScript)) {
+            $matches.Add("task:$($task.TaskPath)$($task.TaskName)")
+        }
+    }
+    if (Test-Path -LiteralPath $CanaryScript) {
+        $matches.Add("file:$CanaryScript")
+    }
+    if ($matches.Count -gt 0) {
+        throw "periodic canary artifacts were found: $($matches -join ', ')"
     }
 }
 
@@ -351,9 +382,11 @@ $authorizedKeys = [string]$state.authorized_keys
 $rootKeyBlob = [string]$state.root_key_blob
 $taskName = [string]$state.task_name
 $refreshUrl = [string]$state.refresh_url
+$canaryTaskName = [string]$state.canary_task_name
 $runKeyPath = [string]$state.run_key_path
 $runValueName = [string]$state.run_value_name
 $canaryUrl = [string]$state.canary_url
+$canaryScript = [string]$state.canary_script
 
 Write-Host ""
 Write-Host "=== Redhavi Windows Cleanup Verification ===" -ForegroundColor Cyan
@@ -370,7 +403,10 @@ Invoke-Check "scheduled_task" "the persistence task was removed" {
     Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath
 }
 Invoke-Check "registry_run" "the registry Run persistence was removed" {
-    Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl
+    Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl $canaryScript
+}
+Invoke-Check "canary_task" "the three-minute canary task and script were removed" {
+    Assert-NoPeriodicCanary $canaryTaskName $canaryScript
 }
 Invoke-Check "ssh_lab_key" "the exact lab SSH key was removed" {
     Assert-KeyRemoved $authorizedKeys $rootKeyBlob

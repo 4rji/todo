@@ -1078,15 +1078,15 @@
     },
     "redhavi-checkWin.ps1": {
         "name": "redhavi-checkWin.ps1",
-        "short_desc": "Scores scheduled-task and registry-canary cleanup for the Windows Redhavi lab.",
+        "short_desc": "Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.",
         "detailed_desc": [
             "Verifies a Windows system previously prepared by redhaviwin.ps1 without changing it.",
             "Requires an elevated Windows PowerShell 5.1 session and a valid ready-state marker.",
             "",
-            "Checks the ccdc and splunk accounts, scheduled-task persistence, the registry Run canary, the exact lab SSH key, and ReadOnly file locks.",
+            "Checks the ccdc and splunk accounts, scheduled-task persistence, the registry Run canary, the periodic canary task, the exact lab SSH key, and ReadOnly file locks.",
             "It also checks the PHP payload and the TelnetClient and TFTP optional features.",
             "",
-            "Prints a ten-item score and returns status 1 for remaining findings or status 2 for verification errors."
+            "Prints an eleven-item score and returns status 1 for remaining findings or status 2 for verification errors."
         ]
     },
     "redhavi-check-fedora": {
@@ -1127,14 +1127,16 @@
     },
     "redhaviwin.ps1": {
         "name": "redhaviwin.ps1",
-        "short_desc": "Provisions a Windows CCDC lab with scheduled persistence and a registry canary.",
+        "short_desc": "Provisions a Windows CCDC lab with persistence and a three-minute HTTP canary.",
         "detailed_desc": [
             "Creates a controlled Windows CCDC lab with users, persistence, insecure features, and vulnerable web content.",
             "Requires an elevated Windows PowerShell 5.1 session and supports a read-only -Verify mode.",
             "",
             "Installs Git, curl, Notepad++, XAMPP, and OpenSSH Server; enables TelnetClient and TFTP; and starts Apache and sshd.",
             "Creates the ccdc and splunk administrator accounts, adds the exact lab SSH key, and schedules a minutely PHP refresh.",
-            "It also adds an HKLM Run value that sends a harmless HTTP check-in with the hostname and username whenever a user signs in.",
+            "It writes a local canary PowerShell script and adds an HKLM Run value that invokes it whenever a user signs in.",
+            "The canary sends a harmless HTTP check-in containing only the hostname and username.",
+            "A separate SYSTEM scheduled task invokes the same canary every three minutes.",
             "",
             "Validates downloaded artifacts, preserves unrelated SSH keys, avoids duplicate entries, and writes a ready-state marker only after post-validation."
         ]

