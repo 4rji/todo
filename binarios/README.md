@@ -770,7 +770,7 @@ redhavi-checkWin-ps2exe.ps1 Builds an elevated x64 Windows checker executable wi
 redhavi-checkWin.ps1 Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.
 redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
 redhaviwin.ps1      Provisions a Windows CCDC lab with persistence and a three-minute REST canary without requiring Apache.
-redhavi-monitor     Servidor canary CCDC: marca rojo/verde por IP segun sigan haciendo check-in.
+redhavi-monitor     Servidor canary CCDC - marca rojo/verde por IP segun sigan haciendo check-in.
 
 
 
