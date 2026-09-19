@@ -1,319 +1,394 @@
+#Requires -Version 5.1
 #Requires -RunAsAdministrator
+
+[CmdletBinding()]
+param(
+    [string]$StateFile = (Join-Path $env:ProgramData "redhavi\state-win.json")
+)
+
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-############################################
-# CLEANUP VERIFIER (Windows) - COMPLETE v2
-############################################
+# Cleanup verifier for systems prepared with redhaviwin.ps1.
+# It does not modify the system; it only checks the scenario's exact artifacts.
+$script:ScenarioVersion = 3
+$script:ExpectedChecks = 10
+$script:TotalChecks = 0
+$script:PassedChecks = 0
+$script:FailedChecks = 0
+$script:ErrorChecks = 0
 
-$script:TOTAL_CHECKS  = 0
-$script:PASSED_CHECKS = 0
-
-function Ok($msg){ Write-Host "[OK] $msg" -ForegroundColor Green; $script:PASSED_CHECKS++ }
-function X ($msg){ Write-Host "[X]  $msg" -ForegroundColor Red }
-function Check($name, [scriptblock]$sb){
-  $script:TOTAL_CHECKS++
-  try { & $sb; Ok $name }
-  catch { X "$name -> $($_.Exception.Message)" }
+function Write-Ok {
+    param([string]$Id, [string]$Message)
+    Write-Host ("[OK]    [{0,-20}] {1}" -f $Id, $Message) -ForegroundColor Green
+    $script:PassedChecks++
 }
 
-function Test-Command($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
-
-# --- CONFIG ---
-$AllowedLocalUsers = @("Administrator","DefaultAccount","Guest","WDAGUtilityAccount")
-$EnforceAllowlistUsers = $false
-
-$MustNotExistUsers = @("backup","admin2","test","support","ssh","svc","temp")
-
-# Ports that are “actually suspicious” for a lab endpoint baseline
-$RiskyListeningPorts = @(22,23,4444,31337,1337,6666,7777,8080,9001,9002,9999)
-
-# Paths that are usually OK for legit binaries
-$AllowedBinaryRoots = @(
-  "C:\Windows\",
-  "C:\Program Files\",
-  "C:\Program Files (x86)\",
-  "C:\ProgramData\Microsoft\"
-)
-
-# Allow common Run entries (add more if you want)
-$AllowedRunNames = @(
-  "SecurityHealth",
-  "SecurityHealthSystray",
-  "OneDrive",
-  "WindowsDefender",
-  "RtkAudUService",
-  "IgfxTray","HotKeysCmds","Persistence"
-)
-
-# Allow tasks under these roots (Windows built-ins)
-$AllowedTaskPathPrefixes = @(
-  "\Microsoft\Windows\",
-  "\MicrosoftEdgeUpdateTask"
-)
-
-# --- HELPERS ---
-function Get-LocalUsersSafe {
-  try { Get-LocalUser | Select-Object -ExpandProperty Name }
-  catch {
-    (net user) | ForEach-Object { $_.Trim() } |
-      Where-Object { $_ -and $_ -notmatch '^(User accounts for|---|The command completed)' } |
-      ForEach-Object { $_ -split '\s+' } | ForEach-Object { $_ } |
-      Where-Object { $_ }
-  }
+function Write-Finding {
+    param([string]$Id, [string]$Message)
+    Write-Host ("[X]     [{0,-20}] {1}" -f $Id, $Message) -ForegroundColor Red
+    $script:FailedChecks++
 }
 
-function Find-AuthorizedKeys {
-  $hits = @()
-  if (Test-Path "C:\Users") {
-    Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-      $p = Join-Path $_.FullName ".ssh\authorized_keys"
-      if (Test-Path $p) { $hits += $p }
-    }
-  }
-  $sys = "C:\ProgramData\ssh\administrators_authorized_keys"
-  if (Test-Path $sys) { $hits += $sys }
-  return $hits
+function Write-CheckError {
+    param([string]$Id, [string]$Message)
+    Write-Host ("[ERROR] [{0,-20}] {1}" -f $Id, $Message) -ForegroundColor Yellow
+    $script:ErrorChecks++
 }
 
-function Get-RunPersistence {
-  $paths = @(
-    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce",
-    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-  )
-  $items = @()
-  foreach ($p in $paths) {
-    if (Test-Path $p) {
-      $props = Get-ItemProperty $p
-      $props.PSObject.Properties |
-        Where-Object { $_.Name -notmatch '^PS' -and $_.Value } |
-        ForEach-Object {
-          $items += [pscustomobject]@{ Path=$p; Name=$_.Name; Value=[string]$_.Value }
+function Throw-CheckError {
+    param([Parameter(Mandatory)][string]$Message)
+    throw "INFRA::$Message"
+}
+
+function Invoke-Check {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$SuccessMessage,
+        [Parameter(Mandatory)][scriptblock]$Test
+    )
+
+    $script:TotalChecks++
+    try {
+        & $Test | Out-Null
+        Write-Ok $Id $SuccessMessage
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith("INFRA::")) {
+            Write-CheckError $Id $message.Substring(7)
+        } else {
+            Write-Finding $Id $message
         }
     }
-  }
-  return $items
 }
 
-function Get-StartupFolderItems {
-  $folders = @(
-    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup",
-    "$env:AppData\Microsoft\Windows\Start Menu\Programs\Startup"
-  )
-  $items = @()
-  foreach ($f in $folders) {
-    if (Test-Path $f) {
-      $items += Get-ChildItem $f -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
-    }
-  }
-  return $items
+function Stop-Verification {
+    param([Parameter(Mandatory)][string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+    exit 2
 }
 
-function Get-ListeningPorts {
-  try {
-    Get-NetTCPConnection -State Listen | Select-Object -ExpandProperty LocalPort -Unique | Sort-Object
-  } catch {
-    (netstat -ano -p tcp | Select-String "LISTENING" | ForEach-Object {
-      ($_.ToString() -split '\s+')[2].Split(':')[-1] -as [int]
-    } | Sort-Object -Unique)
-  }
-}
-
-function Is-AllowedBinaryPath([string]$cmdline) {
-  if (-not $cmdline) { return $true }
-  $c = $cmdline.Trim()
-
-  # try to extract exe path (quoted or first token)
-  $exe = $null
-  if ($c.StartsWith('"')) {
-    $exe = ($c -split '"')[1]
-  } else {
-    $exe = ($c -split '\s+')[0]
-  }
-  if (-not $exe) { return $true }
-
-  # environment vars expansion
-  $exe = [Environment]::ExpandEnvironmentVariables($exe)
-
-  foreach ($root in $AllowedBinaryRoots) {
-    if ($exe.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-  }
-  return $false
-}
-
-function Is-MicrosoftService([string]$svcName) {
-  try {
-    $p = "HKLM:\SYSTEM\CurrentControlSet\Services\$svcName"
-    $img = (Get-ItemProperty $p -ErrorAction Stop).ImagePath
-    if ($img) {
-      $img = [Environment]::ExpandEnvironmentVariables([string]$img)
-      return (Is-AllowedBinaryPath $img)
-    }
-  } catch {}
-  # if unknown, don't auto-bless
-  return $false
-}
-
-############################################
-# CHECKS
-############################################
-
-Check "No denylisted local users exist" {
-  $users = Get-LocalUsersSafe
-  $found = $MustNotExistUsers | Where-Object { $users -contains $_ }
-  if ($found) { throw ("Found forbidden users: " + ($found -join ", ")) }
-}
-
-Check "No unexpected local users (allowlist baseline) [optional]" {
-  if (-not $EnforceAllowlistUsers) { return }
-  $users = Get-LocalUsersSafe
-  $unexpected = $users | Where-Object { $AllowedLocalUsers -notcontains $_ }
-  if ($unexpected) { throw ("Unexpected local users: " + ($unexpected -join ", ")) }
-}
-
-Check "No authorized_keys present (user/system)" {
-  $keys = Find-AuthorizedKeys
-  if ($keys.Count -gt 0) { throw ("authorized_keys found: " + ($keys -join " | ")) }
-}
-
-Check "Scheduled tasks: only flag non-Windows/root-odd tasks" {
-  $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
-  $bad = New-Object System.Collections.Generic.List[string]
-
-  foreach ($t in $tasks) {
-    $full = "$($t.TaskPath)$($t.TaskName)"
-
-    $isAllowedPath = $false
-    foreach ($pref in $AllowedTaskPathPrefixes) {
-      if ($full.StartsWith($pref, [System.StringComparison]::OrdinalIgnoreCase)) { $isAllowedPath = $true; break }
+function Read-ScenarioState {
+    if (-not (Test-Path -LiteralPath $StateFile -PathType Leaf)) {
+        Stop-Verification "The state marker $StateFile is missing; scenario provisioning cannot be confirmed."
     }
 
-    # If it's a Windows/Microsoft task path prefix, ignore
-    if ($isAllowedPath) { continue }
-
-    # Otherwise inspect actions for weird binary paths
-    $info = Get-ScheduledTaskInfo -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction SilentlyContinue | Out-Null
-    $cmds = @()
     try {
-      $cmds = $t.Actions | ForEach-Object {
-        if ($_.Execute) { "$($_.Execute) $($_.Arguments)" } else { "" }
-      }
-    } catch {}
-
-    $weird = $false
-    foreach ($c in $cmds) {
-      if (-not (Is-AllowedBinaryPath $c)) { $weird = $true; break }
+        $state = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+    } catch {
+        Stop-Verification "The state marker does not contain valid JSON: $($_.Exception.Message)"
     }
 
-    if ($weird -or -not $isAllowedPath) {
-      $bad.Add($full)
+    $requiredProperties = @(
+        "scenario", "version", "status", "expected_checks", "index_path",
+        "authorized_keys", "root_key_blob", "task_name", "refresh_url",
+        "run_key_path", "run_value_name", "canary_url"
+    )
+    foreach ($property in $requiredProperties) {
+        if (-not ($state.PSObject.Properties.Name -contains $property)) {
+            Stop-Verification "The state marker is missing the required '$property' field."
+        }
     }
-  }
 
-  if ($bad.Count -gt 0) { throw ("Suspicious tasks: " + (($bad | Select-Object -First 25 -Unique) -join ", ")) }
+    if ($state.scenario -ne "redhavi-win") {
+        Stop-Verification "The state marker does not belong to the redhavi-win scenario."
+    }
+    if ([int]$state.version -ne $script:ScenarioVersion) {
+        Stop-Verification "Incompatible scenario version."
+    }
+    if ($state.status -ne "ready") {
+        Stop-Verification "Provisioning is marked as incomplete; no points will be awarded."
+    }
+    if ([int]$state.expected_checks -ne $script:ExpectedChecks) {
+        Stop-Verification "The state marker does not declare $($script:ExpectedChecks) checks."
+    }
+
+    return $state
 }
 
-Check "Services: only flag services with binary outside allowed roots" {
-  $svcs = Get-Service | Select-Object -ExpandProperty Name
-  $bad = New-Object System.Collections.Generic.List[string]
+function Assert-RequiredCommands {
+    foreach ($commandName in @(
+        "Get-LocalUser", "Get-LocalGroupMember", "Get-ScheduledTask",
+        "Get-WindowsOptionalFeature"
+    )) {
+        if (-not (Get-Command $commandName -ErrorAction SilentlyContinue)) {
+            Stop-Verification "Required command is unavailable: $commandName"
+        }
+    }
+}
 
-  foreach ($s in $svcs) {
-    # bless services whose ImagePath resolves inside allowed roots
-    if (Is-MicrosoftService $s) { continue }
-
-    # if not blessed, check if it even has an ImagePath (some are virtual)
-    $img = $null
+function Get-AdministratorsGroup {
     try {
-      $p = "HKLM:\SYSTEM\CurrentControlSet\Services\$s"
-      $img = (Get-ItemProperty $p -ErrorAction Stop).ImagePath
-    } catch {}
-
-    if (-not $img) { continue } # virtual/driver without ImagePath string: ignore
-
-    $img = [Environment]::ExpandEnvironmentVariables([string]$img)
-    if (-not (Is-AllowedBinaryPath $img)) {
-      $bad.Add("$s -> $img")
+        $group = Get-CimInstance Win32_Group -Filter "LocalAccount=True AND SID='S-1-5-32-544'" |
+            Select-Object -First 1
+    } catch {
+        Throw-CheckError "Could not query the Administrators group: $($_.Exception.Message)"
     }
-  }
-
-  if ($bad.Count -gt 0) { throw ("Suspicious services: " + (($bad | Select-Object -First 25 -Unique) -join " | ")) }
-}
-
-Check "Run/RunOnce: only flag entries not in allowlist and pointing outside allowed roots" {
-  $runs = Get-RunPersistence
-  $bad = New-Object System.Collections.Generic.List[string]
-
-  foreach ($r in $runs) {
-    if ($AllowedRunNames -contains $r.Name) { continue }
-
-    # allow SecurityHealth* variants
-    if ($r.Name -like "SecurityHealth*") { continue }
-
-    if (-not (Is-AllowedBinaryPath $r.Value)) {
-      $bad.Add("$($r.Path)\$($r.Name)=$($r.Value)")
+    if (-not $group) {
+        Throw-CheckError "The Administrators group (S-1-5-32-544) was not found."
     }
-  }
-
-  if ($bad.Count -gt 0) { throw ("Suspicious Run entries: " + (($bad | Select-Object -First 25 -Unique) -join " | ")) }
+    return $group.Name
 }
 
-Check "Startup folders clean (no files)" {
-  $items = Get-StartupFolderItems
-  if ($items.Count -gt 0) { throw ("Startup items: " + ($items -join " | ")) }
+function Assert-LabUserClean {
+    param([Parameter(Mandatory)][string]$Name)
+
+    try {
+        $user = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
+    } catch {
+        Throw-CheckError "Could not query user $Name: $($_.Exception.Message)"
+    }
+    if (-not $user) {
+        return
+    }
+
+    $reasons = New-Object System.Collections.Generic.List[string]
+    if ($user.Enabled) {
+        $reasons.Add("the account is still enabled")
+    }
+
+    $administrators = Get-AdministratorsGroup
+    try {
+        $isAdministrator = [bool](Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
+            Where-Object { $_.SID -eq $user.SID })
+    } catch {
+        Throw-CheckError "Could not query group membership for $Name: $($_.Exception.Message)"
+    }
+    if ($isAdministrator) {
+        $reasons.Add("the account is still a member of $administrators")
+    }
+
+    if ($reasons.Count -gt 0) {
+        throw ($reasons -join "; ")
+    }
 }
 
-Check "No risky ports are listening" {
-  $ports = Get-ListeningPorts
-  $hit = $ports | Where-Object { $RiskyListeningPorts -contains $_ }
-  if ($hit) { throw ("Risky listening ports: " + ($hit -join ", ")) }
+function Assert-NoRefreshPersistence {
+    param(
+        [Parameter(Mandatory)][string]$TaskName,
+        [Parameter(Mandatory)][string]$RefreshUrl,
+        [Parameter(Mandatory)][string]$IndexPath
+    )
+
+    try {
+        $tasks = @(Get-ScheduledTask -ErrorAction Stop)
+    } catch {
+        Throw-CheckError "Could not enumerate scheduled tasks: $($_.Exception.Message)"
+    }
+
+    $matches = New-Object System.Collections.Generic.List[string]
+    foreach ($task in $tasks) {
+        $fullName = "$($task.TaskPath)$($task.TaskName)"
+        $actionParts = New-Object System.Collections.Generic.List[string]
+        foreach ($action in @($task.Actions)) {
+            $execute = ""
+            $arguments = ""
+            if ($action.PSObject.Properties.Name -contains "Execute") {
+                $execute = [string]$action.Execute
+            }
+            if ($action.PSObject.Properties.Name -contains "Arguments") {
+                $arguments = [string]$action.Arguments
+            }
+            $actionParts.Add("$execute $arguments")
+        }
+        $actionText = $actionParts -join " "
+        $isNamedTask = $task.TaskName -eq $TaskName
+        $hasScenarioAction = $actionText.Contains($RefreshUrl) -and $actionText.Contains($IndexPath)
+        if ($isNamedTask -or $hasScenarioAction) {
+            $matches.Add($fullName)
+        }
+    }
+
+    if ($matches.Count -gt 0) {
+        throw "persistence was found in: $($matches -join ', ')"
+    }
 }
 
-Check "No leftover packages installed (winget/choco) matching deny terms" {
-  # This is optional/weak. Leave it as pass unless exact denylist is provided.
-  $deny = @("xray","frp","ngrok","tailscale","anydesk","teamviewer","openssh","putty")
-  $bad = New-Object System.Collections.Generic.List[string]
+function Assert-NoRegistryPersistence {
+    param(
+        [Parameter(Mandatory)][string]$KeyPath,
+        [Parameter(Mandatory)][string]$ValueName,
+        [Parameter(Mandatory)][string]$CanaryUrl
+    )
 
-  if (Test-Command winget) {
-    $w = (winget list 2>$null) -join "`n"
-    foreach ($d in $deny) { if ($w -match $d) { $bad.Add("winget: $d") } }
-  }
+    if (-not (Test-Path -Path $KeyPath)) {
+        return
+    }
+    try {
+        $properties = Get-ItemProperty -Path $KeyPath -ErrorAction Stop
+    } catch {
+        Throw-CheckError "Could not inspect registry key ${KeyPath}: $($_.Exception.Message)"
+    }
 
-  if (Test-Command choco) {
-    $c = (choco list --local-only 2>$null) -join "`n"
-    foreach ($d in $deny) { if ($c -match $d) { $bad.Add("choco: $d") } }
-  }
+    $matches = New-Object System.Collections.Generic.List[string]
+    foreach ($property in $properties.PSObject.Properties) {
+        if ($property.Name -like "PS*") {
+            continue
+        }
+        $value = [string]$property.Value
+        $isNamedValue = $property.Name -eq $ValueName
+        $hasScenarioAction = $value.Contains($CanaryUrl)
+        if ($isNamedValue -or $hasScenarioAction) {
+            $matches.Add($property.Name)
+        }
+    }
 
-  if ($bad.Count -gt 0) { throw ($bad -join " | ") }
+    if ($matches.Count -gt 0) {
+        throw "registry persistence was found in ${KeyPath}: $($matches -join ', ')"
+    }
 }
 
-############################################
-# FINAL SCORE SUMMARY
-############################################
+function Assert-KeyRemoved {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Blob
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Throw-CheckError "$Path exists but is not a file."
+    }
+
+    try {
+        foreach ($line in Get-Content -LiteralPath $Path -ErrorAction Stop) {
+            $tokens = @($line.Trim() -split "\s+")
+            if ($tokens -contains $Blob) {
+                throw "the exact lab SSH key is still present"
+            }
+        }
+    } catch {
+        if ($_.Exception.Message -eq "the exact lab SSH key is still present") {
+            throw
+        }
+        Throw-CheckError "Could not read $Path: $($_.Exception.Message)"
+    }
+}
+
+function Assert-FileNotReadOnly {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    } catch {
+        Throw-CheckError "Could not inspect $Path: $($_.Exception.Message)"
+    }
+    if ([bool]($item.Attributes -band [IO.FileAttributes]::ReadOnly)) {
+        throw "$Path still has the ReadOnly attribute"
+    }
+}
+
+function Assert-WebShellRemoved {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Throw-CheckError "$Path exists but is not a file."
+    }
+    try {
+        if (Select-String -LiteralPath $Path -SimpleMatch "shell_exec" -Quiet -ErrorAction Stop) {
+            throw "shell_exec is still present in $Path"
+        }
+    } catch {
+        if ($_.Exception.Message.StartsWith("shell_exec is still present")) {
+            throw
+        }
+        Throw-CheckError "Could not inspect $Path: $($_.Exception.Message)"
+    }
+}
+
+function Assert-FeatureDisabled {
+    param([Parameter(Mandatory)][string]$Name)
+
+    try {
+        $feature = Get-WindowsOptionalFeature -Online -FeatureName $Name -ErrorAction Stop
+    } catch {
+        Throw-CheckError "Could not query the $Name feature: $($_.Exception.Message)"
+    }
+    if ($feature.State -eq "Enabled" -or $feature.State -eq "EnablePending") {
+        throw "the optional $Name feature is still enabled"
+    }
+}
+
+function Show-SummaryAndExit {
+    if ($script:TotalChecks -ne $script:ExpectedChecks) {
+        Stop-Verification "Internal error: $($script:TotalChecks) checks ran; expected $($script:ExpectedChecks)."
+    }
+
+    $percentage = [int](100 * $script:PassedChecks / $script:ExpectedChecks)
+    Write-Host ""
+    Write-Host "=== FINAL RESULT ===" -ForegroundColor Cyan
+    Write-Host "Total:       $($script:TotalChecks)"
+    Write-Host "Passed:      $($script:PassedChecks)"
+    Write-Host "Remaining:   $($script:FailedChecks)"
+    Write-Host "Errors:      $($script:ErrorChecks)"
+    Write-Host "Score:       $percentage%"
+    Write-Host ""
+
+    if ($script:ErrorChecks -gt 0) {
+        Write-Host "Verification encountered infrastructure errors." -ForegroundColor Yellow
+        exit 2
+    }
+    if ($script:FailedChecks -gt 0) {
+        Write-Host "The system still contains scenario artifacts." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "The system is completely clean." -ForegroundColor Green
+    exit 0
+}
+
+Assert-RequiredCommands
+$state = Read-ScenarioState
+$indexPath = [string]$state.index_path
+$authorizedKeys = [string]$state.authorized_keys
+$rootKeyBlob = [string]$state.root_key_blob
+$taskName = [string]$state.task_name
+$refreshUrl = [string]$state.refresh_url
+$runKeyPath = [string]$state.run_key_path
+$runValueName = [string]$state.run_value_name
+$canaryUrl = [string]$state.canary_url
+
 Write-Host ""
-Write-Host "=== FINAL CLEANUP SCORE ==="
+Write-Host "=== Redhavi Windows Cleanup Verification ===" -ForegroundColor Cyan
+Write-Host "State marker: $StateFile"
 Write-Host ""
 
-$FAILED  = $TOTAL_CHECKS - $PASSED_CHECKS
-$PERCENT = if ($TOTAL_CHECKS -gt 0) { [int](100 * $PASSED_CHECKS / $TOTAL_CHECKS) } else { 0 }
-
-Write-Host "Total Checks:      $TOTAL_CHECKS"
-Write-Host "Passed (OK):       $PASSED_CHECKS"
-Write-Host "Failed (X):        $FAILED"
-Write-Host "Score Percentage:  $PERCENT%"
-
-Write-Host ""
-Write-Host "============================="
-
-if ($PERCENT -eq 100) {
-  Write-Host "System fully cleaned. Excellent work!"
-} elseif ($PERCENT -ge 80) {
-  Write-Host "Good cleanup. A few items remain."
-} elseif ($PERCENT -ge 50) {
-  Write-Host "Partial cleanup. Several issues still present."
-} else {
-  Write-Host "System still compromised. Needs major cleanup."
+Invoke-Check "user_ccdc" "ccdc was removed or is disabled without administrative privileges" {
+    Assert-LabUserClean "ccdc"
+}
+Invoke-Check "user_splunk" "splunk was removed or is disabled without administrative privileges" {
+    Assert-LabUserClean "splunk"
+}
+Invoke-Check "scheduled_task" "the persistence task was removed" {
+    Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath
+}
+Invoke-Check "registry_run" "the registry Run persistence was removed" {
+    Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl
+}
+Invoke-Check "ssh_lab_key" "the exact lab SSH key was removed" {
+    Assert-KeyRemoved $authorizedKeys $rootKeyBlob
+}
+Invoke-Check "ssh_readonly" "authorized_keys no longer has the ReadOnly lock" {
+    Assert-FileNotReadOnly $authorizedKeys
+}
+Invoke-Check "webshell" "the shell_exec payload was removed" {
+    Assert-WebShellRemoved $indexPath
+}
+Invoke-Check "web_readonly" "index.php no longer has the ReadOnly lock" {
+    Assert-FileNotReadOnly $indexPath
+}
+Invoke-Check "feature_telnet" "TelnetClient is disabled" {
+    Assert-FeatureDisabled "TelnetClient"
+}
+Invoke-Check "feature_tftp" "TFTP is disabled" {
+    Assert-FeatureDisabled "TFTP"
 }
 
-Write-Host "============================="
-Write-Host ""
+Show-SummaryAndExit

@@ -765,7 +765,9 @@ redhavi-check       Checa las malconfiguraciones
 redhavi-check-fedora Checks whether the Fedora CCDC lab misconfigurations have been removed.
 redhavi-check-federo-shc Provides the Fedora cleanup checker source adapted for shc compilation.
 redhavi-check-shc   Provides the Linux cleanup checker source adapted for shc compilation.
+redhavi-checkWin.ps1 Scores scheduled-task and registry-canary cleanup for the Windows Redhavi lab.
 redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
+redhaviwin.ps1      Provisions a Windows CCDC lab with scheduled persistence and a registry canary.
 
 
 
