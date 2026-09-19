@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 # Cleanup verifier for systems prepared with redhaviwin.ps1.
 # It does not modify the system; it only checks the scenario's exact artifacts.
-$script:ScenarioVersion = 5
+$script:ScenarioVersion = 7
 $script:ExpectedChecks = 11
 $script:TotalChecks = 0
 $script:PassedChecks = 0
@@ -87,6 +87,7 @@ function Read-ScenarioState {
     $requiredProperties = @(
         "scenario", "version", "status", "expected_checks", "index_path",
         "authorized_keys", "root_key_blob", "task_name", "refresh_url",
+        "refresh_script",
         "canary_task_name", "canary_interval",
         "run_key_path", "run_value_name", "canary_url", "canary_script"
     )
@@ -173,7 +174,8 @@ function Assert-NoRefreshPersistence {
     param(
         [Parameter(Mandatory)][string]$TaskName,
         [Parameter(Mandatory)][string]$RefreshUrl,
-        [Parameter(Mandatory)][string]$IndexPath
+        [Parameter(Mandatory)][string]$IndexPath,
+        [Parameter(Mandatory)][string]$RefreshScript
     )
 
     try {
@@ -199,10 +201,17 @@ function Assert-NoRefreshPersistence {
         }
         $actionText = $actionParts -join " "
         $isNamedTask = $task.TaskName -eq $TaskName
-        $hasScenarioAction = $actionText.Contains($RefreshUrl) -and $actionText.Contains($IndexPath)
+        $hasScenarioAction = (
+            $actionText.Contains($RefreshScript) -or
+            ($actionText.Contains($RefreshUrl) -and $actionText.Contains($IndexPath))
+        )
         if ($isNamedTask -or $hasScenarioAction) {
-            $matches.Add($fullName)
+            $matches.Add("task:$fullName")
         }
+    }
+
+    if (Test-Path -LiteralPath $RefreshScript) {
+        $matches.Add("file:$RefreshScript")
     }
 
     if ($matches.Count -gt 0) {
@@ -390,6 +399,7 @@ function Invoke-RedhaviCheck {
     $rootKeyBlob = [string]$state.root_key_blob
     $taskName = [string]$state.task_name
     $refreshUrl = [string]$state.refresh_url
+    $refreshScript = [string]$state.refresh_script
     $canaryTaskName = [string]$state.canary_task_name
     $runKeyPath = [string]$state.run_key_path
     $runValueName = [string]$state.run_value_name
@@ -407,8 +417,8 @@ function Invoke-RedhaviCheck {
     Invoke-Check "user_splunk" "splunk was removed or is disabled without administrative privileges" {
         Assert-LabUserClean "splunk"
     }
-    Invoke-Check "scheduled_task" "the persistence task was removed" {
-        Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath
+    Invoke-Check "scheduled_task" "the persistence task and helper script were removed" {
+        Assert-NoRefreshPersistence $taskName $refreshUrl $indexPath $refreshScript
     }
     Invoke-Check "registry_run" "the registry Run persistence was removed" {
         Assert-NoRegistryPersistence $runKeyPath $runValueName $canaryUrl $canaryScript

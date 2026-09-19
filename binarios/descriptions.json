@@ -1144,10 +1144,10 @@
             "Creates a controlled Windows CCDC lab with users, persistence, insecure features, and vulnerable web content.",
             "Requires an elevated Windows PowerShell 5.1 session and supports a read-only -Verify mode.",
             "",
-            "Installs Git, curl, Notepad++, XAMPP, and OpenSSH Server; enables TelnetClient and TFTP; and starts Apache and sshd.",
+            "Installs Git, curl, Notepad++, XAMPP, and OpenSSH Server; enables TelnetClient and TFTP; and starts sshd without requiring Apache as a service.",
             "Creates the ccdc and splunk administrator accounts, adds the exact lab SSH key, and schedules a minutely PHP refresh.",
             "It writes a local canary PowerShell script and adds an HKLM Run value that invokes it whenever a user signs in.",
-            "The canary sends a harmless HTTP check-in containing only the hostname and username.",
+            "The canary sends a harmless REST check-in to the configured endpoint without host or user metadata.",
             "A separate SYSTEM scheduled task invokes the same canary every three minutes.",
             "",
             "Validates downloaded artifacts, preserves unrelated SSH keys, avoids duplicate entries, and writes a ready-state marker only after post-validation."
