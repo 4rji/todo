@@ -1089,6 +1089,19 @@
             "Prints an eleven-item score and returns status 1 for remaining findings or status 2 for verification errors."
         ]
     },
+    "redhavi-checkWin-ps2exe.ps1": {
+        "name": "redhavi-checkWin-ps2exe.ps1",
+        "short_desc": "Builds an elevated x64 Windows checker executable with PS2EXE.",
+        "detailed_desc": [
+            "Compiles redhavi-checkWin.ps1 into the console executable redhavi-checkWin.exe.",
+            "The generated executable requests administrator privileges and preserves checker output and exit codes.",
+            "",
+            "Run .\\redhavi-checkWin-ps2exe.ps1 -InstallPs2Exe to install the module for the current user and compile.",
+            "Use -Force to replace an existing output file, or override -SourcePath and -OutputPath when needed.",
+            "",
+            "PS2EXE packaging deters casual inspection but is not cryptographic source protection; distribute only the generated executable to students."
+        ]
+    },
     "redhavi-monitor": {
         "name": "redhavi-monitor",
         "short_desc": "Servidor canary CCDC: rastrea check-ins por IP y las marca rojo (sucia) o verde (limpia).",
