@@ -272,7 +272,8 @@ pga                 pega y ejecuta scripts -g go -b para bash para Arch
 firefoxephemeral    Cambia idioma, Crea dockerfile, y tambien el contenedor para firefox
 abrireph-ext-file   Extrae un archivo bajado en el docker container, hace toddo el proceso
 firef               Script para linux para abrir ephemeral firefox cambia idioma (primero firefoxephemeral)
-firefm              Este es para abrir el firefox ephemeral. (primero instalar firefoxephemeral)
+firefm              Este es para abrir el firefox ephemeral. (primero instalar firefoxephemeral) FIREFM_LANG=es-ES no pregunta idioma
+firefox-ephemeral.applescript Igual que firefm pero sin terminal en mac: elige idioma en un dialogo (osacompile -o firefox-ephemeral.scpt para compilarlo)
 binariosgo          Descarga los binarios go, que estan comprimidos (antes comprimidos)
 webc                Convierte todas las imagens png a webp en mac
 webcc               Converts selected documentation image folders to WebP and deletes original PNG/JPEG/AI files.

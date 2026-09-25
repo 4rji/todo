@@ -42,14 +42,19 @@ fi
 LANG_CODES=( "en-US" "es-ES" "ja" "zh-CN" "ru" "fr-FR" "de-DE" "pt-BR" "it-IT" "ko" )
 LANG_NAMES=( "English" "Español" "日本語" "中文(简)" "Русский" "Français" "Deutsch" "Português(BR)" "Italiano" "한국어" )
 
-echo
-echo "flag -a abre las cuatro ventanas de check + (opcional) tu URL"
-echo "Selecciona idioma (Enter = English):"
-for i in "${!LANG_CODES[@]}"; do
-  printf "  %02d) %-10s - %s\n" $((i+1)) "${LANG_CODES[$i]}" "${LANG_NAMES[$i]}"
-done
+# FIREFM_LANG=es-ES (o el número) elige sin preguntar; lo usa firefox-ephemeral.applescript
+num="${FIREFM_LANG:-}"
 
-read -rp "Número: " num
+if [[ -z "$num" ]]; then
+  echo
+  echo "flag -a abre las cuatro ventanas de check + (opcional) tu URL"
+  echo "Selecciona idioma (Enter = English):"
+  for i in "${!LANG_CODES[@]}"; do
+    printf "  %02d) %-10s - %s\n" $((i+1)) "${LANG_CODES[$i]}" "${LANG_NAMES[$i]}"
+  done
+
+  read -rp "Número: " num || true   # sin terminal (EOF) queda English
+fi
 
 if [[ -z "$num" ]]; then
   num=1
@@ -59,6 +64,9 @@ if [[ "$num" =~ ^[0-9]+$ ]]; then
   idx=$((10#$num - 1))
 else
   idx=0
+  for i in "${!LANG_CODES[@]}"; do
+    if [[ "${LANG_CODES[$i]}" == "$num" ]]; then idx=$i; fi
+  done
 fi
 
 if (( idx < 0 || idx >= ${#LANG_CODES[@]} )); then
