@@ -1193,6 +1193,21 @@
             "Validates downloaded artifacts, preserves unrelated SSH keys, avoids duplicate entries, and writes a ready-state marker only after post-validation."
         ]
     },
+    "k6_loadtest": {
+        "name": "k6_loadtest",
+        "short_desc": "Generates and optionally runs k6 HTTP load tests with configurable users, duration, and thresholds.",
+        "detailed_desc": [
+            "Installs k6 with Homebrew or apt-get if it is missing.",
+            "Prompts for a target URL and adds http:// when no HTTP or HTTPS scheme is supplied.",
+            "",
+            "Defaults to 10 virtual users for 30 seconds, with p95 latency below 500 ms and HTTP failure rate below 1%.",
+            "Validates numeric inputs and accepts duration units of seconds, minutes, or hours.",
+            "",
+            "Writes the generated test to /tmp/k6_load_test.js, replacing any existing file at that path.",
+            "The test repeatedly sends HTTP GET requests and checks for 2xx or 3xx response status codes.",
+            "Prompts to run the test immediately, defaulting to yes, or prints the command to run it later."
+        ]
+    },
     "voces": {
         "name": "voces",
         "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
