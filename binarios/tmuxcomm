@@ -1,14 +1,17 @@
-#!/bin/bash
-
 echo "tmux ls"
 echo "tmux new -s airsend"
 echo "tmux attach -t airsend"
 
 echo ""
-echo "## Copy and PASTE mode"
+echo "## Join panes into window 0"
+echo "tmux join-pane -s :1 -t :0"
+echo "tmux join-pane -s :2 -t :0"
+echo "tmux join-pane -s :3 -t :0"
+
 echo ""
-echo '''Ctrl-b Enter   -> copy-mode (move with arrows to select)
-v              -> select
-y              -> copy
-Ctrl-b ]       -> paste
-'''
+echo "## Copy and Paste Mode"
+echo ""
+echo "Ctrl-b [       -> Enter copy mode"
+echo "v              -> Start selection"
+echo "y              -> Copy selection"
+echo "Ctrl-b ]       -> Paste"
