@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+echo "=================================="
+echo " Security Tool Installer"
+echo "=================================="
+echo
+echo "1) Trivy"
+echo "2) Grype"
+echo "3) Both"
+echo
+read -rp "Select an option (1-3): " CHOICE
+
+install_trivy() {
+    echo "[*] Installing Trivy..."
+
+    sudo apt-get update
+    sudo apt-get install -y wget gnupg
+
+    wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+        | gpg --dearmor \
+        | sudo tee /usr/share/keyrings/trivy.gpg >/dev/null
+
+    echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+        | sudo tee /etc/apt/sources.list.d/trivy.list >/dev/null
+
+    sudo apt-get update
+    sudo apt-get install -y trivy
+
+    echo "[+] Trivy installed successfully"
+    trivy --version || true
+}
+
+install_grype() {
+    echo "[*] Installing Grype..."
+
+    curl -sSfL https://get.anchore.io/grype \
+        | sudo sh -s -- -b /usr/local/bin
+
+    echo "[+] Grype installed successfully"
+    grype version || true
+}
+
+case "$CHOICE" in
+    1)
+        install_trivy
+        ;;
+    2)
+        install_grype
+        ;;
+    3)
+        install_trivy
+        echo
+        install_grype
+        ;;
+    *)
+        echo "Invalid option."
+        exit 1
+        ;;
+esac
+
+echo
+echo "[+] Installation complete."
