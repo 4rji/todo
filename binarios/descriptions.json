@@ -221,7 +221,7 @@
     },
     "convertir": {
         "name": "convertir",
-        "short_desc": "Transcribes audio/video with Whisper, plus timestamped SRT/search and Whisper-JSON to Markdown for RAG.",
+        "short_desc": "Transcribes audio/video with Whisper and compresses videos to smaller H.265 MP4 files; includes timestamps and JSON-to-Markdown for RAG.",
         "detailed_desc": [
             "Transcribes supported audio files with the Whisper CLI using the medium model, English language, and TXT output.",
             "",
@@ -231,6 +231,9 @@
             "For video input, it extracts audio to an MP3 with ffmpeg before running Whisper.",
             "Passing i shows installation instructions for ffmpeg, a Python virtual environment, and Whisper.",
             "-s file: re-encodes a video to MP4 (H.264 + AAC, high quality) saved with the same base name.",
+            "-c file (or --comprimir file): compresses any video readable by FFmpeg to .comprimido.mp4 using H.265/libx265, CRF 22, and preset slow, keeping the original resolution and frame timing. Requires ffmpeg and ffprobe; compression is lossy and playback requires H.265 support.",
+            "Keeps the main video and all audio tracks, copying AAC audio and converting other audio to AAC. Subtitles and attachments are omitted.",
+            "Leaves the original untouched, refuses to overwrite existing output, cleans temporary files, and saves the result only when it is smaller than the input.",
             "-t file: transcribes with timestamps, producing an SRT plus a grep-friendly .busqueda.txt where each line is '[HH:MM:SS] text' to find the exact moment a topic is spoken.",
             "-r file.json [interval]: converts a Whisper JSON (the one with the 'segments' list) into a timestamped Markdown for RAG indexing. It groups consecutive segments into paragraphs, each starting with '[MM:SS] ' and closing once at least 'interval' seconds (default 45) have elapsed. Output is a UTF-8 .md with the same base name as the JSON."
         ]
