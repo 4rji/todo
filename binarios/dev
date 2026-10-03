@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ngcs-dev.sh - run an x86_64 (amd64) Linux container from an Apple Silicon Mac.
+# dev - run an x86_64 (amd64) Linux container from an Apple Silicon Mac.
 #
 # Model:
-#   - The first run of each distro builds a local image (ngcs-dev-debian,
-#     ngcs-dev-ubuntu) that adds zsh, sudo and the user "dev" (password "ass").
+#   - The first run of each distro builds a local image (dev:debian,
+#     dev:ubuntu) that adds zsh, sudo and the user "dev" (password "ass").
 #     Every mode opens a zsh login shell as that user.
 #   - One persistent container per distro (dev-debian, dev-ubuntu). No mount.
 #     Install your tools there once; they are kept between runs.
@@ -95,7 +95,7 @@ ${BLU}Behavior:${RST}
 
 ${BLU}User:${RST}
   Every mode opens zsh as ${GRN}${DEV_USER}${RST} (password ${YEL}${DEV_PASS}${RST}, can sudo).
-  The first run of each distro builds the local image ngcs-dev-<distro>.
+  The first run of each distro builds the local image dev:<distro>.
 
 ${BLU}Workflow:${RST}
   1. ${GRN}$(basename "$0")${RST}            install your tools (sudo apt, mise, ...) and exit
@@ -140,10 +140,10 @@ case "$DISTRO" in
 esac
 
 NAME="dev-${DISTRO}"
-IMAGE="ngcs-dev-${DISTRO}"
+IMAGE="dev:${DISTRO}"
 # /dev/shm is a tmpfs (Docker default: 64MB). 8g is a ceiling, not a reservation:
 # memory is only used as files are written.
-SHM_SIZE="${NGCS_SHM_SIZE:-8g}"
+SHM_SIZE="${DEV_SHM_SIZE:-8g}"
 # docker run gets no command: the image's CMD opens the shell (zsh -l as DEV_USER).
 RUN_ARGS=(--platform linux/amd64 --shm-size "$SHM_SIZE" -it)
 
@@ -190,7 +190,7 @@ fi
 
 # ---------- mounted run: throwaway copy of the persistent container ----------
 if [ -n "$MOUNT" ]; then
-  SNAP="ngcs-snap-${DISTRO}"
+  SNAP="dev:${DISTRO}-snap"
   if [ "$PERSIST" -eq 1 ] && docker container inspect "$NAME" >/dev/null 2>&1; then
     info "Snapshotting ${NAME} (your installed tools are kept)"
     docker commit "$NAME" "$SNAP" >/dev/null

@@ -3,7 +3,7 @@
         "name": "dev",
         "short_desc": "Runs amd64 Debian or Ubuntu development containers with persistent tools and optional temporary mounts.",
         "detailed_desc": [
-            "Requires Docker and starts an interactive Bash shell using the linux/amd64 platform, intended for Apple Silicon Macs.",
+            "Requires Docker and opens an interactive zsh shell as user dev (password ass, can sudo) using the linux/amd64 platform, intended for Apple Silicon Macs.",
             "Uses Debian 12 by default; pass ubuntu to use Ubuntu 22.04.",
             "",
             "Without a mount, it creates or reuses dev-debian or dev-ubuntu and keeps installed tools and container changes between runs.",
@@ -12,7 +12,7 @@
             "Only files in the mounted directory persist; other changes in the temporary container are discarded.",
             "",
             "Use --rm to start from a clean image and remove the container on exit; -l or --list lists persistent dev containers.",
-            "Use -h or --help for usage. NGCS_SHM_SIZE sets the shared-memory limit, which defaults to 8g."
+            "Use -h or --help for usage. DEV_SHM_SIZE sets the shared-memory limit, which defaults to 8g."
         ]
     },
     "scan_folders": {
