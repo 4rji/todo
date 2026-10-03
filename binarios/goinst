@@ -17,6 +17,7 @@ OPTIONS=(
   "sitemirror — Download websites and create a local copy"
   "lanwatchgo — Detect network changes and devices"
   "mann — Install github.com/4rji/mann"
+  "autoteclado — Install github.com/4rji/binarios-go/autoteclado"
   "Quit"
 )
 
@@ -30,6 +31,7 @@ commands=(
   "go install github.com/4rji/binarios-go/sitemirror@latest"
   "go install github.com/4rji/binarios-go/lanwatchgo@latest"
   "go install github.com/4rji/mann@latest"
+  "go install github.com/4rji/binarios-go/autoteclado@latest"
 )
 
 bins=(
@@ -42,6 +44,7 @@ bins=(
   "sitemirror"
   "lanwatchgo"
   "mann"
+  "autoteclado"
 )
 
 echo ""
@@ -95,6 +98,7 @@ case $idx in
   6) echo -e "  \033[36mDownload websites and create a local copy.\033[0m" ;;
   7) echo -e "  \033[36mDetect network changes and devices; run with lanwatchgo serve.\033[0m" ;;
   8) echo -e "  \033[36mInstall mann from github.com/4rji/mann.\033[0m" ;;
+  9) echo -e "  \033[36mInstall autoteclado from github.com/4rji/binarios-go/autoteclado.\033[0m" ;;
 esac
 
 echo ""
