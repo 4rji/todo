@@ -481,6 +481,7 @@ encrypt             Go, para encriptar archivos con pass o key, misma funcion qu
 
 
 ###------distrobox - docker
+dev                 Runs amd64 Debian or Ubuntu development containers with persistent tools and optional temporary mounts.
 dockercp            Alias que muestra el formato para copiar archivos en docker
 dockernet           Crea una red para rotar ips en docker y muestra comando para ejecutar
 dcc                 Crea un archivo, muestra y ejecuta random ips docker, dockernet
@@ -761,23 +762,29 @@ sshmod            Modifica ssh y hace copia
 vcen                Para manejar las maquinas en el vcenter desde cli linux, vmware, vcenter, server
 vcenterinst         Descarga govc para vcenter vmware, variables adentro del script. 
 mailinst            Instala mail server en fedora 21. baja archivos de conf y todo.
-redhavi             Instala misconfiguraciones en linux.
-redhavi-fedora      Seeds Fedora CCDC lab misconfigurations and a three-minute dashboard check-in timer.
-redhavi-check       Checa las malconfiguraciones
-redhavi-check-fedora Checks Fedora CCDC cleanup, including the dashboard check-in timer.
-redhavi-check-federo-shc Provides the Fedora cleanup checker source adapted for shc compilation.
-redhavi-check-shc   Provides the Linux cleanup checker source adapted for shc compilation.
-redhavi-apolloWin.ps1 Downloads apollo1.exe and schedules it to run every three minutes on Windows.
-redhavi-checkWin-ps2exe.ps1 Builds an elevated x64 Windows checker executable with PS2EXE.
-redhavi-checkWin.ps1 Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.
-redhavi-task.md     Guia de tarea para alumnos: que revisar en el lab sin dar respuestas
-redhaviwin.ps1      Provisions a Windows CCDC lab with persistence and a three-minute REST canary without requiring Apache.
-redhavi-monitor     Servidor canary CCDC - marca rojo/verde por IP segun sigan haciendo check-in.
+redhavi/README.md   Documents the authorized training-only Redhavi CCDC lab suite.
+redhavi/redhavi     Seeds and verifies the Ubuntu Redhavi scenario.
+redhavi/redhavi-fedora Seeds Fedora CCDC lab misconfigurations and a three-minute dashboard check-in timer.
+redhavi/redhavi-check Performs the read-only Linux cleanup assessment.
+redhavi/redhavi-check-fedora Checks Fedora CCDC cleanup, including the dashboard check-in timer.
+redhavi/redhavi-check-federo-shc Provides the Fedora cleanup checker source adapted for SHC compilation.
+redhavi/redhavi-check-shc Provides the Linux cleanup checker source adapted for SHC compilation.
+redhavi/redhavi-apolloWin.ps1 Downloads a freshly generated Mythic Apollo payload from an external lab server and schedules it on Windows.
+redhavi/redhavi-poseidon Downloads a freshly generated Mythic Poseidon payload and creates a recurring Linux systemd timer.
+redhavi/apollo1.exe Zero-byte placeholder created with touch; replace it with a freshly generated Mythic payload for an authorized lab.
+redhavi/poseidon.bin Zero-byte placeholder created with touch; it is not a functional payload.
+redhavi/redhavi-checkWin-ps2exe.ps1 Builds an elevated x64 Windows checker executable with PS2EXE.
+redhavi/redhavi-checkWin.ps1 Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.
+redhavi/redhavi-task.md Provides an English student cleanup assignment without disclosing answers.
+redhavi/redhaviwin.ps1 Provisions a Windows CCDC lab with persistence and a three-minute REST canary without requiring Apache.
+redhavi/redhavi-monitor Runs the CCDC canary server and tracks dirty or clean status by check-in IP.
+redhavi/ecomredhavi Creates an inert e-commerce web and database hardening lab.
+redhavi/ecomredhavimysql Creates the extended Apache and MySQL misconfiguration lab.
+redhavi/INSTALLATION.md Documents builds, deployment, monitoring, and exercise operation.
 
 
 
 ###------ otros
-redhavi-check       Checa las malconfiguraciones
 cht                 Marca binarios de /opt/4rji/bin como inmutables. Con -i quita. Detecta Linux/Mac (chattr/chflags)
 dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
 wifi-radar          En comprimidos, muestra la calidad de la senal wifi en un webserver, necesitas wifi

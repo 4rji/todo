@@ -1,4 +1,20 @@
 {
+    "dev": {
+        "name": "dev",
+        "short_desc": "Runs amd64 Debian or Ubuntu development containers with persistent tools and optional temporary mounts.",
+        "detailed_desc": [
+            "Requires Docker and starts an interactive Bash shell using the linux/amd64 platform, intended for Apple Silicon Macs.",
+            "Uses Debian 12 by default; pass ubuntu to use Ubuntu 22.04.",
+            "",
+            "Without a mount, it creates or reuses dev-debian or dev-ubuntu and keeps installed tools and container changes between runs.",
+            "Use -m PATH or --mount PATH to mount a local directory at /work in a temporary container.",
+            "When a persistent container exists, mounted runs use a snapshot so its installed tools are available.",
+            "Only files in the mounted directory persist; other changes in the temporary container are discarded.",
+            "",
+            "Use --rm to start from a clean image and remove the container on exit; -l or --list lists persistent dev containers.",
+            "Use -h or --help for usage. NGCS_SHM_SIZE sets the shared-memory limit, which defaults to 8g."
+        ]
+    },
     "scan_folders": {
         "name": "scan_folders",
         "short_desc": "Analiza carpetas y repositorios Git en busca de secretos y datos sensibles; genera informes y permite ampliar el analisis con ClamAV, SBOM y CVEs.",
@@ -1076,11 +1092,114 @@
             "Despues transferi ese .ovpn a la maquina/router que lo va a usar (por ejemplo con scp, USB, o pegandolo a mano) e importalo con el cliente OpenVPN correspondiente."
         ]
     },
-    "redhavi-apolloWin.ps1": {
-        "name": "redhavi-apolloWin.ps1",
-        "short_desc": "Downloads apollo1.exe and schedules it to run periodically on Windows.",
+    "redhavi/README.md": {
+        "name": "redhavi/README.md",
+        "short_desc": "Documents the authorized training-only Redhavi CCDC lab suite.",
         "detailed_desc": [
-            "Downloads apollo1.exe from the configured HTTP URL into the Redhavi ProgramData directory.",
+            "Introduces the Ubuntu, Fedora, Windows, e-commerce, checker, monitor, and student exercise files kept in the Redhavi folder.",
+            "It describes the safe scenario workflow and identifies which tools modify targets and which are read-only.",
+            "",
+            "The safety notice limits these intentionally vulnerable scenarios to authorized, isolated, disposable training systems.",
+            "It also explains that optional Apollo and Poseidon payloads must be generated again in Mythic and hosted on configured external lab servers."
+        ]
+    },
+    "redhavi/INSTALLATION.md": {
+        "name": "redhavi/INSTALLATION.md",
+        "short_desc": "Documents Redhavi checker builds, deployment, monitoring, and exercise operation.",
+        "detailed_desc": [
+            "Provides English instructions for building the Linux and Fedora checkers with SHC and packaging the Windows checker with PS2EXE.",
+            "",
+            "Covers safe transfer, checker exit codes, canary monitoring, exercise evidence, and troubleshooting.",
+            "The Apollo and Poseidon sections require freshly generated Mythic payloads on isolated external lab servers."
+        ]
+    },
+    "redhavi/redhavi": {
+        "name": "redhavi/redhavi",
+        "short_desc": "Seeds and verifies the Ubuntu Redhavi CCDC scenario.",
+        "detailed_desc": [
+            "Creates an intentionally vulnerable Ubuntu exercise with insecure packages, practice administrator accounts, cron persistence, web payloads, and an SSH key.",
+            "Downloaded artifacts are verified against pinned hashes or fingerprints before installation.",
+            "",
+            "Run only as root on an authorized disposable Ubuntu machine.",
+            "Use --verify to validate the seeded scenario without modifying it."
+        ]
+    },
+    "redhavi/redhavi-check": {
+        "name": "redhavi/redhavi-check",
+        "short_desc": "Performs the read-only Linux Redhavi cleanup assessment.",
+        "detailed_desc": [
+            "Checks practice accounts, administrative access, root cron persistence, the exact lab SSH key, immutable attributes, PHP webshell markers, and insecure packages.",
+            "Supports multiple Linux package families with operating-system-specific scoring.",
+            "",
+            "Requires root access for complete inspection and does not clean or modify the target."
+        ]
+    },
+    "redhavi/redhavi-task.md": {
+        "name": "redhavi/redhavi-task.md",
+        "short_desc": "Provides an English student cleanup assignment without disclosing answers.",
+        "detailed_desc": [
+            "Directs students to investigate accounts, SSH, scheduled tasks, web content, services, packages, permissions, networking, and persistence.",
+            "",
+            "Requires students to document evidence and risk, make controlled changes, verify the result, and identify follow-up items."
+        ]
+    },
+    "redhavi/ecomredhavi": {
+        "name": "redhavi/ecomredhavi",
+        "short_desc": "Creates an inert e-commerce web and database hardening lab.",
+        "detailed_desc": [
+            "Installs Apache, MySQL, and PHP and creates practice databases, web content, and intentionally weak configurations.",
+            "The suspicious PHP file is an inert training stub and does not execute commands.",
+            "",
+            "Run only on an authorized disposable Linux lab system."
+        ]
+    },
+    "redhavi/ecomredhavimysql": {
+        "name": "redhavi/ecomredhavimysql",
+        "short_desc": "Creates the extended Apache and MySQL misconfiguration lab.",
+        "detailed_desc": [
+            "Builds an e-commerce-style practice environment with Apache information exposure, missing security headers, directory listing, and weak database accounts.",
+            "",
+            "The script is intentionally unsafe and belongs only on an authorized disposable lab system."
+        ]
+    },
+    "redhavi/apollo1.exe": {
+        "name": "redhavi/apollo1.exe",
+        "short_desc": "Provides a zero-byte placeholder for a freshly generated Mythic Apollo payload.",
+        "detailed_desc": [
+            "This file was created with touch and contains no executable payload data.",
+            "It cannot run or connect to a Mythic environment.",
+            "",
+            "For an authorized isolated exercise, generate a new Apollo payload in Mythic, host it on the configured external lab server, and verify its SHA-256 hash."
+        ]
+    },
+    "redhavi/poseidon.bin": {
+        "name": "redhavi/poseidon.bin",
+        "short_desc": "Provides a zero-byte placeholder for an authorized Poseidon lab payload.",
+        "detailed_desc": [
+            "This file was created with touch and contains no executable payload data.",
+            "It is a documentation placeholder only and is not functional."
+        ]
+    },
+    "redhavi/redhavi-poseidon": {
+        "name": "redhavi/redhavi-poseidon",
+        "short_desc": "Downloads a freshly generated Mythic Poseidon payload and creates a recurring Linux systemd timer.",
+        "detailed_desc": [
+            "Downloads poseidon.bin from the configured external lab server into /var/lib/redhavi by default.",
+            "Rejects empty downloads and optionally requires an expected SHA-256 hash.",
+            "",
+            "Creates a root-owned systemd service and timer that attempt to run the payload every three minutes by default.",
+            "An already running service is not started a second time.",
+            "",
+            "Generate a fresh Poseidon payload in Mythic for each authorized isolated exercise.",
+            "Use --remove to disable and remove the timer, service, and installed payload."
+        ]
+    },
+    "redhavi/redhavi-apolloWin.ps1": {
+        "name": "redhavi/redhavi-apolloWin.ps1",
+        "short_desc": "Downloads a freshly generated Mythic Apollo payload from an external lab server and schedules it on Windows.",
+        "detailed_desc": [
+            "Downloads apollo1.exe from the configured external lab server IP into the Redhavi ProgramData directory.",
+            "The payload must be generated again in Mythic for the current authorized exercise; a stale payload may not connect or function.",
             "Optionally verifies an expected SHA-256 hash before installing the executable.",
             "",
             "Creates a visible Windows scheduled task that runs as SYSTEM every three minutes by default.",
@@ -1090,8 +1209,8 @@
             "Use -Remove to delete both the scheduled task and the installed executable."
         ]
     },
-    "redhavi-checkWin.ps1": {
-        "name": "redhavi-checkWin.ps1",
+    "redhavi/redhavi-checkWin.ps1": {
+        "name": "redhavi/redhavi-checkWin.ps1",
         "short_desc": "Scores task, registry, and three-minute canary cleanup for the Windows Redhavi lab.",
         "detailed_desc": [
             "Verifies a Windows system previously prepared by redhaviwin.ps1 without changing it.",
@@ -1103,8 +1222,8 @@
             "Prints an eleven-item score and returns status 1 for remaining findings or status 2 for verification errors."
         ]
     },
-    "redhavi-checkWin-ps2exe.ps1": {
-        "name": "redhavi-checkWin-ps2exe.ps1",
+    "redhavi/redhavi-checkWin-ps2exe.ps1": {
+        "name": "redhavi/redhavi-checkWin-ps2exe.ps1",
         "short_desc": "Builds an elevated x64 Windows checker executable with PS2EXE.",
         "detailed_desc": [
             "Compiles redhavi-checkWin.ps1 into the console executable redhavi-checkWin.exe.",
@@ -1116,20 +1235,21 @@
             "PS2EXE packaging deters casual inspection but is not cryptographic source protection; distribute only the generated executable to students."
         ]
     },
-    "redhavi-monitor": {
-        "name": "redhavi-monitor",
-        "short_desc": "Servidor canary CCDC: rastrea check-ins por IP y las marca rojo (sucia) o verde (limpia).",
+    "redhavi/redhavi-monitor": {
+        "name": "redhavi/redhavi-monitor",
+        "short_desc": "Runs the CCDC canary server and tracks dirty or clean status by check-in IP.",
         "detailed_desc": [
-            "Servidor HTTP en Python (solo stdlib) que sirve un canary en /checkin y registra la IP de cada maquina que lo descarga.",
-            "Mientras una IP siga haciendo check-in (backdoor/cron malicioso) queda en ROJO; si deja de pedir por mas del umbral (default 240s = 4 min) pasa a VERDE; si vuelve a pedir vuelve a ROJO.",
+            "Runs a standard-library-only Python HTTP server that provides a canary at /checkin and records each requesting IP.",
+            "A recent check-in marks an IP red; after the idle threshold, 240 seconds by default, it turns green; a later request turns it red again.",
             "",
-            "Dashboard web con auto-refresh que deja agregar/quitar IPs a mano y auto-descubre las que hacen check-in. Estado persistido en JSON entre reinicios.",
+            "The auto-refreshing dashboard supports adding and removing IPs and automatically discovers clients when they check in.",
+            "State is persisted as JSON across restarts.",
             "",
-            "Uso: redhavi-monitor --port 8081 --bind 0.0.0.0 [--payload archivo.sh] [--clean-threshold 240] [--no-auto-discover]."
+            "Usage: redhavi-monitor --port 8081 --bind 0.0.0.0 [--payload file.sh] [--clean-threshold 240] [--no-auto-discover]."
         ]
     },
-    "redhavi-fedora": {
-        "name": "redhavi-fedora",
+    "redhavi/redhavi-fedora": {
+        "name": "redhavi/redhavi-fedora",
         "short_desc": "Seeds Fedora CCDC lab misconfigurations and a three-minute dashboard check-in timer.",
         "detailed_desc": [
             "Prepares an authorized Fedora CCDC lab with intentionally vulnerable users, packages, web content, cron persistence, and root SSH access.",
@@ -1141,8 +1261,8 @@
             "Use --yes with --apply to skip the interactive LAB confirmation on an authorized disposable machine."
         ]
     },
-    "redhavi-check-fedora": {
-        "name": "redhavi-check-fedora",
+    "redhavi/redhavi-check-fedora": {
+        "name": "redhavi/redhavi-check-fedora",
         "short_desc": "Checks Fedora CCDC cleanup, including the dashboard check-in timer.",
         "detailed_desc": [
             "Performs a read-only cleanup verification for systems prepared with redhavi-fedora.",
@@ -1154,8 +1274,8 @@
             "Prints a final score and returns status 1 when findings remain; it never cleans or modifies the system."
         ]
     },
-    "redhavi-check-federo-shc": {
-        "name": "redhavi-check-federo-shc",
+    "redhavi/redhavi-check-federo-shc": {
+        "name": "redhavi/redhavi-check-federo-shc",
         "short_desc": "Fedora cleanup checker source adapted for shc compilation.",
         "detailed_desc": [
             "Standalone source copy of redhavi-check-fedora with /bin/bash and a direct main invocation for shc.",
@@ -1165,8 +1285,8 @@
             "This file is readable Bash source, not a compiled binary. Distribute only the resulting binary to students."
         ]
     },
-    "redhavi-check-shc": {
-        "name": "redhavi-check-shc",
+    "redhavi/redhavi-check-shc": {
+        "name": "redhavi/redhavi-check-shc",
         "short_desc": "Linux cleanup checker source adapted for shc compilation.",
         "detailed_desc": [
             "Standalone source copy of redhavi-check with /bin/bash and a direct main invocation for shc.",
@@ -1177,8 +1297,8 @@
             "This file is readable Bash source, not a compiled binary. Distribute only the resulting binary to students."
         ]
     },
-    "redhaviwin.ps1": {
-        "name": "redhaviwin.ps1",
+    "redhavi/redhaviwin.ps1": {
+        "name": "redhavi/redhaviwin.ps1",
         "short_desc": "Provisions a Windows CCDC lab with persistence and a three-minute HTTP canary.",
         "detailed_desc": [
             "Creates a controlled Windows CCDC lab with users, persistence, insecure features, and vulnerable web content.",

@@ -55,3 +55,47 @@
 
   Importante: las reglas NCCDC 2026 responsabilizan al equipo si un firewall o IPS rompe el
   scoring; además, los scripts propios deben publicarse, declararse y congelarse con anticipación
+
+
+
+#WINDOWS
+
+ Para CCDC recomiendo MITRE CALDERA + Atomic Red Team. CALDERA controla la campaña y registra cada acción; Atomic aporta
+  técnicas pequeñas, repetibles y con limpieza definida. Mythic puede quedarse como acceso opcional, pero no debería ser el
+  centro del ejercicio. CALDERA está diseñado precisamente para emulación basada en ATT&CK.
+
+  Un escenario Windows interesante sería:
+
+  1. Acceso inicial: agente instalado previamente o compromiso simulado del sitio PHP.
+  2. Descubrimiento: enumerar usuarios, grupos, procesos y servicios.
+  3. Persistencia: crear un usuario local con nombre creíble y agregarlo a administradores; además, crear una tarea programada o
+     servicio. Atomic ya contiene pruebas reproducibles de cuentas y tareas programadas.
+
+  4. Señal visible: usar msg.exe para mostrar algo como “Your server belongs to Red Team” en la sesión del estudiante.
+     Probablemente eso fue lo que recuerdas.
+
+  5. Impacto controlado: modificar la página web, dejar archivos señuelo o cambiar temporalmente un servicio secundario.
+  6. Defensa: intentar alterar Defender para producir telemetría, pero dejar Tamper Protection activo para que bloquee el
+     intento. También puedes usar EICAR para comprobar si los estudiantes detectan que la protección dejó de funcionar.
+
+  7. Reincidencia: si eliminan solamente el usuario, la tarea lo vuelve a crear; si eliminan solamente la tarea, todavía queda
+     el usuario. Eso obliga a buscar la causa completa.
+
+  8. Final: CALDERA detiene la operación y ejecutas una limpieza conocida o restauras el snapshot.
+
+  Yo evitaría desactivar permanentemente Defender. Si el antivirus se apaga desde el principio, los estudiantes pierden una
+  fuente importante de evidencias y el ejercicio puede convertirse en buscar malware ofuscado. Es más educativo registrar un
+  intento de degradación, comprobar que detectaron el cambio y puntuar que restablezcan la protección.
+
+  La puntuación podría cubrir:
+
+  - Encontrar y eliminar la cuenta no autorizada.
+  - Identificar la tarea o servicio que la recrea.
+  - Detectar el canal C2.
+  - Mantener Apache y el sitio disponibles.
+  - Restaurar Defender.
+  - Presentar eventos, tiempos y causa raíz.
+
+  Usaría un beacon HTTPS sencillo de CALDERA/Sandcat y reservaría Mythic para una máquina avanzada. Meterpreter suele ser
+  reconocido muy rápido por firmas y convierte el reto en “el antivirus encontró Metasploit”, mientras que las acciones nativas
+  dejan artefactos mucho mejores para investigación.
