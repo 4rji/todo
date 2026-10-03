@@ -2,6 +2,9 @@
 # ngcs-dev.sh - run an x86_64 (amd64) Linux container from an Apple Silicon Mac.
 #
 # Model:
+#   - The first run of each distro builds a local image (ngcs-dev-debian,
+#     ngcs-dev-ubuntu) that adds zsh, sudo and the user "dev" (password "ass").
+#     Every mode opens a zsh login shell as that user.
 #   - One persistent container per distro (dev-debian, dev-ubuntu). No mount.
 #     Install your tools there once; they are kept between runs.
 #   - With -m, Docker cannot add a mount to an existing container, so the
@@ -90,14 +93,22 @@ ${BLU}Behavior:${RST}
                             ${RED}changes are not saved${RST}
   --rm                      Clean image, deleted on exit
 
+${BLU}User:${RST}
+  Every mode opens zsh as ${GRN}${DEV_USER}${RST} (password ${YEL}${DEV_PASS}${RST}, can sudo).
+  The first run of each distro builds the local image ngcs-dev-<distro>.
+
 ${BLU}Workflow:${RST}
-  1. ${GRN}$(basename "$0")${RST}            install your tools (apt, mise, ...) and exit
+  1. ${GRN}$(basename "$0")${RST}            install your tools (sudo apt, mise, ...) and exit
   2. ${GRN}$(basename "$0") -m ~/repo${RST}  work on a repo with those tools available
 
 ${DIM}Remove a persistent container with: docker rm dev-debian${RST}
 EOF
   exit "${1:-0}"
 }
+
+# ---------- container user (baked into the image on its first build) ----------
+DEV_USER="dev"
+DEV_PASS="ass"
 
 # ---------- argument parsing ----------
 DISTRO="debian"
@@ -124,14 +135,16 @@ done
 command -v docker >/dev/null 2>&1 || die "docker not found in PATH"
 
 case "$DISTRO" in
-  debian) IMAGE="debian:12" ;;
-  ubuntu) IMAGE="ubuntu:22.04" ;;
+  debian) BASE_IMAGE="debian:12" ;;
+  ubuntu) BASE_IMAGE="ubuntu:22.04" ;;
 esac
 
 NAME="dev-${DISTRO}"
+IMAGE="ngcs-dev-${DISTRO}"
 # /dev/shm is a tmpfs (Docker default: 64MB). 8g is a ceiling, not a reservation:
 # memory is only used as files are written.
 SHM_SIZE="${NGCS_SHM_SIZE:-8g}"
+# docker run gets no command: the image's CMD opens the shell (zsh -l as DEV_USER).
 RUN_ARGS=(--platform linux/amd64 --shm-size "$SHM_SIZE" -it)
 
 if [ -n "$MOUNT" ]; then
@@ -145,11 +158,34 @@ fi
 
 banner
 info "Distro:  ${GRN}${DISTRO}${RST} (linux/amd64)"
+info "User:    ${GRN}${DEV_USER}${RST} (zsh)"
 info "Shm:     ${GRN}${SHM_SIZE}${RST} (/dev/shm, thin)"
 if [ -n "$MOUNT" ]; then
   info "Mount:   ${GRN}${MOUNT}${RST} -> /work"
 else
   info "Mount:   ${DIM}none${RST}"
+fi
+
+# ---------- local image: BASE_IMAGE + zsh, sudo and DEV_USER (built once) ----------
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  info "Building ${GRN}${IMAGE}${RST} from ${BASE_IMAGE} (first run only)"
+  docker build --platform linux/amd64 -t "$IMAGE" - <<EOF
+FROM ${BASE_IMAGE}
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zsh sudo && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -s /usr/bin/zsh -G sudo ${DEV_USER} && echo '${DEV_USER}:${DEV_PASS}' | chpasswd
+USER ${DEV_USER}
+WORKDIR /home/${DEV_USER}
+# Distro-recommended zshrc; any ~/.zshrc also skips the zsh-newuser-install wizard.
+RUN cp /etc/zsh/newuser.zshrc.recommended .zshrc
+CMD ["zsh", "-l"]
+EOF
+fi
+
+# Containers created before this image existed have no DEV_USER and open as root.
+if [ "$PERSIST" -eq 1 ] && docker container inspect "$NAME" >/dev/null 2>&1 &&
+   [ "$(docker container inspect -f '{{.Config.User}}' "$NAME")" != "$DEV_USER" ]; then
+  warn "${NAME} predates the '${DEV_USER}' user and still opens as root."
+  warn "To switch, recreate it (its installed tools are lost): docker rm ${NAME}"
 fi
 
 # ---------- mounted run: throwaway copy of the persistent container ----------
@@ -171,7 +207,7 @@ if [ -n "$MOUNT" ]; then
   printf '%s[!] Only files inside %s are kept.%s\n' "$RED" "$MOUNT" "$RST"
 
   rc=0
-  docker run --rm "${RUN_ARGS[@]}" "$SRC" bash || rc=$?
+  docker run --rm "${RUN_ARGS[@]}" "$SRC" || rc=$?
   docker rmi "$SNAP" >/dev/null 2>&1 || true
   exit "$rc"
 fi
@@ -179,7 +215,7 @@ fi
 # ---------- ephemeral, no mount ----------
 if [ "$PERSIST" -eq 0 ]; then
   info "Mode:    ${YEL}ephemeral${RST} (deleted on exit)"
-  exec docker run --rm "${RUN_ARGS[@]}" "$IMAGE" bash
+  exec docker run --rm "${RUN_ARGS[@]}" "$IMAGE"
 fi
 
 # ---------- persistent, no mount ----------
@@ -190,5 +226,5 @@ if docker container inspect "$NAME" >/dev/null 2>&1; then
 fi
 
 ok "Creating new container"
-exec docker run --name "$NAME" "${RUN_ARGS[@]}" "$IMAGE" bash
+exec docker run --name "$NAME" "${RUN_ARGS[@]}" "$IMAGE"
 
