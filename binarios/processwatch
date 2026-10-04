@@ -13,18 +13,20 @@ while true; do
     PID=$(pgrep -n -x "$PROC" 2>/dev/null)
 
     if [ -n "$PID" ]; then
+        COMMAND=$(ps -ww -p "$PID" -o command= 2>/dev/null)
         OUT="process_${PROC}_$(date +%Y%m%d_%H%M%S).txt"
 
         {
             echo "=== PROCESS DETECTED ==="
             echo "Time: $(date)"
+            printf 'Command: %s\n' "${COMMAND:-Unavailable (process exited before capture)}"
             echo
 
-            echo "=== PROCESS ==="
+            printf '=== PROCESS: %s ===\n' "${COMMAND:-Unavailable (process exited before capture)}"
             ps -ww -p "$PID" -o pid,ppid,user,start,time,command
 
             echo
-            echo "=== PARENT CHAIN ==="
+            printf '=== PARENT CHAIN: %s ===\n' "${COMMAND:-Unavailable (process exited before capture)}"
 
             CURRENT="$PID"
 
