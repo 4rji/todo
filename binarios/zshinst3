@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# zshinst3: deja la terminal completa en UNA sola pasada.
+#
+# Orden (importa):
+#   1. zshinst    va PRIMERO: pisa ~/.zshrc con `cat >`, así que si va al final
+#                 borra el host_nombre y el loader de bashfun/herralias.
+#                 El chsh no corta nada: solo cambia la shell del próximo login.
+#   2. zshinst2   baja un ~/.p10k.zsh ya armado (con el segmento hola), por eso
+#                 NO hace falta `p10k configure` (si lo corrés, lo pisa).
+#   3. neofinst
+#   4. tmuxinst   ojo: también pisa ~/.nanorc con el viejo de dotfiles...
+#   5. nanoinst   ...por eso nanoinst va DESPUÉS, para que quede su config.
+#   6. bashfun
+#   7. herralias
+#
+# Al final: exec zsh
+set -uo pipefail
+
+green='\033[0;32m'
+yellow='\033[0;33m'
+red='\033[0;31m'
+blue='\033[1;34m'
+nocolor='\033[0m'
+
+msg()  { printf '%b[+] %s%b\n' "$green" "$1" "$nocolor"; }
+warn() { printf '%b[!] %s%b\n' "$yellow" "$1" "$nocolor"; }
+err()  { printf '%b[x] %s%b\n' "$red" "$1" "$nocolor" >&2; }
+sep()  { printf '%b_________________________________________________________%b\n' "$blue" "$nocolor"; }
+
+STEPS=(zshinst2 neofinst tmuxinst nanoinst bashfun herralias)
+
+show_help() {
+  cat <<'EOF'
+zshinst3 - instala todo de una sola pasada.
+
+Corre, en orden:
+  zshinst   zshinst2   neofinst   tmuxinst   nanoinst   bashfun   herralias
+
+Pide sudo y host_nombre una sola vez al principio. zshinst te va a pedir tu
+contraseña para el chsh. Si un paso falla, sigue con el resto y te muestra un
+resumen al final.
+
+Uso:
+  zshinst3          corre todo (zshinst incluido)
+  zshinst3 -s       se saltea zshinst (si ya lo corriste y no querés que
+                    vuelva a pisar ~/.zshrc)
+  zshinst3 -h       esta ayuda
+
+Al terminar:
+  exec zsh
+EOF
+}
+
+RUN_ZSHINST=1
+case "${1:-}" in
+  -h|--help)
+    show_help
+    exit 0
+    ;;
+  -s|--sin-zshinst)
+    RUN_ZSHINST=0
+    ;;
+esac
+
+# Preferimos los *inst que están al lado de este script y si no, los del PATH.
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)"
+ZSHRC="$HOME/.zshrc"
+
+OK=()
+FAILED=()
+
+run_step() {
+  local name="$1" cmd
+  if [[ -x "$SCRIPT_DIR/$name" ]]; then
+    cmd="$SCRIPT_DIR/$name"
+  elif command -v "$name" >/dev/null 2>&1; then
+    cmd="$name"
+  else
+    err "No encontré '$name' (ni en $SCRIPT_DIR ni en el PATH). Lo salto."
+    FAILED+=("$name")
+    return
+  fi
+
+  echo
+  sep
+  msg "Corriendo: $name"
+  sep
+  # Cada uno con su shebang (bashfun es python3).
+  if "$cmd"; then
+    OK+=("$name")
+  else
+    err "'$name' terminó con error. Sigo con el resto."
+    FAILED+=("$name")
+  fi
+}
+
+# Se pregunta ANTES de zshinst, que pisa ~/.zshrc (deja backup).
+get_host_nombre() {
+  if [[ -n "${host_nombre:-}" ]]; then
+    msg "host_nombre del entorno: $host_nombre"
+  elif [[ -f "$ZSHRC" ]] && grep -q '^export host_nombre=' "$ZSHRC"; then
+    host_nombre="$(grep '^export host_nombre=' "$ZSHRC" | tail -n1 \
+      | sed "s/^export host_nombre=//; s/^['\"]//; s/['\"]$//")"
+    msg "host_nombre tomado de ~/.zshrc: $host_nombre"
+  fi
+
+  while [[ -z "${host_nombre:-}" ]]; do
+    read -rp "Ingresá el valor para host_nombre: " host_nombre
+  done
+
+  # Exportada, zshinst2 y neofinst no la vuelven a pedir ni la agregan.
+  export host_nombre
+}
+
+# Se escribe DESPUÉS de zshinst, sobre el ~/.zshrc nuevo.
+save_host_nombre() {
+  if [[ -f "$ZSHRC" ]] && grep -q '^export host_nombre=' "$ZSHRC"; then
+    return
+  fi
+  echo "export host_nombre='$host_nombre'" >> "$ZSHRC"
+  msg "host_nombre guardado en ~/.zshrc"
+}
+
+msg "Pidiendo sudo una sola vez (neofinst, tmuxinst y nanoinst lo usan)"
+sudo -v || warn "Sin sudo; los pasos que instalan paquetes pueden fallar."
+
+get_host_nombre
+
+if (( RUN_ZSHINST )); then
+  run_step zshinst
+else
+  warn "Salteando zshinst (-s)"
+fi
+
+save_host_nombre
+
+# tmuxinst borra .tmux.conf y .tmux.conf.local relativos al directorio actual.
+cd "$HOME" || exit 1
+
+for step in "${STEPS[@]}"; do
+  run_step "$step"
+done
+
+echo
+sep
+msg "Resumen"
+msg "OK: ${OK[*]:-(ninguno)}"
+if (( ${#FAILED[@]} )); then
+  warn "Con errores: ${FAILED[*]}"
+  warn "Revisá esos a mano."
+fi
+sep
+echo "Ahora corré:"
+echo "  exec zsh"
+echo
+echo "En tmux instalá los plugins con Control B, luego Shift I"
+echo "No corras 'p10k configure': pisa el ~/.p10k.zsh de zshinst2."

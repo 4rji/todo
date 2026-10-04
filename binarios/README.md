@@ -206,6 +206,7 @@ zshinst             Configura zsh con todo, Oh My Zsh, powerlevel10k y plugins; 
 zshinst1            antes zshinst, Instala la zsh h-my-zsh powerlevel10k
 zshinstmac          Version macOS (Apple Silicon): instala zsh y git con brew (instala Homebrew si falta), Oh My Zsh, powerlevel10k y plugins
 zshinst2            Instala la configuracion de barra terminal .p10k.zsh, 
+zshinst3            Instala todo en una sola pasada: zshinst (primero, pisa .zshrc) zshinst2 neofinst tmuxinst nanoinst bashfun herralias; -s saltea zshinst
 tmuxinst            Archivos para la configuracion de tmux, lo instala. con B
 neofetchinst        Instala y personaliza neofetch para ppg1
 kittyinst           Instala kitty en Linux/macOS y baja su configuracion
