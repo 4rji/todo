@@ -1,0 +1,810 @@
+#!/usr/bin/env bash
+#
+# ctsearch - search a Certificate Transparency log for a domain, one chunk at a time
+#
+# README
+# ------
+# Downloads a CT log in fixed-size blocks (500,000 entries by default) with
+# mpalmer/scrape-ct-log, decodes every certificate in the block and matches
+# the names inside it (subject CN + SAN dNSNames) against a domain, its
+# subdomains and wildcards (*.example.com). Hits are deduplicated into
+# results/<domain>.txt, progress is saved after every block so a later run can
+# resume, and a downloaded block is never deleted without asking first.
+#
+# Why decode at all? scrape-ct-log writes certificates as base64 DER, so the
+# hostnames never show up as plain text in the chunk file and a plain grep
+# finds nothing. The small embedded python3 decoder turns each certificate
+# back into its strings and rg does the matching.
+#
+# Everything lives under the current directory (or $CT_SEARCH_DIR):
+#   tools/scrape-ct-log    scraper binary, built once and then reused
+#   chunks/                downloaded blocks (only the ones you keep)
+#   results/<domain>.txt   every unique hostname found so far
+#   .ct-search-state       resume point per domain + log
+#
+# Needs curl, rg and python3. The first run also needs git, cargo and
+# rustc >= 1.88 to build the scraper (distro Rust is often too old; use rustup).
+#
+# Example:
+#   $ ctsearch
+#   Domain to search (e.g. opengear.com): opengear.com
+#   CT log URL [https://ct.googleapis.com/logs/us1/argon2026h1/]:
+#   Starting offset [0]:
+#   Chunk size (entries per block) [500000]:
+#   ...
+#   [+] Downloading entries 0 - 499999
+#   [+] Searching for opengear.com...
+#   [✓] 2 hostname(s) in this chunk, 2 new:
+#       *.opengear.com  (new)
+#       www.opengear.com  (new)
+#   Do you want to keep this 500k-entry chunk? [y/N] n
+#   Search the next block? [Y/n] y
+#
+
+set -Eeuo pipefail
+
+readonly DEFAULT_LOG_URL="https://ct.googleapis.com/logs/us1/argon2026h1/"
+readonly DEFAULT_CHUNK_SIZE=500000
+readonly SCRAPER_REPO="https://github.com/mpalmer/scrape-ct-log"
+
+WORK_DIR="${CT_SEARCH_DIR:-$PWD}"
+TOOLS_DIR="$WORK_DIR/tools"
+CHUNKS_DIR="$WORK_DIR/chunks"
+RESULTS_DIR="$WORK_DIR/results"
+STATE_FILE="$WORK_DIR/.ct-search-state"
+SCRAPER_SRC="$TOOLS_DIR/scrape-ct-log-src"
+SCRAPER="$TOOLS_DIR/scrape-ct-log"
+
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+    GREEN=$'\033[1;32m' YELLOW=$'\033[1;33m' RED=$'\033[1;31m'
+    CYAN=$'\033[1;36m' BLUE=$'\033[1;34m' BOLD=$'\033[1m' DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    GREEN='' YELLOW='' RED='' CYAN='' BLUE='' BOLD='' DIM='' RESET=''
+fi
+
+# Options (-d/-u/-s/-c) and session state
+OPT_DOMAIN='' OPT_URL='' OPT_START='' OPT_CHUNK=''
+DOMAIN='' CT_LOG_URL='' LOG_NAME='' RESULTS_FILE='' PYTHON=''
+TREE_SIZE=0 CHUNK_SIZE=$DEFAULT_CHUNK_SIZE OFFSET=0
+CHUNK_ENTRIES=0 CHUNK_BAD=0 CHUNKS_DONE=0 ENTRIES_SCANNED=0
+SESSION_STARTED=0 SCRAPER_PID='' PARTIAL_FILE='' TMP_DIR=''
+
+# Reads base64 DER certificates (one per line) on stdin and prints every
+# string in the matching ones that contains the domain. A tiny DER walker
+# instead of a regex over raw bytes, so length bytes that happen to be
+# printable never get glued onto a hostname.
+DECODER_PY=$(cat <<'PY'
+import base64, binascii, sys
+
+needle = sys.argv[1].lower().encode("ascii")
+counts_path = sys.argv[2]
+# [2] dNSName (SAN), UTF8String, PrintableString, IA5String
+STRING_TAGS = (0x82, 0x0C, 0x13, 0x16)
+
+def strings(buf, i, end, out, depth=0):
+    while i + 2 <= end:
+        tag, length = buf[i], buf[i + 1]
+        i += 2
+        if tag & 0x1F == 0x1F:  # high-tag-number form: never used in certs
+            return
+        if length & 0x80:
+            n = length & 0x7F
+            if n == 0 or n > 4 or i + n > end:
+                return
+            length = int.from_bytes(buf[i:i + n], "big")
+            i += n
+        j = i + length
+        if j > end:
+            return
+        if tag & 0x20:  # constructed
+            if depth < 32:
+                strings(buf, i, j, out, depth + 1)
+        elif tag in STRING_TAGS:
+            out.append(buf[i:j])
+        elif tag == 0x04 and length and buf[i] == 0x30 and depth < 32:
+            strings(buf, i, j, out, depth + 1)  # extnValue wrapping DER (SAN)
+        i = j
+
+entries = bad = 0
+for line in sys.stdin.buffer:
+    b64 = line.strip()
+    if not b64:
+        continue
+    entries += 1
+    try:
+        der = base64.b64decode(b64 + b"=" * (-len(b64) % 4))
+    except (binascii.Error, ValueError):
+        bad += 1
+        continue
+    if needle not in der.lower():
+        continue
+    found = []
+    strings(der, 0, len(der), found)
+    for s in found:
+        if needle in s.lower():
+            text = s.decode("utf-8", "replace").replace("\r", " ").replace("\n", " ")
+            sys.stdout.write(text + "\n")
+
+with open(counts_path, "w") as f:
+    f.write("%d %d\n" % (entries, bad))
+PY
+)
+
+# ---------------------------------------------------------------- helpers
+
+status()  { printf '%s[+]%s %s\n' "$CYAN" "$RESET" "$*"; }
+success() { printf '%s[✓]%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn()    { printf '%s[!]%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
+err()     { printf '%s[✗]%s %s\n' "$RED" "$RESET" "$*" >&2; }
+die()     { err "$@"; exit 1; }
+
+trim() {
+    local s=$1
+    s=${s#"${s%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    printf '%s' "$s"
+}
+
+rel() { printf '%s' "${1#"$WORK_DIR"/}"; }
+
+count_lines() {
+    local n
+    n=$(wc -l <"$1")
+    printf '%d' "$((n))"
+}
+
+file_size() {
+    local n
+    n=$(wc -c <"$1")
+    printf '%d' "$((n))"
+}
+
+group_digits() {
+    local n=$1 out=''
+    while (( ${#n} > 3 )); do
+        out=",${n: -3}$out"
+        n=${n:0:${#n}-3}
+    done
+    printf '%s' "$n$out"
+}
+
+human_count() {
+    local n=$1
+    if (( n >= 1000000 && n % 1000000 == 0 )); then
+        printf '%dM' $(( n / 1000000 ))
+    elif (( n >= 1000 && n % 1000 == 0 )); then
+        printf '%dk' $(( n / 1000 ))
+    else
+        group_digits "$n"
+    fi
+}
+
+fmt_bytes() {
+    awk -v b="$1" 'BEGIN {
+        if (b >= 1073741824) printf "%.2f GB", b / 1073741824
+        else if (b >= 1048576) printf "%.1f MB", b / 1048576
+        else printf "%d KB", b / 1024
+    }'
+}
+
+fmt_duration() {
+    local s=$1
+    printf '%02d:%02d:%02d' $(( s / 3600 )) $(( s % 3600 / 60 )) $(( s % 60 ))
+}
+
+# version_ge 1.85.1 1.88.0 -> false
+version_ge() {
+    local IFS=. i x y
+    local -a a b
+    a=($1) b=($2)
+    for i in 0 1 2; do
+        x=${a[i]:-0} y=${b[i]:-0}
+        if (( 10#$x > 10#$y )); then return 0; fi
+        if (( 10#$x < 10#$y )); then return 1; fi
+    done
+    return 0
+}
+
+# rg exits 1 when nothing matches; only treat 2+ as a real failure
+rg_soft() { rg --no-config "$@" || [[ $? -eq 1 ]]; }
+
+# ask VAR "question" [default] - Enter keeps the default
+ask() {
+    local __var=$1 __q=$2 __def=${3:-} __reply
+    if [[ -n $__def ]]; then __q+=" [$__def]"; fi
+    printf '%s%s:%s ' "$YELLOW" "$__q" "$RESET"
+    IFS= read -r __reply || die "Input closed, stopping."
+    __reply=$(trim "$__reply")
+    printf -v "$__var" '%s' "${__reply:-$__def}"
+}
+
+# confirm "question" Y|N - returns 0 for yes
+confirm() {
+    local q=$1 def=$2 hint='[y/N]' reply
+    if [[ $def == Y ]]; then hint='[Y/n]'; fi
+    while :; do
+        printf '%s%s %s%s ' "$YELLOW" "$q" "$hint" "$RESET"
+        IFS= read -r reply || die "Input closed, stopping."
+        reply=$(trim "${reply:-$def}")
+        case $reply in
+            [Yy] | [Yy][Ee][Ss]) return 0 ;;
+            [Nn] | [Nn][Oo]) return 1 ;;
+        esac
+        warn "Please answer y or n."
+    done
+}
+
+normalize_domain() {
+    local d re='^([a-z0-9_-]+\.)+[a-z0-9-]+$'
+    d=$(trim "$1" | tr '[:upper:]' '[:lower:]')
+    d=${d#*://}
+    d=${d%%/*}
+    d=${d%%:*}
+    d=${d#\*.}
+    d=${d#.}
+    d=${d%.}
+    [[ $d =~ $re ]] || return 1
+    printf '%s' "$d"
+}
+
+normalize_url() {
+    local u re='^https?://[^/[:space:]]+(/[^[:space:]]*)?$'
+    u=$(trim "$1")
+    u=${u%/}
+    u=${u%/ct/v1/get-sth}
+    [[ $u =~ $re ]] || return 1
+    printf '%s/' "${u%/}"
+}
+
+# https://ct.googleapis.com/logs/us1/argon2026h1/ -> argon2026h1
+# https://oak.ct.letsencrypt.org/2026h1/          -> oak_2026h1
+log_name_from_url() {
+    local u=${1#*://} host path name
+    host=${u%%/*}
+    path=${u#"$host"}
+    path=${path%/}
+    name=${path##*/}
+    if [[ -z $name ]]; then name=${host%%.*}; fi
+    if [[ $name == [0-9]* ]]; then name="${host%%.*}_$name"; fi
+    printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+usage() {
+    cat <<EOF
+${BOLD}ctsearch${RESET} - search a Certificate Transparency log for a domain, block by block
+
+Usage: ctsearch [options]
+
+With no options everything is asked interactively. For every block it
+downloads N entries with scrape-ct-log, decodes the certificates, prints the
+hostnames that match the domain (exact, subdomains, *.wildcards), merges them
+into results/<domain>.txt, saves the resume point and asks whether to keep
+the block and whether to continue.
+
+Options:
+  -d, --domain DOMAIN     domain to search (e.g. opengear.com)
+  -u, --url URL           CT log URL (default: $DEFAULT_LOG_URL)
+  -s, --start OFFSET      first entry to fetch (skips the resume question)
+  -c, --chunk-size N      entries per block (default: $DEFAULT_CHUNK_SIZE)
+  -h, --help              show this help
+
+Files (relative to \$CT_SEARCH_DIR, default: current directory):
+  tools/scrape-ct-log     scraper binary, cloned and built on first run
+  chunks/                 downloaded blocks you chose to keep
+  results/<domain>.txt    unique hostnames found, sorted
+  .ct-search-state        resume point per domain + log
+
+Requirements: curl, rg, python3. First run only: git, cargo, rustc >= 1.88.
+Set NO_COLOR=1 to disable colors. Ctrl+C stops cleanly; progress up to the
+last finished block is kept.
+
+Example:
+  cd ~/ct-work && ctsearch -d opengear.com
+EOF
+}
+
+need_arg() {
+    if [[ $# -lt 2 || -z $2 ]]; then die "Option $1 needs a value (see --help)."; fi
+}
+
+parse_args() {
+    while (( $# > 0 )); do
+        case $1 in
+            -h | --help) usage; exit 0 ;;
+            -d | --domain) need_arg "$@"; OPT_DOMAIN=$2; shift 2 ;;
+            -u | --url) need_arg "$@"; OPT_URL=$2; shift 2 ;;
+            -s | --start)
+                need_arg "$@"
+                [[ $2 =~ ^[0-9]+$ ]] || die "--start needs a non-negative integer."
+                OPT_START=$2; shift 2 ;;
+            -c | --chunk-size)
+                need_arg "$@"
+                [[ $2 =~ ^[1-9][0-9]*$ ]] || die "--chunk-size needs a positive integer."
+                OPT_CHUNK=$2; shift 2 ;;
+            *) die "Unknown option: $1 (see --help)" ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------- traps
+
+on_error() {
+    local rc=$? line=$1 cmd=$2
+    # Errors inside $(...) or pipelines are reported by the parent shell
+    if (( BASH_SUBSHELL == 0 )); then
+        err "Unexpected error (exit $rc) at line $line: $cmd"
+    fi
+}
+
+on_interrupt() {
+    trap - INT TERM HUP
+    printf '\n'
+    warn "Interrupted, stopping."
+    exit 130
+}
+
+print_summary() {
+    local found=0 total=0 saved note line='────────────────────────────────────────────────────────'
+    saved=$(state_lookup)
+    if [[ $saved == "$OFFSET" ]]; then
+        note='next run resumes here'
+    elif [[ -n $saved ]]; then
+        note="saved resume point: $saved"
+    else
+        note='no progress saved yet'
+    fi
+    if [[ -f $TMP_DIR/session ]]; then
+        LC_ALL=C sort -u "$TMP_DIR/session" >"$TMP_DIR/session.u"
+        found=$(count_lines "$TMP_DIR/session.u")
+    fi
+    if [[ -f $RESULTS_FILE ]]; then total=$(count_lines "$RESULTS_FILE"); fi
+    printf '\n%s%s%s\n' "$BLUE" "$line" "$RESET"
+    printf '  %sSummary%s\n' "$BOLD" "$RESET"
+    printf '  %s%-18s%s %s\n' "$CYAN" "Chunks processed" "$RESET" "$CHUNKS_DONE"
+    printf '  %s%-18s%s %s\n' "$CYAN" "Entries scanned" "$RESET" "$(group_digits "$ENTRIES_SCANNED")"
+    printf '  %s%-18s%s %s this session, %s in results file\n' "$CYAN" "Unique domains" "$RESET" "$found" "$total"
+    printf '  %s%-18s%s %s (%s)\n' "$CYAN" "Last offset" "$RESET" "$OFFSET" "$note"
+    printf '  %s%-18s%s %s\n' "$CYAN" "Results file" "$RESET" "$RESULTS_FILE"
+    printf '%s%s%s\n' "$BLUE" "$line" "$RESET"
+}
+
+cleanup() {
+    local rc=$?
+    trap - EXIT ERR INT TERM HUP
+    set +e
+    # The scraper runs in the background, where Ctrl+C doesn't reach it
+    if [[ -n $SCRAPER_PID ]] && kill -0 "$SCRAPER_PID" 2>/dev/null; then
+        printf '\n'
+        kill "$SCRAPER_PID" 2>/dev/null
+        wait "$SCRAPER_PID" 2>/dev/null
+    fi
+    if [[ -n $PARTIAL_FILE && -e $PARTIAL_FILE ]]; then
+        rm -f -- "$PARTIAL_FILE"
+        warn "Removed incomplete download $(rel "$PARTIAL_FILE")"
+    fi
+    if (( SESSION_STARTED )); then print_summary; fi
+    if [[ -n $TMP_DIR && -d $TMP_DIR ]]; then rm -rf -- "$TMP_DIR"; fi
+    exit "$rc"
+}
+
+# ---------------------------------------------------------------- setup
+
+find_scraper() {
+    if [[ -x $SCRAPER ]]; then
+        printf '%s' "$SCRAPER"
+        return 0
+    fi
+    command -v scrape-ct-log 2>/dev/null
+}
+
+check_dependencies() {
+    local cmd missing='' need_build=0
+    if ! find_scraper >/dev/null; then need_build=1; fi
+    printf '%sChecking dependencies%s\n' "$BOLD" "$RESET"
+    for cmd in git cargo curl rg python3; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$cmd"
+        elif [[ $cmd == git || $cmd == cargo ]] && (( ! need_build )); then
+            printf '  %s-%s %s %s(not needed, scraper already built)%s\n' "$YELLOW" "$RESET" "$cmd" "$DIM" "$RESET"
+        else
+            printf '  %s✗%s %s\n' "$RED" "$RESET" "$cmd"
+            missing+=" $cmd"
+        fi
+    done
+    if [[ -n $missing ]]; then
+        err "Missing:$missing"
+        for cmd in $missing; do
+            case $cmd in
+                cargo) warn "cargo: install Rust with rustup -> https://rustup.rs" ;;
+                rg) warn "rg: apt install ripgrep | brew install ripgrep | pacman -S ripgrep" ;;
+                python3) warn "python3: needed to decode certificates (apt install python3 | brew install python)" ;;
+                *) warn "$cmd: install it with your package manager" ;;
+            esac
+        done
+        exit 1
+    fi
+    PYTHON=$(command -v python3)
+}
+
+check_rust_version() {
+    local need have
+    need=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' "$1")
+    command -v rustc >/dev/null 2>&1 || return 0
+    have=$(rustc --version | sed -n 's/^rustc \([0-9][0-9.]*\).*/\1/p')
+    if [[ -z $need || -z $have ]] || version_ge "$have" "$need"; then return 0; fi
+    err "scrape-ct-log needs rustc >= $need, this machine has rustc $have."
+    if command -v rustup >/dev/null 2>&1; then
+        warn "Update it with: rustup update stable"
+    else
+        warn "Distro Rust packages are often too old. Install rustup: https://rustup.rs"
+    fi
+    warn "Then run ctsearch again; the clone in $(rel "$SCRAPER_SRC") is reused."
+    exit 1
+}
+
+install_scraper() {
+    local found
+    if found=$(find_scraper); then
+        SCRAPER=$found
+        success "scrape-ct-log: $SCRAPER"
+        return 0
+    fi
+    status "scrape-ct-log not found, building it once from $SCRAPER_REPO"
+    mkdir -p "$TOOLS_DIR"
+    if [[ -d $SCRAPER_SRC && ! -f $SCRAPER_SRC/Cargo.toml ]]; then
+        warn "Removing incomplete clone $(rel "$SCRAPER_SRC")"
+        rm -rf -- "$SCRAPER_SRC"
+    fi
+    if [[ -d $SCRAPER_SRC ]]; then
+        status "Reusing clone $(rel "$SCRAPER_SRC")"
+    else
+        git clone --depth 1 "$SCRAPER_REPO" "$SCRAPER_SRC" \
+            || die "git clone failed (network down or GitHub unreachable?)."
+    fi
+    check_rust_version "$SCRAPER_SRC/Cargo.toml"
+    status "cargo build --release (a few minutes the first time)"
+    (cd "$SCRAPER_SRC" && cargo build --release) || die "cargo build failed, see the output above."
+    cp "$SCRAPER_SRC/target/release/scrape-ct-log" "$SCRAPER"
+    chmod +x "$SCRAPER"
+    success "Installed $SCRAPER"
+    printf '    %s%s is no longer needed and can be deleted to free space.%s\n' "$DIM" "$(rel "$SCRAPER_SRC")" "$RESET"
+}
+
+# ---------------------------------------------------------------- state
+
+# Most recent entry, as "domain<TAB>url"
+state_last() {
+    [[ -f $STATE_FILE ]] || return 0
+    awk -F'\t' '!/^#/ && NF >= 3 { d = $1; u = $2 } END { if (d != "") printf "%s\t%s\n", d, u }' "$STATE_FILE"
+}
+
+# Saved next offset for DOMAIN + CT_LOG_URL (empty if none)
+state_lookup() {
+    [[ -f $STATE_FILE ]] || return 0
+    D=$DOMAIN U=$CT_LOG_URL awk -F'\t' \
+        '!/^#/ && $1 == ENVIRON["D"] && $2 == ENVIRON["U"] { o = $3 } END { print o }' "$STATE_FILE"
+}
+
+# save_state NEXT_OFFSET - one line per domain + log, newest last
+save_state() {
+    local tmp="$STATE_FILE.tmp.$$"
+    {
+        printf '# ctsearch resume points: domain<TAB>log_url<TAB>next_offset<TAB>updated_epoch\n'
+        if [[ -f $STATE_FILE ]]; then
+            D=$DOMAIN U=$CT_LOG_URL awk -F'\t' \
+                '!/^#/ && NF >= 3 && !($1 == ENVIRON["D"] && $2 == ENVIRON["U"])' "$STATE_FILE"
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$DOMAIN" "$CT_LOG_URL" "$1" "$(date +%s)"
+    } >"$tmp"
+    mv -f -- "$tmp" "$STATE_FILE"
+}
+
+# ---------------------------------------------------------------- CT log
+
+get_tree_size() {
+    local url="${CT_LOG_URL}ct/v1/get-sth" body='' rc=0 size=''
+    status "Querying $url"
+    body=$(curl -fsSL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 \
+        "$url" 2>"$TMP_DIR/curl.err") || rc=$?
+    if (( rc != 0 )); then
+        case $rc in
+            6) err "Could not resolve the host in $CT_LOG_URL" ;;
+            7) err "Could not connect to $CT_LOG_URL" ;;
+            22) err "HTTP error: wrong URL, or not an RFC 6962 CT log (tiled/static logs aren't supported)." ;;
+            28) err "Timed out talking to $CT_LOG_URL" ;;
+            35 | 51 | 58 | 60) err "TLS error talking to $CT_LOG_URL" ;;
+            *) err "curl failed (exit $rc) querying $url" ;;
+        esac
+        if [[ -s $TMP_DIR/curl.err ]]; then awk '!seen[$0]++ { print "    " $0 }' "$TMP_DIR/curl.err" >&2; fi
+        return 1
+    fi
+    if [[ -n $PYTHON ]]; then
+        size=$(printf '%s' "$body" | "$PYTHON" -c '
+import json, sys
+v = json.load(sys.stdin).get("tree_size")
+print(v if isinstance(v, int) and v >= 0 else "")' 2>/dev/null) || size=''
+    else
+        size=$(printf '%s' "$body" | tr -d ' \t\r\n' | sed -n 's/.*"tree_size":\([0-9][0-9]*\).*/\1/p')
+    fi
+    if [[ ! $size =~ ^[0-9]+$ ]]; then
+        err "No tree_size in the answer from $url. Is this really a CT log URL?"
+        return 1
+    fi
+    if (( size == 0 )); then
+        err "This log is empty (tree_size 0)."
+        return 1
+    fi
+    TREE_SIZE=$size
+}
+
+chunk_is_complete() {
+    [[ -s $1 ]] || return 1
+    [[ $(tail -c 2 "$1" | tr -d '\r\n ') == *'}' ]]
+}
+
+show_progress() {
+    local bytes=0
+    [[ -t 1 ]] || return 0
+    if [[ -f $PARTIAL_FILE ]]; then bytes=$(file_size "$PARTIAL_FILE"); fi
+    printf '\r    %s%s elapsed, %s written%s\033[K' "$DIM" \
+        "$(fmt_duration $(( SECONDS - $1 )))" "$(fmt_bytes "$bytes")" "$RESET"
+}
+
+# download_chunk OFFSET COUNT FILE
+download_chunk() {
+    local start=$1 count=$2 file=$3 rc=0 t0=$SECONDS
+    status "Downloading entries $start - $(( start + count - 1 ))"
+    if chunk_is_complete "$file"; then
+        success "Already on disk, reusing $(rel "$file")"
+        return 0
+    fi
+    # Written as .part and renamed when done, so chunks/*.json are always complete
+    PARTIAL_FILE="$file.part"
+    "$SCRAPER" -s "$start" -n "$count" -o "$PARTIAL_FILE" "$CT_LOG_URL" 2>"$TMP_DIR/scraper.log" &
+    SCRAPER_PID=$!
+    while kill -0 "$SCRAPER_PID" 2>/dev/null; do
+        show_progress "$t0"
+        sleep 1
+    done
+    wait "$SCRAPER_PID" || rc=$?
+    SCRAPER_PID=''
+    if [[ -t 1 ]]; then printf '\r\033[K'; fi
+    if (( rc != 0 )); then
+        err "scrape-ct-log failed (exit $rc): network problem, rate limiting or bad log URL."
+        if [[ -s $TMP_DIR/scraper.log ]]; then tail -n 5 "$TMP_DIR/scraper.log" | sed 's/^/    /' >&2; fi
+    elif [[ ! -s $PARTIAL_FILE ]]; then
+        err "scrape-ct-log produced an empty file."
+        rc=1
+    elif ! chunk_is_complete "$PARTIAL_FILE"; then
+        err "The downloaded file is truncated (incomplete JSON)."
+        rc=1
+    fi
+    if (( rc != 0 )); then
+        rm -f -- "$PARTIAL_FILE"
+        PARTIAL_FILE=''
+        return 1
+    fi
+    mv -f -- "$PARTIAL_FILE" "$file"
+    PARTIAL_FILE=''
+    success "Saved $(rel "$file") ($(fmt_bytes "$(file_size "$file")")) in $(fmt_duration $(( SECONDS - t0 )))"
+}
+
+# search_chunk FILE - writes the sorted unique hits to $TMP_DIR/matches
+search_chunk() {
+    local file=$1 re
+    status "Searching for $DOMAIN..."
+    # Whole string must be the domain, a subdomain or a *. wildcard of it
+    re='^(\*\.)?([a-z0-9_-]+\.)*'"$(printf '%s' "$DOMAIN" | sed 's/\./\\./g')"'\.?$'
+    rm -f -- "$TMP_DIR/counts"
+    # The chunk is one huge JSON line: split on commas so every
+    # "certificate":"<base64>" field sits on its own line
+    if ! LC_ALL=C tr ',' '\n' <"$file" \
+        | rg_soft -o -N '"certificate"\s*:\s*"([A-Za-z0-9+/=]+)"' -r '$1' \
+        | "$PYTHON" -c "$DECODER_PY" "$DOMAIN" "$TMP_DIR/counts" \
+        | rg_soft -i -N -e "$re" \
+        | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+        | sed 's/\.$//' \
+        | LC_ALL=C sort -u >"$TMP_DIR/matches"; then
+        err "Searching $(rel "$file") failed."
+        return 1
+    fi
+    read -r CHUNK_ENTRIES CHUNK_BAD <"$TMP_DIR/counts"
+    if (( CHUNK_ENTRIES == 0 )); then
+        err "No certificates found in $(rel "$file"), the file looks corrupt."
+        return 1
+    fi
+    if (( CHUNK_BAD > 0 )); then
+        warn "$CHUNK_BAD entries could not be decoded and were skipped."
+    fi
+}
+
+# Appends this chunk's hits to the results file (sort -u) and prints them
+save_results() {
+    local matches="$TMP_DIR/matches" n new
+    n=$(count_lines "$matches")
+    if (( n == 0 )); then
+        status "No hostnames for $DOMAIN in this chunk."
+        return 0
+    fi
+    touch "$RESULTS_FILE"
+    LC_ALL=C sort -u "$RESULTS_FILE" >"$TMP_DIR/before"
+    LC_ALL=C comm -13 "$TMP_DIR/before" "$matches" >"$TMP_DIR/new"
+    new=$(count_lines "$TMP_DIR/new")
+    cat "$matches" >>"$RESULTS_FILE"
+    LC_ALL=C sort -u -o "$RESULTS_FILE" "$RESULTS_FILE"
+    cat "$matches" >>"$TMP_DIR/session"
+    success "$n hostname(s) in this chunk, $new new:"
+    awk -v g="$GREEN" -v b="$BOLD" -v r="$RESET" \
+        'FILENAME == ARGV[1] { isnew[$0] = 1; next }
+         { printf "    %s%s%s%s\n", g, $0, r, (($0 in isnew) ? "  " b "(new)" r : "") }' \
+        "$TMP_DIR/new" "$matches"
+    status "Saved to $(rel "$RESULTS_FILE")"
+}
+
+# prompt_keep_chunk FILE COUNT
+prompt_keep_chunk() {
+    local file=$1
+    if confirm "Do you want to keep this $(human_count "$2")-entry chunk?" N; then
+        success "Kept $(rel "$file")"
+    else
+        rm -f -- "$file"
+        status "Deleted $(rel "$file")"
+    fi
+}
+
+# ---------------------------------------------------------------- flow
+
+prompt_target() {
+    local last_domain='' last_url='' input url_default
+    IFS=$'\t' read -r last_domain last_url <<<"$(state_last)" || true
+
+    if [[ -n $OPT_DOMAIN ]]; then
+        DOMAIN=$(normalize_domain "$OPT_DOMAIN") || die "Invalid domain: $OPT_DOMAIN"
+    else
+        while :; do
+            ask input "Domain to search (e.g. opengear.com)" "$last_domain"
+            if DOMAIN=$(normalize_domain "$input"); then break; fi
+            warn "'$input' doesn't look like a domain. Try something like example.com"
+        done
+    fi
+
+    url_default=${last_url:-$DEFAULT_LOG_URL}
+    input=$OPT_URL
+    while :; do
+        if [[ -z $input ]]; then ask input "CT log URL" "$url_default"; fi
+        if ! CT_LOG_URL=$(normalize_url "$input"); then
+            warn "Invalid URL '$input' (expected https://host/path/)"
+        elif get_tree_size; then
+            break
+        fi
+        confirm "Try a different CT log URL?" Y || exit 1
+        input=''
+    done
+}
+
+choose_start_offset() {
+    local saved input
+    if [[ -n $OPT_START ]]; then
+        (( OPT_START < TREE_SIZE )) || die "--start $OPT_START is past the end of the log ($TREE_SIZE entries)."
+        OFFSET=$OPT_START
+        return 0
+    fi
+    saved=$(state_lookup)
+    if [[ $saved =~ ^[0-9]+$ ]]; then
+        if (( saved < TREE_SIZE )); then
+            status "Saved progress for $DOMAIN on this log: $(group_digits "$saved") of $(group_digits "$TREE_SIZE") entries done."
+            if confirm "Resume from offset $saved?" Y; then
+                OFFSET=$saved
+                return 0
+            fi
+        else
+            success "$DOMAIN was already searched to the end of this log ($(group_digits "$saved") entries)."
+            confirm "Start over from offset 0?" N || exit 0
+            OFFSET=0
+            return 0
+        fi
+    fi
+    while :; do
+        ask input "Starting offset" 0
+        if [[ $input =~ ^[0-9]+$ ]] && (( input < TREE_SIZE )); then break; fi
+        warn "Enter a number between 0 and $(( TREE_SIZE - 1 ))."
+    done
+    OFFSET=$input
+}
+
+prompt_chunk_size() {
+    local input
+    if [[ -n $OPT_CHUNK ]]; then
+        CHUNK_SIZE=$OPT_CHUNK
+        return 0
+    fi
+    while :; do
+        ask input "Chunk size (entries per block)" "$DEFAULT_CHUNK_SIZE"
+        if [[ $input =~ ^[1-9][0-9]*$ ]]; then break; fi
+        warn "Enter a positive whole number."
+    done
+    CHUNK_SIZE=$input
+}
+
+show_plan() {
+    local line='────────────────────────────────────────────────────────'
+    printf '\n%s%s%s\n' "$BLUE" "$line" "$RESET"
+    printf '  %s%-16s%s %s\n' "$CYAN" "Domain" "$RESET" "$DOMAIN"
+    printf '  %s%-16s%s %s\n' "$CYAN" "CT log URL" "$RESET" "$CT_LOG_URL"
+    printf '  %s%-16s%s %s entries\n' "$CYAN" "Tree size" "$RESET" "$(group_digits "$TREE_SIZE")"
+    printf '  %s%-16s%s %s entries\n' "$CYAN" "Chunk size" "$RESET" "$(group_digits "$CHUNK_SIZE")"
+    printf '  %s%-16s%s %s\n' "$CYAN" "Starting offset" "$RESET" "$(group_digits "$OFFSET")"
+    printf '  %s%-16s%s %s\n' "$CYAN" "Blocks left" "$RESET" \
+        "$(group_digits $(( (TREE_SIZE - OFFSET + CHUNK_SIZE - 1) / CHUNK_SIZE )))"
+    printf '  %s%-16s%s %s\n' "$CYAN" "Results file" "$RESET" "$(rel "$RESULTS_FILE")"
+    printf '%s%s%s\n' "$BLUE" "$line" "$RESET"
+}
+
+run_search_loop() {
+    local count end chunk
+    while (( OFFSET < TREE_SIZE )); do
+        count=$CHUNK_SIZE
+        # Never ask for entries past tree_size
+        if (( OFFSET + count > TREE_SIZE )); then count=$(( TREE_SIZE - OFFSET )); fi
+        end=$(( OFFSET + count ))
+        chunk=$(printf '%s/%s_%010d_%010d.json' "$CHUNKS_DIR" "$LOG_NAME" "$OFFSET" "$end")
+        printf '\n%s━━ Block %s - %s of %s ━━%s\n' "$BLUE" \
+            "$(group_digits "$OFFSET")" "$(group_digits "$end")" "$(group_digits "$TREE_SIZE")" "$RESET"
+        if (( count < CHUNK_SIZE )); then
+            warn "Last block of the log: requesting only $(group_digits "$count") entries."
+        fi
+
+        if ! download_chunk "$OFFSET" "$count" "$chunk"; then
+            if confirm "Retry this block?" Y; then continue; fi
+            break
+        fi
+        if ! search_chunk "$chunk"; then
+            if confirm "Delete $(rel "$chunk") and download it again?" Y; then
+                rm -f -- "$chunk"
+                continue
+            fi
+            break
+        fi
+        if (( CHUNK_ENTRIES != count )); then
+            warn "Expected $count entries but the chunk holds $CHUNK_ENTRIES."
+        fi
+        save_results
+        save_state "$end"
+        OFFSET=$end
+        CHUNKS_DONE=$(( CHUNKS_DONE + 1 ))
+        ENTRIES_SCANNED=$(( ENTRIES_SCANNED + CHUNK_ENTRIES ))
+
+        prompt_keep_chunk "$chunk" "$count"
+        if (( OFFSET >= TREE_SIZE )); then
+            success "Reached the end of the log ($(group_digits "$TREE_SIZE") entries)."
+            break
+        fi
+        confirm "Search the next block?" Y || break
+    done
+}
+
+main() {
+    parse_args "$@"
+    trap cleanup EXIT
+    trap on_interrupt INT TERM HUP
+    trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
+    TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ctsearch.XXXXXX")
+
+    printf '%s%sctsearch%s - Certificate Transparency search with scrape-ct-log\n\n' "$BOLD" "$BLUE" "$RESET"
+    check_dependencies
+    install_scraper
+    mkdir -p "$CHUNKS_DIR" "$RESULTS_DIR"
+
+    prompt_target
+    LOG_NAME=$(log_name_from_url "$CT_LOG_URL")
+    RESULTS_FILE="$RESULTS_DIR/$DOMAIN.txt"
+    choose_start_offset
+    prompt_chunk_size
+    show_plan
+
+    SESSION_STARTED=1
+    run_search_loop
+}
+
+main "$@"
