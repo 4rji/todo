@@ -1,0 +1,59 @@
+#!/bin/bash
+
+PROC="$1"
+
+if [ -z "$PROC" ]; then
+    echo "Usage: $0 <process_name>"
+    exit 1
+fi
+
+echo "[*] Waiting for process: $PROC"
+
+while true; do
+    PID=$(pgrep -n -x "$PROC" 2>/dev/null)
+
+    if [ -n "$PID" ]; then
+        OUT="process_${PROC}_$(date +%Y%m%d_%H%M%S).txt"
+
+        {
+            echo "=== PROCESS DETECTED ==="
+            echo "Time: $(date)"
+            echo
+
+            echo "=== PROCESS ==="
+            ps -ww -p "$PID" -o pid,ppid,user,start,time,command
+
+            echo
+            echo "=== PARENT CHAIN ==="
+
+            CURRENT="$PID"
+
+            while [ "$CURRENT" -gt 1 ] 2>/dev/null; do
+                ps -ww -p "$CURRENT" -o pid,ppid,user,command
+
+                CURRENT=$(ps -p "$CURRENT" -o ppid= 2>/dev/null | tr -d ' ')
+
+                [ -z "$CURRENT" ] && break
+            done
+
+            echo
+            echo "=== NETWORK CONNECTIONS ==="
+            lsof -nP -a -p "$PID" -i 2>/dev/null
+
+            echo
+            echo "=== OPEN FILES ==="
+            lsof -nP -p "$PID" 2>/dev/null
+
+            echo
+            echo "=== EXECUTABLE / CWD ==="
+            lsof -p "$PID" 2>/dev/null | grep -E ' cwd | txt '
+
+        } | tee "$OUT"
+
+        echo
+        echo "[+] Saved to: $OUT"
+        exit 0
+    fi
+
+    sleep 0.1
+done

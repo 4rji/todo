@@ -1367,6 +1367,20 @@
             "Prompts to run the test immediately, defaulting to yes, or prints the command to run it later."
         ]
     },
+    "processwatch": {
+        "name": "processwatch",
+        "short_desc": "Waits for a named process and saves its details, parent chain, network connections, and open files.",
+        "detailed_desc": [
+            "Usage: processwatch <process_name>.",
+            "Polls every 0.1 seconds using pgrep with an exact process-name match and selects the newest matching process.",
+            "",
+            "Captures the detection time, process details, and parent chain up to but excluding PID 1.",
+            "Uses lsof to list network connections, open files, executable mappings, and the current working directory.",
+            "",
+            "Prints the report and saves it in the current directory as process_<process_name>_YYYYMMDD_HHMMSS.txt.",
+            "Exits after the first capture; requires pgrep, ps, and lsof, and visibility depends on permissions and whether the process is still running."
+        ]
+    },
     "voces": {
         "name": "voces",
         "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
