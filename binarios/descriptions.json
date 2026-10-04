@@ -1369,16 +1369,17 @@
     },
     "processwatch": {
         "name": "processwatch",
-        "short_desc": "Waits for a named process and saves its details, parent chain, network connections, and open files.",
+        "short_desc": "Continuously watches a named process and logs its command, details, parent chain, connections, and files.",
         "detailed_desc": [
             "Usage: processwatch <process_name>.",
-            "Polls every 0.1 seconds using pgrep with an exact process-name match and selects the newest matching process.",
+            "Polls every 0.1 seconds using pgrep with an exact process-name match and captures each newly observed matching PID once while it remains present.",
             "",
-            "Captures the detection time, process details, and parent chain up to but excluding PID 1.",
+            "Captures the detection time as HH:MM:SS, the full process command, process details, and parent chain up to but excluding PID 1.",
+            "Displays the diagnostic command beside each process, parent, network, file, and executable section heading.",
             "Uses lsof to list network connections, open files, executable mappings, and the current working directory.",
             "",
-            "Prints the report and saves it in the current directory as process_<process_name>_YYYYMMDD_HHMMSS.txt.",
-            "Exits after the first capture; requires pgrep, ps, and lsof, and visibility depends on permissions and whether the process is still running."
+            "Prints reports and appends them to a log in the current directory as process_<process_name>_HH-MM-SS.txt, using the time of the first capture.",
+            "Continues monitoring until Ctrl+C; requires pgrep, ps, and lsof, and visibility depends on permissions and whether the process is still running."
         ]
     },
     "voces": {
