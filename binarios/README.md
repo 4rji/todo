@@ -19,7 +19,7 @@ decloak.py          File decloaking tool to identify possible rootkit-based cont
 copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
 galletapython       Serves galleta.js and logs base64 cookie callbacks for lab testing.
 processdecloak      Busca procesos ocultos en linux
-processwatch        Waits for a named process and saves its details, parent chain, network connections, and open files.
+processwatch        Continuously watches a named process and logs its command, details, parent chain, connections, and files.
 tlscheck            TLS cert check using SHA256 Useful for detecting TLS interception - MITM.
 ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
 

@@ -8,19 +8,34 @@ if [ -z "$PROC" ]; then
 fi
 
 echo "[*] Waiting for process: $PROC"
+echo "[*] Monitoring continuously; press Ctrl+C to stop."
+
+PREVIOUS_PIDS=" "
+OUT=""
 
 while true; do
-    PID=$(pgrep -n -x "$PROC" 2>/dev/null)
+    PIDS=$(pgrep -x "$PROC" 2>/dev/null)
+    CURRENT_PIDS=" "
 
-    if [ -n "$PID" ]; then
-        OUT="process_${PROC}_$(date +%Y%m%d_%H%M%S).txt"
+    while IFS= read -r PID; do
+        [ -z "$PID" ] && continue
+        CURRENT_PIDS="$CURRENT_PIDS$PID "
+        case "$PREVIOUS_PIDS" in
+            *" $PID "*) continue ;;
+        esac
+
+        COMMAND=$(ps -ww -p "$PID" -o command= 2>/dev/null)
+        if [ -z "$OUT" ]; then
+            OUT="process_${PROC}_$(date +%H-%M-%S).txt"
+        fi
 
         {
             echo "=== PROCESS DETECTED ==="
-            echo "Time: $(date)"
+            echo "Time: $(date +%H:%M:%S)"
+            printf 'Command: %s\n' "${COMMAND:-Unavailable (process exited before capture)}"
             echo
 
-            echo "=== PROCESS ==="
+            printf '=== PROCESS: ps -ww -p %s -o pid,ppid,user,start,time,command ===\n' "$PID"
             ps -ww -p "$PID" -o pid,ppid,user,start,time,command
 
             echo
@@ -29,31 +44,33 @@ while true; do
             CURRENT="$PID"
 
             while [ "$CURRENT" -gt 1 ] 2>/dev/null; do
+                printf '=== ps -ww -p %s -o pid,ppid,user,command ===\n' "$CURRENT"
                 ps -ww -p "$CURRENT" -o pid,ppid,user,command
 
+                printf '=== ps -p %s -o ppid= | tr -d '\'' '\'' ===\n' "$CURRENT"
                 CURRENT=$(ps -p "$CURRENT" -o ppid= 2>/dev/null | tr -d ' ')
 
                 [ -z "$CURRENT" ] && break
             done
 
             echo
-            echo "=== NETWORK CONNECTIONS ==="
+            printf '=== NETWORK CONNECTIONS: lsof -nP -a -p %s -i ===\n' "$PID"
             lsof -nP -a -p "$PID" -i 2>/dev/null
 
             echo
-            echo "=== OPEN FILES ==="
+            printf '=== OPEN FILES: lsof -nP -p %s ===\n' "$PID"
             lsof -nP -p "$PID" 2>/dev/null
 
             echo
-            echo "=== EXECUTABLE / CWD ==="
+            printf '=== EXECUTABLE / CWD: lsof -p %s | grep -E '\'' cwd | txt '\'' ===\n' "$PID"
             lsof -p "$PID" 2>/dev/null | grep -E ' cwd | txt '
 
-        } | tee "$OUT"
+        } | tee -a "$OUT"
 
         echo
         echo "[+] Saved to: $OUT"
-        exit 0
-    fi
+    done <<< "$PIDS"
 
+    PREVIOUS_PIDS="$CURRENT_PIDS"
     sleep 0.1
 done
