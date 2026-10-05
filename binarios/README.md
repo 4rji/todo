@@ -224,7 +224,7 @@ xleakinst           Para ver xcel, cvs  archivos como xls y similares en termina
 #DNS o ips 
 cleanips            Extrae ips, dominios y urls de archivos, limpia y cuenta sort uniq 
 ctfr                Enumera dominios, con -d starbucks.com por ejemplo o -o output
-ctsearch            Busca dominios o listas (-d archivo) en logs CT por bloques; -a auto (8s), resume, results/ y ayuda a color con guia de espacio/tiempo
+ctsearch            Busca dominios o listas (-d archivo) en logs CT por bloques; -a auto (8s), resume y -r muestra/guarda DNS y origen en results_clean.md
 dnsquad             Verifica si quad9 se usa, consulta whois Ip propia y externa de consultas
 dnsleak             Consulta si el dns se esta saliendo
 dnscom              Comandos de dns para cosas
@@ -575,7 +575,7 @@ sshautoscript       Abre un tunel SSH inverso a una maquina, ella accede a tu SS
 shtb                Syncroniza carpetas con rsync entre servidores, para htb vmqemu
 mackali	            Cambia la MAC de kali
 ctfr                Enumera dominios, con -d starbucks.com por ejemplo o -o output
-ctsearch            Busca dominios o listas (-d archivo) en logs CT por bloques; -a auto (8s), resume, results/ y ayuda a color con guia de espacio/tiempo
+ctsearch            Busca dominios o listas (-d archivo) en logs CT por bloques; -a auto (8s), resume y -r muestra/guarda DNS y origen en results_clean.md
 ultrascan           varios escaneos, menu y todo
 nmap-full           Create a html file with full scan of network
 sship               ippsec sshpass el para pasar iniciar ssh sin mensajes ni autorizacion Ippsec

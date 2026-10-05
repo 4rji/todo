@@ -11,6 +11,8 @@
 # results/<domain>.txt, progress is saved after every block so a later run can
 # resume. Normal mode asks whether to keep each block; --auto deletes it
 # after 8 seconds without a reply and continues to the next block.
+# Use -r to resolve saved hostnames and print/save results_clean.md without
+# downloading any more CT entries. Report mode also needs dig, paste and tee.
 #
 # Why decode at all? scrape-ct-log writes certificates as base64 DER, so the
 # hostnames never show up as plain text in the chunk file and a plain grep
@@ -21,6 +23,7 @@
 #   tools/scrape-ct-log    scraper binary, built once and then reused
 #   chunks/                downloaded blocks (only the ones you keep)
 #   results/<domain>.txt   every unique hostname found so far
+#   results_clean.md       DNS answers and source file/line listing (-r)
 #   .ct-search-state       resume point per domain + log
 #
 # Needs curl, rg and python3. The first run also needs git, cargo and
@@ -75,7 +78,7 @@ fi
 # Options (-d/-u/-s/-c) and session state
 OPT_DOMAIN_SPECS=() DOMAINS=()
 OPT_URL='' OPT_START='' OPT_CHUNK=''
-AUTO_MODE=0
+AUTO_MODE=0 REPORT_MODE=0
 DOMAIN='' CT_LOG_URL='' LOG_NAME='' RESULTS_FILE='' PYTHON=''
 TREE_SIZE=0 CHUNK_SIZE=$DEFAULT_CHUNK_SIZE OFFSET=0
 CHUNK_ENTRIES=0 CHUNK_BAD=0 CHUNKS_DONE=0 ENTRIES_SCANNED=0
@@ -440,15 +443,18 @@ ${BOLD}${BLUE}Options:${RESET}
   ${YELLOW}-s, --start${RESET} OFFSET      first entry to fetch (skips the resume question)
   ${YELLOW}-c, --chunk-size${RESET} N      entries per block (default: $DEFAULT_CHUNK_SIZE)
   ${YELLOW}-a, --auto${RESET}              use 8-second defaults: delete block, continue
+  ${YELLOW}-r, --results${RESET}           report existing results only; no CT downloads
   ${YELLOW}-h, --help${RESET}              show this help
 
 ${BOLD}${BLUE}Files${RESET} (relative to \$CT_SEARCH_DIR, default: current directory):
   ${CYAN}tools/scrape-ct-log${RESET}     scraper binary, cloned and built on first run
   ${CYAN}chunks/${RESET}                 downloaded blocks you chose to keep
   ${CYAN}results/<domain>.txt${RESET}    unique hostnames found, sorted
+  ${CYAN}results_clean.md${RESET}        DNS answers and source file/line listing (-r)
   ${CYAN}.ct-search-state${RESET}        resume point per domain + log
 
 ${BOLD}${BLUE}Requirements:${RESET} curl, rg, python3. First run only: git, cargo, rustc >= 1.88.
+Report mode (-r) needs dig, rg, cat, sort, paste and tee; no scraper is needed.
 Set NO_COLOR=1 to disable colors. Ctrl+C stops cleanly; progress up to the
 last finished block is kept.
 
@@ -459,6 +465,14 @@ ${BOLD}${BLUE}Examples:${RESET}
   ${CYAN}ctsearch -d ./inventory -c 10000${RESET}
   ${CYAN}ctsearch -d example.com -d "./my hosts.list"${RESET}
   ${CYAN}ctsearch --auto -d ./inventory -c 10000${RESET}
+  ${CYAN}ctsearch -r${RESET}
+
+${BOLD}${BLUE}Saved results report (-r):${RESET}
+  Reads all results/*.txt under the current directory or \$CT_SEARCH_DIR.
+  Resolves each unique hostname with dig +short, skipping *.wildcards.
+  Also lists results/ entries with their source filenames and line numbers.
+  Displays both sections and replaces results_clean.md on each run.
+  This mode uses saved results only; search options do not start a CT scan.
 
 ${BOLD}${BLUE}Automatic block mode (--auto):${RESET}
   Matches and progress are saved before the block prompts.
@@ -495,6 +509,7 @@ parse_args() {
         case $1 in
             -h | --help) usage; exit 0 ;;
             -a | --auto) AUTO_MODE=1; shift ;;
+            -r | --results) REPORT_MODE=1; shift ;;
             -d | --domain) need_arg "$@"; OPT_DOMAIN_SPECS+=("$2"); shift 2 ;;
             -u | --url) need_arg "$@"; OPT_URL=$2; shift 2 ;;
             -s | --start)
@@ -508,6 +523,40 @@ parse_args() {
             *) die "Unknown option: $1 (see --help)" ;;
         esac
     done
+}
+
+# Print both requested result views as one Markdown report.
+write_results_report() {
+    local host answers
+    printf '# CT search results\n\n## DNS answers\n\n'
+    printf 'Unique hostnames; wildcards skipped. Empty DNS answers do not prove a host is inactive.\n\n```text\n'
+    while IFS= read -r host || [[ -n $host ]]; do
+        [[ -z $host || $host == \*.* ]] && continue
+        printf '%-45s ' "$host"
+        if answers=$(dig +short "$host" | paste -sd, -); then
+            printf '%s\n' "${answers:-(no DNS answer)}"
+        else
+            printf '(DNS query failed)\n'
+        fi
+    done <"$TMP_DIR/report-hosts"
+    printf '```\n\n## Source files and line numbers\n\n```text\n'
+    (cd "$WORK_DIR" && rg_soft --color never -n --no-heading '.' results/)
+    printf '```\n'
+}
+
+report_results() {
+    local cmd file
+    local -a files=()
+    for cmd in dig rg cat sort paste tee; do
+        command -v "$cmd" >/dev/null 2>&1 || die "Report mode needs $cmd; install it with your package manager."
+    done
+    for file in "$RESULTS_DIR"/*.txt; do
+        [[ -f $file ]] && files+=("$file")
+    done
+    (( ${#files[@]} > 0 )) || die "No results/*.txt files found in $WORK_DIR. Run a CT search first."
+    cat -- "${files[@]}" | LC_ALL=C sort -u >"$TMP_DIR/report-hosts"
+    write_results_report | tee "$WORK_DIR/results_clean.md"
+    status "Saved to results_clean.md"
 }
 
 # ---------------------------------------------------------------- traps
@@ -1039,6 +1088,10 @@ main() {
     trap on_interrupt INT TERM HUP
     trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
     TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ctsearch.XXXXXX")
+    if (( REPORT_MODE )); then
+        report_results
+        return 0
+    fi
     prepare_input
 
     printf '%s%sctsearch%s - Certificate Transparency search with scrape-ct-log\n\n' "$BOLD" "$BLUE" "$RESET"
