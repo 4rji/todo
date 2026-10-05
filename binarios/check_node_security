@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 
 # Read-only remote security snapshot for a Lighthouse node.
-# Usage: ./check_node_security.sh [host] [timeout_seconds]
+# Usage: ./check_node_security.sh [--all] [host] [timeout_seconds]
+#   --all  also show every command executed and the full algorithm lists.
 #
 # This script performs unauthenticated, non-destructive network checks only.
 
 set -uo pipefail
 export LC_ALL=C
 
-TARGET="${1:-10.0.84.19}"
-CONNECT_TIMEOUT="${2:-5}"
+SHOW_ALL=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --all) SHOW_ALL=1 ;;
+    *)     POSITIONAL+=("$arg") ;;
+  esac
+done
+
+TARGET="${POSITIONAL[0]:-10.0.84.19}"
+CONNECT_TIMEOUT="${POSITIONAL[1]:-5}"
 
 if [[ "$TARGET" == -* || ! "$TARGET" =~ ^[A-Za-z0-9.-]+$ ]]; then
   printf 'Error: invalid IPv4 address or hostname: %s\n' "$TARGET" >&2
@@ -36,10 +46,10 @@ if [[ -z "${NO_COLOR:-}" && ( -t 1 || "${FORCE_COLOR:-0}" == '1' ) ]]; then
   RED=$'\033[1;91m'
   GREEN=$'\033[1;92m'
   YELLOW=$'\033[1;93m'
-  BLUE=$'\033[1;94m'
-  MAGENTA=$'\033[1;95m'
-  CYAN=$'\033[1;96m'
+  BLUE=$'\033[1;38;5;33m'
+  ORANGE=$'\033[1;38;5;208m'
   WHITE=$'\033[1;97m'
+  TEXT=$'\033[97m'
   BOLD=$'\033[1m'
   DIM=$'\033[2m'
   RESET=$'\033[0m'
@@ -48,9 +58,9 @@ else
   GREEN=''
   YELLOW=''
   BLUE=''
-  MAGENTA=''
-  CYAN=''
+  ORANGE=''
   WHITE=''
+  TEXT=''
   BOLD=''
   DIM=''
   RESET=''
@@ -86,12 +96,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 section() {
-  printf '\n%s%s╔═ %s%s\n' "$BOLD" "$CYAN" "$1" "$RESET"
+  printf '\n%s╔═ %s%s\n' "$ORANGE" "$1" "$RESET"
 }
 
+# Command echo is verbose output: only shown with --all.
 show_command() {
+  (( SHOW_ALL )) || return 0
   local argument
-  printf '  %s%sCommand:%s' "$BOLD" "$MAGENTA" "$RESET"
+  printf '  %sCommand:%s' "$ORANGE" "$RESET"
   for argument in "$@"; do
     printf ' %s%q%s' "$BLUE" "$argument" "$RESET"
   done
@@ -99,43 +111,46 @@ show_command() {
 }
 
 show_command_stdin() {
+  (( SHOW_ALL )) || return 0
   show_command "$@"
-  printf '  %s%sstdin:%s %s/dev/null%s\n' "$DIM" "$MAGENTA" "$RESET" "$BLUE" "$RESET"
+  printf '  %sstdin:%s %s/dev/null%s\n' "$ORANGE" "$RESET" "$BLUE" "$RESET"
 }
 
 show_command_line() {
-  printf '  %s%sCommand:%s %s%s%s\n' "$BOLD" "$MAGENTA" "$RESET" "$BLUE" "$1" "$RESET"
+  (( SHOW_ALL )) || return 0
+  printf '  %sCommand:%s %s%s%s\n' "$ORANGE" "$RESET" "$BLUE" "$1" "$RESET"
 }
 
 show_manual_command() {
-  printf '  %s%sOn-node follow-up (not executed):%s %s%s%s\n' \
-    "$BOLD" "$MAGENTA" "$RESET" "$BLUE" "$1" "$RESET"
+  (( SHOW_ALL )) || return 0
+  printf '  %sOn-node follow-up (not executed):%s %s%s%s\n' \
+    "$ORANGE" "$RESET" "$BLUE" "$1" "$RESET"
 }
 
 field() {
   local label="$1"
   local value="${2:-}"
   if [[ -n "$value" ]]; then
-    printf '  %s%-27s%s %s%s%s\n' "$CYAN" "$label" "$RESET" "$BLUE" "$value" "$RESET"
+    printf '  %s%-27s%s %s%s%s\n' "$ORANGE" "$label" "$RESET" "$BLUE" "$value" "$RESET"
   else
-    printf '  %s%-27s%s %snot available%s\n' "$CYAN" "$label" "$RESET" "$YELLOW" "$RESET"
+    printf '  %s%-27s%s %snot available%s\n' "$ORANGE" "$label" "$RESET" "$YELLOW" "$RESET"
   fi
 }
 
 pass() {
-  printf '  %s[PASS]%s %s\n' "$GREEN" "$RESET" "$1"
+  printf '  %s[PASS]%s %s%s%s\n' "$GREEN" "$RESET" "$TEXT" "$1" "$RESET"
 }
 
 warn() {
-  printf '  %s[WARN]%s %s\n' "$YELLOW" "$RESET" "$1"
+  printf '  %s[WARN]%s %s%s%s\n' "$YELLOW" "$RESET" "$TEXT" "$1" "$RESET"
 }
 
 fail() {
-  printf '  %s[FAIL]%s %s\n' "$RED" "$RESET" "$1"
+  printf '  %s[FAIL]%s %s%s%s\n' "$RED" "$RESET" "$TEXT" "$1" "$RESET"
 }
 
 info() {
-  printf '  %s[INFO]%s %s\n' "$MAGENTA" "$RESET" "$1"
+  printf '  %s[INFO]%s %s%s%s\n' "$BLUE" "$RESET" "$TEXT" "$1" "$RESET"
 }
 
 header_value() {
@@ -218,9 +233,9 @@ negotiated_transport=''
 fips_tls_result='not tested'
 fips_ssh_result='not tested'
 
-printf '%s%s╔══════════════════════════════════════════════════════════════╗%s\n' "$BOLD" "$CYAN" "$RESET"
-printf '%s%s║              LIGHTHOUSE REMOTE SECURITY AUDIT              ║%s\n' "$BOLD" "$WHITE" "$RESET"
-printf '%s%s╚══════════════════════════════════════════════════════════════╝%s\n' "$BOLD" "$CYAN" "$RESET"
+printf '%s╔══════════════════════════════════════════════════════════════╗%s\n' "$ORANGE" "$RESET"
+printf '%s║%s              LIGHTHOUSE REMOTE SECURITY AUDIT              %s║%s\n' "$ORANGE" "$WHITE" "$ORANGE" "$RESET"
+printf '%s╚══════════════════════════════════════════════════════════════╝%s\n' "$ORANGE" "$RESET"
 field 'Target' "$TARGET"
 field 'UTC date' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 field 'Mode' 'Unauthenticated / read-only'
@@ -635,10 +650,12 @@ field 'Negotiated host key' "$negotiated_hostkey"
 field 'Negotiated transport' "$negotiated_transport"
 field 'Server host fingerprint' "$ssh_fingerprint"
 field 'Authentication methods' "$ssh_auth_methods"
-field 'Offered KEX' "$server_kex"
-field 'Offered host keys' "$server_hostkeys"
-field 'Offered ciphers' "$server_ciphers"
-field 'Offered MACs' "$server_macs"
+if (( SHOW_ALL )); then
+  field 'Offered KEX' "$server_kex"
+  field 'Offered host keys' "$server_hostkeys"
+  field 'Offered ciphers' "$server_ciphers"
+  field 'Offered MACs' "$server_macs"
+fi
 
 ssh_proposal="$server_kex,$server_hostkeys,$server_ciphers,$server_macs"
 if [[ -n "$server_kex" && -n "$server_ciphers" ]] &&
