@@ -24,22 +24,22 @@
 #
 # Needs curl, rg and python3. The first run also needs git, cargo and
 # rustc >= 1.88 to build the scraper (distro Rust is often too old; use rustup).
-# Use -d example.com,example.org or -d ./domains.txt (one domain per line)
+# Use -d example.com,example.net or -d ./targets.txt (one domain per line)
 # to search several domains in the same download. --help includes a block
 # size guide with approximate disk usage and reference download times.
 #
 # Example:
 #   $ ctsearch
-#   Domain(s) or file (e.g. opengear.com): opengear.com
+#   Domain(s) or file (e.g. example.com): example.com
 #   CT log URL [https://ct.googleapis.com/logs/us1/argon2026h1/]:
 #   Starting offset [0]:
 #   Chunk size (entries per block) [500000]:
 #   ...
 #   [+] Downloading entries 0 - 499999
-#   [+] Searching for opengear.com...
-#   [✓] opengear.com: 2 hostname(s) in this chunk, 2 new:
-#       *.opengear.com  (new)
-#       www.opengear.com  (new)
+#   [+] Searching for example.com...
+#   [✓] example.com: 2 hostname(s) in this chunk, 2 new:
+#       *.example.com  (new)
+#       www.example.com  (new)
 #   Do you want to keep this 500k-entry chunk? [y/N] n
 #   Search the next block? [Y/n] y
 #
@@ -214,11 +214,12 @@ reference_download_time() {
 
 show_chunk_guide() {
     local n
-    printf '\n%sChoosing entries per block%s\n' "$BOLD" "$RESET"
-    printf '  %-14s %-16s %s\n' 'Entries' 'Approx. disk' 'Reference download time (HH:MM:SS)'
+    printf '\n%s%sChoosing entries per block%s\n' "$BOLD" "$BLUE" "$RESET"
+    printf '%s  %-14s %-16s %s%s\n' "$BOLD" 'Entries' 'Approx. disk' 'Reference download time (HH:MM:SS)' "$RESET"
     for n in 10000 100000 500000 1000000; do
-        printf '  %-14s %-16s %s\n' "$(group_digits "$n")" \
-            "$(fmt_bytes $(( n * EST_BYTES_PER_ENTRY )))" "$(reference_download_time "$n")"
+        printf '  %s%-14s%s %s%-16s%s %s%s%s\n' "$CYAN" "$(group_digits "$n")" "$RESET" \
+            "$GREEN" "$(fmt_bytes $(( n * EST_BYTES_PER_ENTRY )))" "$RESET" \
+            "$YELLOW" "$(reference_download_time "$n")" "$RESET"
     done
     printf '\n  Disk assumes about %s bytes per entry; certificate sizes vary.\n' "$EST_BYTES_PER_ENTRY"
     printf '  Times assume %s-%s entries/second; these are extrapolations, not full-block benchmarks.\n' \
@@ -315,7 +316,8 @@ add_domain() {
     DOMAINS+=("$d")
 }
 
-# An existing file means one domain per line; otherwise accept a comma list.
+# Any readable regular file works, regardless of its name or extension.
+# Read one domain per line from a file; otherwise accept a comma list.
 load_domain_spec() {
     local spec=$1 line d item remaining line_no=0 file_domains=0
     if [[ -f $spec ]]; then
@@ -398,9 +400,9 @@ log_name_from_url() {
 
 usage() {
     cat <<EOF
-${BOLD}ctsearch${RESET} - search a Certificate Transparency log for domains, block by block
+${BOLD}${BLUE}ctsearch${RESET} - search a Certificate Transparency log for domains, block by block
 
-Usage: ctsearch [options]
+${BOLD}${CYAN}Usage:${RESET} ctsearch [options]
 
 With no options everything is asked interactively. For every block it
 downloads N entries with scrape-ct-log, decodes the certificates, prints the
@@ -408,35 +410,39 @@ hostnames that match the domain (exact, subdomains, *.wildcards), merges them
 into results/<domain>.txt, saves the resume point and asks whether to keep
 the block and whether to continue.
 
-Options:
-  -d, --domain TARGET     domain, comma-separated domains, or a domain file
+${BOLD}${BLUE}Options:${RESET}
+  ${YELLOW}-d, --domain${RESET} TARGET     domain, comma-separated domains, or any text file
                          repeat -d to combine several targets
-  -u, --url URL           CT log URL (default: $DEFAULT_LOG_URL)
-  -s, --start OFFSET      first entry to fetch (skips the resume question)
-  -c, --chunk-size N      entries per block (default: $DEFAULT_CHUNK_SIZE)
-  -h, --help              show this help
+  ${YELLOW}-u, --url${RESET} URL           CT log URL (default: $DEFAULT_LOG_URL)
+  ${YELLOW}-s, --start${RESET} OFFSET      first entry to fetch (skips the resume question)
+  ${YELLOW}-c, --chunk-size${RESET} N      entries per block (default: $DEFAULT_CHUNK_SIZE)
+  ${YELLOW}-h, --help${RESET}              show this help
 
-Files (relative to \$CT_SEARCH_DIR, default: current directory):
-  tools/scrape-ct-log     scraper binary, cloned and built on first run
-  chunks/                 downloaded blocks you chose to keep
-  results/<domain>.txt    unique hostnames found, sorted
-  .ct-search-state        resume point per domain + log
+${BOLD}${BLUE}Files${RESET} (relative to \$CT_SEARCH_DIR, default: current directory):
+  ${CYAN}tools/scrape-ct-log${RESET}     scraper binary, cloned and built on first run
+  ${CYAN}chunks/${RESET}                 downloaded blocks you chose to keep
+  ${CYAN}results/<domain>.txt${RESET}    unique hostnames found, sorted
+  ${CYAN}.ct-search-state${RESET}        resume point per domain + log
 
-Requirements: curl, rg, python3. First run only: git, cargo, rustc >= 1.88.
+${BOLD}${BLUE}Requirements:${RESET} curl, rg, python3. First run only: git, cargo, rustc >= 1.88.
 Set NO_COLOR=1 to disable colors. Ctrl+C stops cleanly; progress up to the
 last finished block is kept.
 
-Example:
-  cd ~/ct-work && ctsearch -d opengear.com
-  ctsearch -d digi.com,opengear.com -c 10000
-  ctsearch -d ./domains.txt -c 100000
-  ctsearch -d digi.com -d ./domains.txt
+${BOLD}${BLUE}Examples:${RESET}
+  ${CYAN}ctsearch -d example.com${RESET}
+  ${CYAN}ctsearch -d example.com,example.net -c 10000${RESET}
+  ${CYAN}ctsearch -d ./targets.txt -c 100000${RESET}
+  ${CYAN}ctsearch -d ./inventory -c 10000${RESET}
+  ${CYAN}ctsearch -d example.com -d "./my hosts.list"${RESET}
 
-Domain file format (one domain per line):
-  # Blank lines and # comments are ignored; inline comments are allowed.
-  digi.com
-  opengear.com
-  example.org  # optional comment
+${BOLD}${BLUE}Text file format${RESET} (one domain per line):
+  ${DIM}# Blank lines and # comments are ignored; inline comments are allowed.${RESET}
+  ${GREEN}alpha.example.net${RESET}
+  ${GREEN}beta.example.net${RESET}
+  ${GREEN}gamma.example.net${RESET}  ${DIM}# optional comment${RESET}
+
+Any filename and extension are accepted, including files with no extension.
+A bare filename or a path works; quote filenames or paths containing spaces.
 
 Duplicates are removed, names are normalized, and each block is downloaded
 and decoded once for all domains. Results go to results/<domain>.txt.
@@ -788,7 +794,7 @@ save_domain_results() {
     local domain=$1 matches=$2 file="$RESULTS_DIR/$1.txt" n new
     n=$(count_lines "$matches")
     if (( n == 0 )); then
-        status "No hostnames for $domain in this chunk."
+        printf '%s[+] No hostnames for %s in this chunk.%s\n' "$GREEN" "$domain" "$RESET"
         return 0
     fi
     touch "$file"
@@ -798,8 +804,8 @@ save_domain_results() {
     cat "$matches" >>"$file"
     LC_ALL=C sort -u -o "$file" "$file"
     cat "$matches" >>"$TMP_DIR/session"
-    success "$domain: $n hostname(s) in this chunk, $new new:"
-    awk -v g="$GREEN" -v b="$BOLD" -v r="$RESET" \
+    printf '%s[✓] %s: %s hostname(s) in this chunk, %s new:%s\n' "$BLUE" "$domain" "$n" "$new" "$RESET"
+    awk -v g="$BLUE" -v b="$BOLD" -v r="$RESET" \
         'FILENAME == ARGV[1] { isnew[$0] = 1; next }
          { printf "    %s%s%s%s\n", g, $0, r, (($0 in isnew) ? "  " b "(new)" r : "") }' \
         "$TMP_DIR/new" "$matches"
@@ -837,7 +843,7 @@ prompt_target() {
         done
     else
         while :; do
-            ask input "Domain(s) or file (e.g. opengear.com)" "$last_domain"
+            ask input "Domain(s) or file (e.g. example.com)" "$last_domain"
             DOMAINS=()
             if load_domain_spec "$input"; then break; fi
         done
