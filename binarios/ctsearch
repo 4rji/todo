@@ -9,7 +9,8 @@
 # the names inside it (subject CN + SAN dNSNames) against a domain, its
 # subdomains and wildcards (*.example.com). Hits are deduplicated into
 # results/<domain>.txt, progress is saved after every block so a later run can
-# resume, and a downloaded block is never deleted without asking first.
+# resume. Normal mode asks whether to keep each block; --auto deletes it
+# after 8 seconds without a reply and continues to the next block.
 #
 # Why decode at all? scrape-ct-log writes certificates as base64 DER, so the
 # hostnames never show up as plain text in the chunk file and a plain grep
@@ -48,6 +49,7 @@ set -Eeuo pipefail
 
 readonly DEFAULT_LOG_URL="https://ct.googleapis.com/logs/us1/argon2026h1/"
 readonly DEFAULT_CHUNK_SIZE=500000
+readonly AUTO_REPLY_TIMEOUT=8
 readonly SCRAPER_REPO="https://github.com/mpalmer/scrape-ct-log"
 # Planning assumptions, not measured guarantees for a particular CT log.
 readonly EST_BYTES_PER_ENTRY=1700
@@ -73,6 +75,7 @@ fi
 # Options (-d/-u/-s/-c) and session state
 OPT_DOMAIN_SPECS=() DOMAINS=()
 OPT_URL='' OPT_START='' OPT_CHUNK=''
+AUTO_MODE=0
 DOMAIN='' CT_LOG_URL='' LOG_NAME='' RESULTS_FILE='' PYTHON=''
 TREE_SIZE=0 CHUNK_SIZE=$DEFAULT_CHUNK_SIZE OFFSET=0
 CHUNK_ENTRIES=0 CHUNK_BAD=0 CHUNKS_DONE=0 ENTRIES_SCANNED=0
@@ -276,14 +279,34 @@ ask() {
     printf -v "$__var" '%s' "${__reply:-$__def}"
 }
 
-# confirm "question" Y|N - returns 0 for yes
+# confirm "question" Y|N [timeout] - returns 0 for yes. A timed prompt uses
+# its default on timeout or closed input; invalid replies share one deadline.
 confirm() {
-    local q=$1 def=$2 hint='[y/N]' reply
-    if [[ $def == Y ]]; then hint='[Y/n]'; fi
+    local q=$1 def=$2 timeout=${3:-0} hint='[y/N]' reply
+    local deadline=0 remaining=0 default_word='no'
+    if [[ $def == Y ]]; then hint='[Y/n]'; default_word='yes'; fi
+    if (( timeout > 0 )); then deadline=$(( SECONDS + timeout )); fi
     while :; do
         prepare_input
-        printf '%s%s %s%s ' "$YELLOW" "$q" "$hint" "$RESET"
-        IFS= read -e -r reply || die "Input closed, stopping."
+        if (( timeout > 0 )); then
+            remaining=$(( deadline - SECONDS ))
+            if (( remaining < 0 )); then remaining=0; fi
+            printf '%s%s %s (default %s in %ss)%s ' "$YELLOW" "$q" "$hint" \
+                "$default_word" "$remaining" "$RESET"
+            if (( remaining > 0 )) && IFS= read -e -r -t "$remaining" reply; then
+                :
+            else
+                # A timeout can leave partial text in reply. Only a complete
+                # answer overrides the default.
+                printf '\n'
+                status "No complete reply; choosing $default_word."
+                [[ $def == Y ]]
+                return
+            fi
+        else
+            printf '%s%s %s%s ' "$YELLOW" "$q" "$hint" "$RESET"
+            IFS= read -e -r reply || die "Input closed, stopping."
+        fi
         reply=$(trim "${reply:-$def}")
         case $reply in
             [Yy] | [Yy][Ee][Ss]) return 0 ;;
@@ -416,6 +439,7 @@ ${BOLD}${BLUE}Options:${RESET}
   ${YELLOW}-u, --url${RESET} URL           CT log URL (default: $DEFAULT_LOG_URL)
   ${YELLOW}-s, --start${RESET} OFFSET      first entry to fetch (skips the resume question)
   ${YELLOW}-c, --chunk-size${RESET} N      entries per block (default: $DEFAULT_CHUNK_SIZE)
+  ${YELLOW}-a, --auto${RESET}              use 8-second defaults: delete block, continue
   ${YELLOW}-h, --help${RESET}              show this help
 
 ${BOLD}${BLUE}Files${RESET} (relative to \$CT_SEARCH_DIR, default: current directory):
@@ -434,6 +458,14 @@ ${BOLD}${BLUE}Examples:${RESET}
   ${CYAN}ctsearch -d ./targets.txt -c 100000${RESET}
   ${CYAN}ctsearch -d ./inventory -c 10000${RESET}
   ${CYAN}ctsearch -d example.com -d "./my hosts.list"${RESET}
+  ${CYAN}ctsearch --auto -d ./inventory -c 10000${RESET}
+
+${BOLD}${BLUE}Automatic block mode (--auto):${RESET}
+  Matches and progress are saved before the block prompts.
+  Reply within 8 seconds to keep a block or stop before the next one.
+  Without a complete reply: delete the processed block and continue.
+  Closed input applies those defaults immediately. Ctrl+C stops the search.
+  Setup, resume and error prompts remain interactive.
 
 ${BOLD}${BLUE}Text file format${RESET} (one domain per line):
   ${DIM}# Blank lines and # comments are ignored; inline comments are allowed.${RESET}
@@ -462,6 +494,7 @@ parse_args() {
     while (( $# > 0 )); do
         case $1 in
             -h | --help) usage; exit 0 ;;
+            -a | --auto) AUTO_MODE=1; shift ;;
             -d | --domain) need_arg "$@"; OPT_DOMAIN_SPECS+=("$2"); shift 2 ;;
             -u | --url) need_arg "$@"; OPT_URL=$2; shift 2 ;;
             -s | --start)
@@ -822,8 +855,9 @@ save_results() {
 
 # prompt_keep_chunk FILE COUNT
 prompt_keep_chunk() {
-    local file=$1
-    if confirm "Do you want to keep this $(human_count "$2")-entry chunk?" N; then
+    local file=$1 timeout=0
+    if (( AUTO_MODE )); then timeout=$AUTO_REPLY_TIMEOUT; fi
+    if confirm "Do you want to keep this $(human_count "$2")-entry chunk?" N "$timeout"; then
         success "Kept $(rel "$file")"
     else
         rm -f -- "$file"
@@ -946,13 +980,18 @@ show_plan() {
     free=$(available_disk_bytes)
     if [[ -n $free ]]; then printf '  %s%-16s%s %s\n' "$CYAN" "Free disk" "$RESET" "$(fmt_bytes "$free")"; fi
     printf '  %s%-16s%s %s\n' "$CYAN" "Results" "$RESET" "$(rel "$(results_label)")"
+    if (( AUTO_MODE )); then
+        printf '  %s%-16s%s delete block / continue after %ss without a reply\n' \
+            "$CYAN" "Automatic mode" "$RESET" "$AUTO_REPLY_TIMEOUT"
+    fi
     printf '  Estimates use %s bytes/entry and %s-%s entries/s; sizes and speed vary.\n' \
         "$EST_BYTES_PER_ENTRY" "$REF_SLOW_ENTRIES_PER_SEC" "$REF_FAST_ENTRIES_PER_SEC"
     printf '%s%s%s\n' "$BLUE" "$line" "$RESET"
 }
 
 run_search_loop() {
-    local count end chunk
+    local count end chunk timeout=0
+    if (( AUTO_MODE )); then timeout=$AUTO_REPLY_TIMEOUT; fi
     while (( OFFSET < TREE_SIZE )); do
         count=$CHUNK_SIZE
         # Never ask for entries past tree_size
@@ -990,7 +1029,7 @@ run_search_loop() {
             success "Reached the end of the log ($(group_digits "$TREE_SIZE") entries)."
             break
         fi
-        confirm "Search the next block?" Y || break
+        confirm "Search the next block?" Y "$timeout" || break
     done
 }
 
