@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ctsearch - search a Certificate Transparency log for a domain, one chunk at a time
+# ctsearch - search a Certificate Transparency log for domains, one chunk at a time
 #
 # README
 # ------
@@ -24,17 +24,20 @@
 #
 # Needs curl, rg and python3. The first run also needs git, cargo and
 # rustc >= 1.88 to build the scraper (distro Rust is often too old; use rustup).
+# Use -d example.com,example.org or -d ./domains.txt (one domain per line)
+# to search several domains in the same download. --help includes a block
+# size guide with approximate disk usage and reference download times.
 #
 # Example:
 #   $ ctsearch
-#   Domain to search (e.g. opengear.com): opengear.com
+#   Domain(s) or file (e.g. opengear.com): opengear.com
 #   CT log URL [https://ct.googleapis.com/logs/us1/argon2026h1/]:
 #   Starting offset [0]:
 #   Chunk size (entries per block) [500000]:
 #   ...
 #   [+] Downloading entries 0 - 499999
 #   [+] Searching for opengear.com...
-#   [✓] 2 hostname(s) in this chunk, 2 new:
+#   [✓] opengear.com: 2 hostname(s) in this chunk, 2 new:
 #       *.opengear.com  (new)
 #       www.opengear.com  (new)
 #   Do you want to keep this 500k-entry chunk? [y/N] n
@@ -46,6 +49,10 @@ set -Eeuo pipefail
 readonly DEFAULT_LOG_URL="https://ct.googleapis.com/logs/us1/argon2026h1/"
 readonly DEFAULT_CHUNK_SIZE=500000
 readonly SCRAPER_REPO="https://github.com/mpalmer/scrape-ct-log"
+# Planning assumptions, not measured guarantees for a particular CT log.
+readonly EST_BYTES_PER_ENTRY=1700
+readonly REF_FAST_ENTRIES_PER_SEC=500
+readonly REF_SLOW_ENTRIES_PER_SEC=125
 
 WORK_DIR="${CT_SEARCH_DIR:-$PWD}"
 TOOLS_DIR="$WORK_DIR/tools"
@@ -64,20 +71,25 @@ else
 fi
 
 # Options (-d/-u/-s/-c) and session state
-OPT_DOMAIN='' OPT_URL='' OPT_START='' OPT_CHUNK=''
+OPT_DOMAIN_SPECS=() DOMAINS=()
+OPT_URL='' OPT_START='' OPT_CHUNK=''
 DOMAIN='' CT_LOG_URL='' LOG_NAME='' RESULTS_FILE='' PYTHON=''
 TREE_SIZE=0 CHUNK_SIZE=$DEFAULT_CHUNK_SIZE OFFSET=0
 CHUNK_ENTRIES=0 CHUNK_BAD=0 CHUNKS_DONE=0 ENTRIES_SCANNED=0
 SESSION_STARTED=0 SCRAPER_PID='' PARTIAL_FILE='' TMP_DIR=''
+TERMINAL_STATE=''
+PRESERVE_SAVED_PROGRESS=0
 
 # Reads base64 DER certificates (one per line) on stdin and prints every
-# string in the matching ones that contains the domain. A tiny DER walker
+# string in the matching ones that contains a selected domain. A tiny DER walker
 # instead of a regex over raw bytes, so length bytes that happen to be
 # printable never get glued onto a hostname.
 DECODER_PY=$(cat <<'PY'
-import base64, binascii, sys
+import base64, binascii, re, sys
 
-needle = sys.argv[1].lower().encode("ascii")
+with open(sys.argv[1], encoding="ascii") as f:
+    needles = [re.escape(line.strip().encode("ascii")) for line in f if line.strip()]
+needle_re = re.compile(b"|".join(needles), re.IGNORECASE)
 counts_path = sys.argv[2]
 # [2] dNSName (SAN), UTF8String, PrintableString, IA5String
 STRING_TAGS = (0x82, 0x0C, 0x13, 0x16)
@@ -117,12 +129,12 @@ for line in sys.stdin.buffer:
     except (binascii.Error, ValueError):
         bad += 1
         continue
-    if needle not in der.lower():
+    if not needle_re.search(der):
         continue
     found = []
     strings(der, 0, len(der), found)
     for s in found:
-        if needle in s.lower():
+        if needle_re.search(s):
             text = s.decode("utf-8", "replace").replace("\r", " ").replace("\n", " ")
             sys.stdout.write(text + "\n")
 
@@ -193,6 +205,49 @@ fmt_duration() {
     printf '%02d:%02d:%02d' $(( s / 3600 )) $(( s % 3600 / 60 )) $(( s % 60 ))
 }
 
+reference_download_time() {
+    local n=$1
+    printf '%s - %s' \
+        "$(fmt_duration $(( (n + REF_FAST_ENTRIES_PER_SEC - 1) / REF_FAST_ENTRIES_PER_SEC )))" \
+        "$(fmt_duration $(( (n + REF_SLOW_ENTRIES_PER_SEC - 1) / REF_SLOW_ENTRIES_PER_SEC )))"
+}
+
+show_chunk_guide() {
+    local n
+    printf '\n%sChoosing entries per block%s\n' "$BOLD" "$RESET"
+    printf '  %-14s %-16s %s\n' 'Entries' 'Approx. disk' 'Reference download time (HH:MM:SS)'
+    for n in 10000 100000 500000 1000000; do
+        printf '  %-14s %-16s %s\n' "$(group_digits "$n")" \
+            "$(fmt_bytes $(( n * EST_BYTES_PER_ENTRY )))" "$(reference_download_time "$n")"
+    done
+    printf '\n  Disk assumes about %s bytes per entry; certificate sizes vary.\n' "$EST_BYTES_PER_ENTRY"
+    printf '  Times assume %s-%s entries/second; these are extrapolations, not full-block benchmarks.\n' \
+        "$REF_SLOW_ENTRIES_PER_SEC" "$REF_FAST_ENTRIES_PER_SEC"
+    printf '  Network speed and CT rate limits can change the time; decoding adds more time.\n'
+    printf '  Start with 10,000 to measure your setup, then try 100,000 or 500,000.\n'
+    printf '  Results appear after the whole block is downloaded and decoded.\n'
+    printf '  Leave extra disk space for temporary files; keeping blocks adds their sizes.\n'
+    printf '  Several domains share the same downloaded block.\n\n'
+}
+
+available_disk_bytes() {
+    local blocks
+    blocks=$(df -Pk "$CHUNKS_DIR" 2>/dev/null | awk 'NR == 2 { print $4 }') || return 0
+    [[ $blocks =~ ^[0-9]+$ ]] || return 0
+    printf '%s' "$(( blocks * 1024 ))"
+}
+
+# Readline handles cursor/delete keys; echo must also be enabled if a previous
+# program left the terminal in no-echo/raw mode. Restore the caller's mode on exit.
+prepare_input() {
+    [[ -t 0 ]] || return 0
+    command -v stty >/dev/null 2>&1 || return 0
+    if [[ -z $TERMINAL_STATE ]]; then
+        TERMINAL_STATE=$(stty -g 2>/dev/null) || return 0
+    fi
+    stty echo icanon 2>/dev/null || true
+}
+
 # version_ge 1.85.1 1.88.0 -> false
 version_ge() {
     local IFS=. i x y
@@ -213,8 +268,9 @@ rg_soft() { rg --no-config "$@" || [[ $? -eq 1 ]]; }
 ask() {
     local __var=$1 __q=$2 __def=${3:-} __reply
     if [[ -n $__def ]]; then __q+=" [$__def]"; fi
+    prepare_input
     printf '%s%s:%s ' "$YELLOW" "$__q" "$RESET"
-    IFS= read -r __reply || die "Input closed, stopping."
+    IFS= read -e -r __reply || die "Input closed, stopping."
     __reply=$(trim "$__reply")
     printf -v "$__var" '%s' "${__reply:-$__def}"
 }
@@ -224,8 +280,9 @@ confirm() {
     local q=$1 def=$2 hint='[y/N]' reply
     if [[ $def == Y ]]; then hint='[Y/n]'; fi
     while :; do
+        prepare_input
         printf '%s%s %s%s ' "$YELLOW" "$q" "$hint" "$RESET"
-        IFS= read -r reply || die "Input closed, stopping."
+        IFS= read -e -r reply || die "Input closed, stopping."
         reply=$(trim "${reply:-$def}")
         case $reply in
             [Yy] | [Yy][Ee][Ss]) return 0 ;;
@@ -246,6 +303,75 @@ normalize_domain() {
     d=${d%.}
     [[ $d =~ $re ]] || return 1
     printf '%s' "$d"
+}
+
+add_domain() {
+    local d=$1 existing
+    if (( ${#DOMAINS[@]} > 0 )); then
+        for existing in "${DOMAINS[@]}"; do
+            [[ $existing == "$d" ]] && return 0
+        done
+    fi
+    DOMAINS+=("$d")
+}
+
+# An existing file means one domain per line; otherwise accept a comma list.
+load_domain_spec() {
+    local spec=$1 line d item remaining line_no=0 file_domains=0
+    if [[ -f $spec ]]; then
+        [[ -r $spec ]] || { warn "Cannot read domain file: $spec"; return 1; }
+        while IFS= read -r line || [[ -n $line ]]; do
+            line_no=$(( line_no + 1 ))
+            line=$(trim "${line%%#*}")
+            [[ -n $line ]] || continue
+            if ! d=$(normalize_domain "$line"); then
+                warn "Invalid domain in $spec at line $line_no (use one domain per line)."
+                return 1
+            fi
+            file_domains=$(( file_domains + 1 ))
+            add_domain "$d"
+        done <"$spec"
+        if (( file_domains == 0 )); then
+            warn "Domain file is empty: $spec"
+            return 1
+        fi
+    elif [[ -e $spec || $spec == /* || $spec == ./* || $spec == ../* ]]; then
+        warn "Domain file not found or not a regular file: $spec"
+        return 1
+    else
+        remaining=$spec
+        while :; do
+            item=${remaining%%,*}
+            if ! d=$(normalize_domain "$item"); then
+                warn "Invalid domain: $(printf '%q' "$item"). Use example.com or a domain file."
+                return 1
+            fi
+            add_domain "$d"
+            [[ $remaining == *,* ]] || break
+            remaining=${remaining#*,}
+        done
+    fi
+}
+
+domain_pattern() {
+    printf '%s%s%s' '^(\*\.)?([a-z0-9_-]+\.)*' \
+        "$(printf '%s' "$1" | sed 's/\./\\./g')" '\.?$'
+}
+
+domain_label() {
+    local d sep=''
+    for d in "${DOMAINS[@]}"; do
+        printf '%s%s' "$sep" "$d"
+        sep=', '
+    done
+}
+
+results_label() {
+    if (( ${#DOMAINS[@]} == 1 )); then
+        printf '%s' "$RESULTS_FILE"
+    else
+        printf '%s/ (%s domain files)' "$RESULTS_DIR" "${#DOMAINS[@]}"
+    fi
 }
 
 normalize_url() {
@@ -272,7 +398,7 @@ log_name_from_url() {
 
 usage() {
     cat <<EOF
-${BOLD}ctsearch${RESET} - search a Certificate Transparency log for a domain, block by block
+${BOLD}ctsearch${RESET} - search a Certificate Transparency log for domains, block by block
 
 Usage: ctsearch [options]
 
@@ -283,7 +409,8 @@ into results/<domain>.txt, saves the resume point and asks whether to keep
 the block and whether to continue.
 
 Options:
-  -d, --domain DOMAIN     domain to search (e.g. opengear.com)
+  -d, --domain TARGET     domain, comma-separated domains, or a domain file
+                         repeat -d to combine several targets
   -u, --url URL           CT log URL (default: $DEFAULT_LOG_URL)
   -s, --start OFFSET      first entry to fetch (skips the resume question)
   -c, --chunk-size N      entries per block (default: $DEFAULT_CHUNK_SIZE)
@@ -301,7 +428,24 @@ last finished block is kept.
 
 Example:
   cd ~/ct-work && ctsearch -d opengear.com
+  ctsearch -d digi.com,opengear.com -c 10000
+  ctsearch -d ./domains.txt -c 100000
+  ctsearch -d digi.com -d ./domains.txt
+
+Domain file format (one domain per line):
+  # Blank lines and # comments are ignored; inline comments are allowed.
+  digi.com
+  opengear.com
+  example.org  # optional comment
+
+Duplicates are removed, names are normalized, and each block is downloaded
+and decoded once for all domains. Results go to results/<domain>.txt.
+For several domains, resume uses the earliest saved offset. A new domain
+starts at 0 by default so earlier matches are not skipped.
+Shared resume keeps any domain's more advanced saved progress. Use --start
+or decline resume to deliberately restart from an earlier offset.
 EOF
+    show_chunk_guide
 }
 
 need_arg() {
@@ -312,7 +456,7 @@ parse_args() {
     while (( $# > 0 )); do
         case $1 in
             -h | --help) usage; exit 0 ;;
-            -d | --domain) need_arg "$@"; OPT_DOMAIN=$2; shift 2 ;;
+            -d | --domain) need_arg "$@"; OPT_DOMAIN_SPECS+=("$2"); shift 2 ;;
             -u | --url) need_arg "$@"; OPT_URL=$2; shift 2 ;;
             -s | --start)
                 need_arg "$@"
@@ -345,9 +489,15 @@ on_interrupt() {
 }
 
 print_summary() {
-    local found=0 total=0 saved note line='────────────────────────────────────────────────────────'
+    local found=0 total=0 saved candidate d same_saved=1 note line='────────────────────────────────────────────────────────'
     saved=$(state_lookup)
-    if [[ $saved == "$OFFSET" ]]; then
+    for d in "${DOMAINS[@]}"; do
+        candidate=$(state_lookup "$d")
+        if [[ $candidate != "$saved" ]]; then same_saved=0; break; fi
+    done
+    if (( ! same_saved )); then
+        note='saved offsets differ; resume uses the earliest (0 for a new domain)'
+    elif [[ $saved == "$OFFSET" ]]; then
         note='next run resumes here'
     elif [[ -n $saved ]]; then
         note="saved resume point: $saved"
@@ -358,14 +508,19 @@ print_summary() {
         LC_ALL=C sort -u "$TMP_DIR/session" >"$TMP_DIR/session.u"
         found=$(count_lines "$TMP_DIR/session.u")
     fi
-    if [[ -f $RESULTS_FILE ]]; then total=$(count_lines "$RESULTS_FILE"); fi
+    : >"$TMP_DIR/all-results"
+    for d in "${DOMAINS[@]}"; do
+        if [[ -f $RESULTS_DIR/$d.txt ]]; then cat "$RESULTS_DIR/$d.txt" >>"$TMP_DIR/all-results"; fi
+    done
+    LC_ALL=C sort -u "$TMP_DIR/all-results" >"$TMP_DIR/all-results.u"
+    total=$(count_lines "$TMP_DIR/all-results.u")
     printf '\n%s%s%s\n' "$BLUE" "$line" "$RESET"
     printf '  %sSummary%s\n' "$BOLD" "$RESET"
     printf '  %s%-18s%s %s\n' "$CYAN" "Chunks processed" "$RESET" "$CHUNKS_DONE"
     printf '  %s%-18s%s %s\n' "$CYAN" "Entries scanned" "$RESET" "$(group_digits "$ENTRIES_SCANNED")"
-    printf '  %s%-18s%s %s this session, %s in results file\n' "$CYAN" "Unique domains" "$RESET" "$found" "$total"
+    printf '  %s%-18s%s %s this session, %s in results files\n' "$CYAN" "Unique hostnames" "$RESET" "$found" "$total"
     printf '  %s%-18s%s %s (%s)\n' "$CYAN" "Last offset" "$RESET" "$OFFSET" "$note"
-    printf '  %s%-18s%s %s\n' "$CYAN" "Results file" "$RESET" "$RESULTS_FILE"
+    printf '  %s%-18s%s %s\n' "$CYAN" "Results" "$RESET" "$(results_label)"
     printf '%s%s%s\n' "$BLUE" "$line" "$RESET"
 }
 
@@ -385,6 +540,7 @@ cleanup() {
     fi
     if (( SESSION_STARTED )); then print_summary; fi
     if [[ -n $TMP_DIR && -d $TMP_DIR ]]; then rm -rf -- "$TMP_DIR"; fi
+    if [[ -n $TERMINAL_STATE ]]; then stty "$TERMINAL_STATE" 2>/dev/null; fi
     exit "$rc"
 }
 
@@ -479,23 +635,33 @@ state_last() {
     awk -F'\t' '!/^#/ && NF >= 3 { d = $1; u = $2 } END { if (d != "") printf "%s\t%s\n", d, u }' "$STATE_FILE"
 }
 
-# Saved next offset for DOMAIN + CT_LOG_URL (empty if none)
+# Saved next offset for a domain + CT_LOG_URL (empty if none)
 state_lookup() {
     [[ -f $STATE_FILE ]] || return 0
-    D=$DOMAIN U=$CT_LOG_URL awk -F'\t' \
+    D=${1:-$DOMAIN} U=$CT_LOG_URL awk -F'\t' \
         '!/^#/ && $1 == ENVIRON["D"] && $2 == ENVIRON["U"] { o = $3 } END { print o }' "$STATE_FILE"
 }
 
 # save_state NEXT_OFFSET - one line per domain + log, newest last
 save_state() {
-    local tmp="$STATE_FILE.tmp.$$"
+    local tmp="$STATE_FILE.tmp.$$" d updated next saved
+    updated=$(date +%s)
     {
         printf '# ctsearch resume points: domain<TAB>log_url<TAB>next_offset<TAB>updated_epoch\n'
         if [[ -f $STATE_FILE ]]; then
-            D=$DOMAIN U=$CT_LOG_URL awk -F'\t' \
-                '!/^#/ && NF >= 3 && !($1 == ENVIRON["D"] && $2 == ENVIRON["U"])' "$STATE_FILE"
+            U=$CT_LOG_URL awk -F'\t' \
+                'FILENAME == ARGV[1] { domains[$1] = 1; next }
+                 !/^#/ && NF >= 3 && !(($1 in domains) && $2 == ENVIRON["U"])' \
+                "$TMP_DIR/domains" "$STATE_FILE"
         fi
-        printf '%s\t%s\t%s\t%s\n' "$DOMAIN" "$CT_LOG_URL" "$1" "$(date +%s)"
+        for d in "${DOMAINS[@]}"; do
+            next=$1
+            if (( PRESERVE_SAVED_PROGRESS )); then
+                saved=$(state_lookup "$d")
+                if [[ $saved =~ ^[0-9]+$ ]] && (( saved > next )); then next=$saved; fi
+            fi
+            printf '%s\t%s\t%s\t%s\n' "$d" "$CT_LOG_URL" "$next" "$updated"
+        done
     } >"$tmp"
     mv -f -- "$tmp" "$STATE_FILE"
 }
@@ -592,17 +758,15 @@ download_chunk() {
 
 # search_chunk FILE - writes the sorted unique hits to $TMP_DIR/matches
 search_chunk() {
-    local file=$1 re
-    status "Searching for $DOMAIN..."
-    # Whole string must be the domain, a subdomain or a *. wildcard of it
-    re='^(\*\.)?([a-z0-9_-]+\.)*'"$(printf '%s' "$DOMAIN" | sed 's/\./\\./g')"'\.?$'
+    local file=$1
+    status "Searching for $(domain_label)..."
     rm -f -- "$TMP_DIR/counts"
     # The chunk is one huge JSON line: split on commas so every
     # "certificate":"<base64>" field sits on its own line
     if ! LC_ALL=C tr ',' '\n' <"$file" \
         | rg_soft -o -N '"certificate"\s*:\s*"([A-Za-z0-9+/=]+)"' -r '$1' \
-        | "$PYTHON" -c "$DECODER_PY" "$DOMAIN" "$TMP_DIR/counts" \
-        | rg_soft -i -N -e "$re" \
+        | "$PYTHON" -c "$DECODER_PY" "$TMP_DIR/domains" "$TMP_DIR/counts" \
+        | rg_soft -i -N -f "$TMP_DIR/domain-patterns" \
         | LC_ALL=C tr '[:upper:]' '[:lower:]' \
         | sed 's/\.$//' \
         | LC_ALL=C sort -u >"$TMP_DIR/matches"; then
@@ -619,27 +783,35 @@ search_chunk() {
     fi
 }
 
-# Appends this chunk's hits to the results file (sort -u) and prints them
-save_results() {
-    local matches="$TMP_DIR/matches" n new
+# Appends this chunk's hits to one domain's results file and prints them
+save_domain_results() {
+    local domain=$1 matches=$2 file="$RESULTS_DIR/$1.txt" n new
     n=$(count_lines "$matches")
     if (( n == 0 )); then
-        status "No hostnames for $DOMAIN in this chunk."
+        status "No hostnames for $domain in this chunk."
         return 0
     fi
-    touch "$RESULTS_FILE"
-    LC_ALL=C sort -u "$RESULTS_FILE" >"$TMP_DIR/before"
+    touch "$file"
+    LC_ALL=C sort -u "$file" >"$TMP_DIR/before"
     LC_ALL=C comm -13 "$TMP_DIR/before" "$matches" >"$TMP_DIR/new"
     new=$(count_lines "$TMP_DIR/new")
-    cat "$matches" >>"$RESULTS_FILE"
-    LC_ALL=C sort -u -o "$RESULTS_FILE" "$RESULTS_FILE"
+    cat "$matches" >>"$file"
+    LC_ALL=C sort -u -o "$file" "$file"
     cat "$matches" >>"$TMP_DIR/session"
-    success "$n hostname(s) in this chunk, $new new:"
+    success "$domain: $n hostname(s) in this chunk, $new new:"
     awk -v g="$GREEN" -v b="$BOLD" -v r="$RESET" \
         'FILENAME == ARGV[1] { isnew[$0] = 1; next }
          { printf "    %s%s%s%s\n", g, $0, r, (($0 in isnew) ? "  " b "(new)" r : "") }' \
         "$TMP_DIR/new" "$matches"
-    status "Saved to $(rel "$RESULTS_FILE")"
+    status "Saved to $(rel "$file")"
+}
+
+save_results() {
+    local d
+    for d in "${DOMAINS[@]}"; do
+        rg_soft -i -N -e "$(domain_pattern "$d")" "$TMP_DIR/matches" >"$TMP_DIR/domain-matches"
+        save_domain_results "$d" "$TMP_DIR/domain-matches"
+    done
 }
 
 # prompt_keep_chunk FILE COUNT
@@ -656,18 +828,27 @@ prompt_keep_chunk() {
 # ---------------------------------------------------------------- flow
 
 prompt_target() {
-    local last_domain='' last_url='' input url_default
+    local last_domain='' last_url='' input url_default spec d
     IFS=$'\t' read -r last_domain last_url <<<"$(state_last)" || true
 
-    if [[ -n $OPT_DOMAIN ]]; then
-        DOMAIN=$(normalize_domain "$OPT_DOMAIN") || die "Invalid domain: $OPT_DOMAIN"
+    if (( ${#OPT_DOMAIN_SPECS[@]} > 0 )); then
+        for spec in "${OPT_DOMAIN_SPECS[@]}"; do
+            load_domain_spec "$spec" || die "Could not load domains from: $spec"
+        done
     else
         while :; do
-            ask input "Domain to search (e.g. opengear.com)" "$last_domain"
-            if DOMAIN=$(normalize_domain "$input"); then break; fi
-            warn "'$input' doesn't look like a domain. Try something like example.com"
+            ask input "Domain(s) or file (e.g. opengear.com)" "$last_domain"
+            DOMAINS=()
+            if load_domain_spec "$input"; then break; fi
         done
     fi
+    DOMAIN=${DOMAINS[0]}
+    printf '%s\n' "${DOMAINS[@]}" >"$TMP_DIR/domains"
+    : >"$TMP_DIR/domain-patterns"
+    for d in "${DOMAINS[@]}"; do
+        domain_pattern "$d" >>"$TMP_DIR/domain-patterns"
+        printf '\n' >>"$TMP_DIR/domain-patterns"
+    done
 
     url_default=${last_url:-$DEFAULT_LOG_URL}
     input=$OPT_URL
@@ -684,26 +865,39 @@ prompt_target() {
 }
 
 choose_start_offset() {
-    local saved input
+    local saved='' candidate input d all_saved=1
     if [[ -n $OPT_START ]]; then
         (( OPT_START < TREE_SIZE )) || die "--start $OPT_START is past the end of the log ($TREE_SIZE entries)."
         OFFSET=$OPT_START
         return 0
     fi
-    saved=$(state_lookup)
-    if [[ $saved =~ ^[0-9]+$ ]]; then
+    # A shared block must start at the earliest saved offset. Any new domain
+    # needs offset 0; rescanning other domains is safe because hits deduplicate.
+    for d in "${DOMAINS[@]}"; do
+        candidate=$(state_lookup "$d")
+        if [[ ! $candidate =~ ^[0-9]+$ ]]; then
+            all_saved=0
+        elif [[ -z $saved ]] || (( candidate < saved )); then
+            saved=$candidate
+        fi
+    done
+    if (( all_saved )) && [[ -n $saved ]]; then
         if (( saved < TREE_SIZE )); then
-            status "Saved progress for $DOMAIN on this log: $(group_digits "$saved") of $(group_digits "$TREE_SIZE") entries done."
+            status "Saved progress for $(domain_label): earliest offset $(group_digits "$saved") of $(group_digits "$TREE_SIZE")."
             if confirm "Resume from offset $saved?" Y; then
                 OFFSET=$saved
+                PRESERVE_SAVED_PROGRESS=1
                 return 0
             fi
         else
-            success "$DOMAIN was already searched to the end of this log ($(group_digits "$saved") entries)."
+            success "All selected domains were already searched to the end of this log ($(group_digits "$saved") entries)."
             confirm "Start over from offset 0?" N || exit 0
             OFFSET=0
             return 0
         fi
+    elif (( ${#DOMAINS[@]} > 1 )); then
+        status "Some domains have no saved progress; use offset 0 to include earlier matches."
+        PRESERVE_SAVED_PROGRESS=1
     fi
     while :; do
         ask input "Starting offset" 0
@@ -714,11 +908,14 @@ choose_start_offset() {
 }
 
 prompt_chunk_size() {
-    local input
+    local input free
     if [[ -n $OPT_CHUNK ]]; then
         CHUNK_SIZE=$OPT_CHUNK
         return 0
     fi
+    show_chunk_guide
+    free=$(available_disk_bytes)
+    if [[ -n $free ]]; then status "Available disk for chunks: $(fmt_bytes "$free")"; fi
     while :; do
         ask input "Chunk size (entries per block)" "$DEFAULT_CHUNK_SIZE"
         if [[ $input =~ ^[1-9][0-9]*$ ]]; then break; fi
@@ -728,16 +925,23 @@ prompt_chunk_size() {
 }
 
 show_plan() {
-    local line='────────────────────────────────────────────────────────'
+    local line='────────────────────────────────────────────────────────' count=$CHUNK_SIZE free
+    if (( OFFSET + count > TREE_SIZE )); then count=$(( TREE_SIZE - OFFSET )); fi
     printf '\n%s%s%s\n' "$BLUE" "$line" "$RESET"
-    printf '  %s%-16s%s %s\n' "$CYAN" "Domain" "$RESET" "$DOMAIN"
+    printf '  %s%-16s%s %s\n' "$CYAN" "Domains" "$RESET" "$(domain_label)"
     printf '  %s%-16s%s %s\n' "$CYAN" "CT log URL" "$RESET" "$CT_LOG_URL"
     printf '  %s%-16s%s %s entries\n' "$CYAN" "Tree size" "$RESET" "$(group_digits "$TREE_SIZE")"
     printf '  %s%-16s%s %s entries\n' "$CYAN" "Chunk size" "$RESET" "$(group_digits "$CHUNK_SIZE")"
     printf '  %s%-16s%s %s\n' "$CYAN" "Starting offset" "$RESET" "$(group_digits "$OFFSET")"
     printf '  %s%-16s%s %s\n' "$CYAN" "Blocks left" "$RESET" \
         "$(group_digits $(( (TREE_SIZE - OFFSET + CHUNK_SIZE - 1) / CHUNK_SIZE )))"
-    printf '  %s%-16s%s %s\n' "$CYAN" "Results file" "$RESET" "$(rel "$RESULTS_FILE")"
+    printf '  %s%-16s%s %s for the next block\n' "$CYAN" "Approx. disk" "$RESET" "$(fmt_bytes $(( count * EST_BYTES_PER_ENTRY )))"
+    printf '  %s%-16s%s %s (download only)\n' "$CYAN" "Reference time" "$RESET" "$(reference_download_time "$count")"
+    free=$(available_disk_bytes)
+    if [[ -n $free ]]; then printf '  %s%-16s%s %s\n' "$CYAN" "Free disk" "$RESET" "$(fmt_bytes "$free")"; fi
+    printf '  %s%-16s%s %s\n' "$CYAN" "Results" "$RESET" "$(rel "$(results_label)")"
+    printf '  Estimates use %s bytes/entry and %s-%s entries/s; sizes and speed vary.\n' \
+        "$EST_BYTES_PER_ENTRY" "$REF_SLOW_ENTRIES_PER_SEC" "$REF_FAST_ENTRIES_PER_SEC"
     printf '%s%s%s\n' "$BLUE" "$line" "$RESET"
 }
 
@@ -790,6 +994,7 @@ main() {
     trap on_interrupt INT TERM HUP
     trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
     TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ctsearch.XXXXXX")
+    prepare_input
 
     printf '%s%sctsearch%s - Certificate Transparency search with scrape-ct-log\n\n' "$BOLD" "$BLUE" "$RESET"
     check_dependencies
