@@ -470,6 +470,7 @@ ${BOLD}${BLUE}Examples:${RESET}
 ${BOLD}${BLUE}Saved results report (-r):${RESET}
   Reads all results/*.txt under the current directory or \$CT_SEARCH_DIR.
   Resolves each unique hostname with dig +short, skipping *.wildcards.
+  Marks nonempty DNS answers with ✅; this does not check service availability.
   Also lists results/ entries with their source filenames and line numbers.
   Displays both sections and replaces results_clean.md on each run.
   This mode uses saved results only; search options do not start a CT scan.
@@ -529,14 +530,17 @@ parse_args() {
 write_results_report() {
     local host answers
     printf '# CT search results\n\n## DNS answers\n\n'
-    printf 'Unique hostnames; wildcards skipped. Empty DNS answers do not prove a host is inactive.\n\n```text\n'
+    printf '✅ = DNS answer received; service availability is not checked. Wildcards skipped. Empty DNS answers do not prove a host is inactive.\n\n```text\n'
     while IFS= read -r host || [[ -n $host ]]; do
         [[ -z $host || $host == \*.* ]] && continue
-        printf '%-45s ' "$host"
         if answers=$(dig +short "$host" | paste -sd, -); then
-            printf '%s\n' "${answers:-(no DNS answer)}"
+            if [[ -n $answers ]]; then
+                printf '✅ %-45s %s\n' "$host" "$answers"
+            else
+                printf '   %-45s (no DNS answer)\n' "$host"
+            fi
         else
-            printf '(DNS query failed)\n'
+            printf '   %-45s (DNS query failed)\n' "$host"
         fi
     done <"$TMP_DIR/report-hosts"
     printf '```\n\n## Source files and line numbers\n\n```text\n'
