@@ -789,6 +789,7 @@ redhavi/INSTALLATION.md Documents builds, deployment, monitoring, and exercise o
 
 
 ###------ otros
+testfile            Creates random test files with an interactive colored menu; asks for the file count and each file's size in MiB.
 cht                 Marca binarios de /opt/4rji/bin como inmutables. Con -i quita. Detecta Linux/Mac (chattr/chflags)
 dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
 wifi-radar          En comprimidos, muestra la calidad de la senal wifi en un webserver, necesitas wifi
