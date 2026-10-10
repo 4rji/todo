@@ -11,9 +11,12 @@ PASSWORD_TOOL="/usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-
 
 usage() {
   cat <<EOF
-Uso: $0 [-r | -h]
+Uso: $0 [-r] [--with-manager] | --show-manager | --hide-manager | -h
   Sin opciones  Instala manager, indexer, Filebeat y dashboard en este servidor.
   -r            Reinstala: BORRA la configuracion y los datos de Wazuh existentes.
+  --with-manager Incluye al manager 000 en Agents y sus contadores al instalar.
+  --show-manager Aplica ese cambio a Wazuh instalado, sin reinstalar.
+  --hide-manager Restaura la visibilidad original usando la copia guardada.
   -h, --help    Muestra esta ayuda.
 
 Ubuntu: 16.04, 18.04, 20.04, 22.04 o 24.04.
@@ -22,6 +25,12 @@ Ambos requieren systemd activo y arquitectura x86_64/ARM64.
 Recomendado para 1-25 agentes: 4 vCPU, 8 GiB de RAM y 50 GB de disco.
 Requiere acceso a Internet. Usa sudo si no se ejecuta como root.
 Al terminar, configura el acceso al dashboard como admin / $ADMIN_PASSWORD
+
+Visibilidad del manager: personalizacion local de la API de Wazuh 4.14.
+Requiere manager y dashboard en este servidor; reinicia wazuh-manager.
+--show-manager y --hide-manager no necesitan Internet.
+Conserva una copia para revertir; una actualizacion de Wazuh puede quitarla.
+El ID 000 sigue siendo el manager local, con sus restricciones originales.
 EOF
 }
 
@@ -30,17 +39,299 @@ die() {
   exit 1
 }
 
+manager_visibility() {
+  local action="$1"
+  local python="/var/ossec/framework/python/bin/python3"
+  [[ -x "$python" ]] || die "No se encontro el Python incluido con Wazuh."
+  systemctl is-active --quiet wazuh-manager || die "wazuh-manager debe estar activo."
+  "$python" - "$action" <<'PY'
+import ast
+import base64
+import hashlib
+import inspect
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+ROOT = Path('/var/ossec')
+STATE_DIR = ROOT / 'var/wazuhinst-manager-dashboard'
+MARKER = '# wazuhinst: mostrar manager 000 v1'
+action = sys.argv[1]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_write(target, data, metadata=None):
+    fd, name = tempfile.mkstemp(prefix='.' + target.name + '-', dir=str(target.parent))
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if metadata:
+            info = metadata.stat()
+            os.chown(str(temporary), info.st_uid, info.st_gid)
+            shutil.copystat(str(metadata), str(temporary))
+        os.replace(str(temporary), str(target))
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def patch(source):
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    lines = source.splitlines(keepends=True)
+    edits = []
+
+    # Solo funciones de lectura; no cambia permisos ni operaciones sobre 000.
+    for name in ('get_agents', 'get_agents_summary_status', 'get_agents_summary_os'):
+        if name not in functions:
+            raise ValueError('Estructura de la API no reconocida: ' + name)
+    listing = functions['get_agents']
+    queries = [node for node in ast.walk(listing) if isinstance(node, ast.keyword)
+               and node.arg == 'query' and isinstance(node.value, ast.Name)
+               and node.value.id == 'q']
+    if len(queries) != 1:
+        raise ValueError('Consulta de Agents no reconocida; no se modifico la API.')
+    # El dashboard envia id!=000. Mantiene el resto del filtro y el RBAC.
+    insertion = listing.body[0].end_lineno if isinstance(listing.body[0], ast.Expr) \
+        and isinstance(listing.body[0].value, ast.Constant) \
+        and isinstance(listing.body[0].value.value, str) else listing.body[0].lineno - 1
+    edits.append((insertion, insertion, [
+        '    ' + MARKER + '\n',
+        '    if q:\n',
+        '        import re as _wazuhinst_re\n',
+        '        q = _wazuhinst_re.sub(r"(^|[;(,])\\s*id\\s*!=\\s*000(?=\\s*(?:[;),]|$))", '
+        'r"\\1id>=000", q)\n',
+    ]))
+    for name in ('get_agents_summary_status', 'get_agents_summary_os'):
+        function = functions[name]
+        queries = [node for node in ast.walk(function) if isinstance(node, ast.keyword)
+                   and node.arg == 'query' and isinstance(node.value, ast.Constant)
+                   and node.value.value == 'id!=000']
+        expected = 2 if name.endswith('_status') else 1
+        if len(queries) != expected:
+            raise ValueError('Contadores no reconocidos: ' + name)
+        # En status, la segunda consulta es sincronizacion de grupos: el
+        # manager no pertenece a grupos y debe quedar fuera de ese calculo.
+        value = sorted(queries, key=lambda node: node.lineno)[0].value
+        line = lines[value.lineno - 1]
+        before = line[:value.col_offset]
+        after = line[value.end_col_offset:]
+        edits.append((value.lineno - 1, value.lineno, [before + "'id>=000'" + after]))
+    status = functions['get_agents_summary_status']
+    totals = [node for node in ast.walk(status) if isinstance(node, ast.Assign)
+              and len(node.targets) == 2
+              and ast.unparse(node.targets[0]) == "connection['total']"
+              and ast.unparse(node.targets[1]) == "sync_configuration['total']"
+              and isinstance(node.value, ast.Name) and node.value.id == 'total']
+    if len(totals) != 1:
+        raise ValueError('Totales de los contadores no reconocidos.')
+    node = totals[0]
+    edits.append((node.lineno - 1, node.end_lineno, [
+        "        connection['total'] = total\n",
+        "        sync_configuration['total'] = (sync_configuration['synced']\n",
+        "                                       + sync_configuration['not_synced'])\n",
+    ]))
+    for start, end, replacement in sorted(edits, reverse=True):
+        lines[start:end] = replacement
+    candidate = ''.join(lines)
+    compile(candidate, 'wazuh/agent.py', 'exec')
+    return candidate.encode('utf-8')
+
+
+def api_settings():
+    import yaml  # Incluido en el Python de Wazuh; no instala dependencias.
+    config = Path('/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml')
+    data = yaml.safe_load(config.read_text())
+    local_addresses = {'localhost', '127.0.0.1', '::1'}
+    checked_addresses = False
+    for record in data.get('hosts', []):
+        for host in record.values():
+            url = urllib.parse.urlsplit(host.get('url', ''))
+            if url.scheme != 'https':
+                continue
+            if url.hostname not in local_addresses and not checked_addresses:
+                checked_addresses = True
+                try:
+                    addresses = subprocess.check_output(['hostname', '-I'], text=True, timeout=5)
+                    local_addresses.update(addresses.split())
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            if url.hostname not in local_addresses:
+                continue
+            username, password = host.get('username'), host.get('password')
+            if not isinstance(username, str) or not isinstance(password, str):
+                continue
+            try:
+                port = int(host.get('port', url.port or 55000))
+            except (TypeError, ValueError):
+                raise ValueError('Puerto local de la API no valido.') from None
+            if not 1 <= port <= 65535:
+                raise ValueError('Puerto local de la API no valido.')
+            address = '[' + url.hostname + ']' if ':' in url.hostname else url.hostname
+            basic = base64.b64encode((username + ':' + password).encode()).decode()
+            return 'https://' + address + ':' + str(port), basic
+    raise ValueError('No se encontro una conexion HTTPS local en wazuh.yml.')
+
+
+def verify(base, basic):
+    context = ssl._create_unverified_context()  # API de este servidor, certificado de Wazuh.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                        urllib.request.HTTPSHandler(context=context))
+    request = urllib.request.Request(base + '/security/user/authenticate?raw=true',
+                                    headers={'Authorization': 'Basic ' + basic}, method='POST')
+    with opener.open(request, timeout=5) as response:
+        token = response.read().decode().strip()
+    if not token:
+        raise ValueError('La API no devolvio un token.')
+
+    def get(route):
+        request = urllib.request.Request(base + route, headers={'Authorization': 'Bearer ' + token})
+        with opener.open(request, timeout=5) as response:
+            result = json.load(response)
+        if result.get('error') != 0:
+            raise ValueError('La API rechazo la comprobacion.')
+        return result['data']
+
+    query = urllib.parse.urlencode({'agents_list': '000', 'q': 'id!=000', 'limit': 1})
+    listing = get('/agents?' + query)
+    manager = [item for item in listing['affected_items'] if item['id'] == '000']
+    if len(manager) != 1 or manager[0].get('status') != 'active':
+        raise ValueError('El manager 000 no aparece activo en GET /agents.')
+    counts = get('/agents/summary/status')['connection']
+    if counts['active'] < 1 or counts['total'] != sum(counts[name] for name in
+            ('active', 'disconnected', 'pending', 'never_connected')):
+        raise ValueError('Los contadores de la API no son consistentes.')
+    return counts
+
+
+def restart():
+    subprocess.run(['systemctl', 'restart', 'wazuh-manager'], check=True, timeout=180)
+    subprocess.run(['systemctl', 'is-active', '--quiet', 'wazuh-manager'], check=True, timeout=10)
+
+
+try:
+    info = subprocess.check_output([str(ROOT / 'bin/wazuh-control'), 'info'], text=True)
+    match = re.search(r'WAZUH_VERSION=["\']?(v?4\.14\.\d+)["\']?', info)
+    if not match:
+        raise ValueError('Esta personalizacion solo admite Wazuh 4.14.x.')
+    config = ET.fromstring('<root>' + (ROOT / 'etc/ossec.conf').read_text() + '</root>')
+    for cluster in config.findall('.//cluster'):
+        if cluster.findtext('disabled', 'no').strip() != 'yes':
+            raise ValueError('Esta opcion requiere un manager sin cluster.')
+    import wazuh.agent
+    target = Path(inspect.getsourcefile(wazuh.agent)).resolve()
+    if not target.is_relative_to(ROOT / 'framework') or not target.is_file():
+        raise ValueError('Ruta de la API de Wazuh no reconocida.')
+    current = target.read_bytes()
+    state_file = STATE_DIR / 'state.json'
+    state = json.loads(state_file.read_text()) if state_file.exists() else None
+    if action == 'hide':
+        if MARKER.encode() not in current:
+            print('[OK] El manager ya tiene la visibilidad original.')
+            sys.exit(0)
+        if not state or state['target'] != str(target) or digest(current) != state['patched_sha256']:
+            raise ValueError('La API cambio desde el parche; no se sobrescribira con una copia antigua.')
+        backup = STATE_DIR / state['backup']
+        original = backup.read_bytes()
+        if digest(original) != state['original_sha256']:
+            raise ValueError('La copia de la API no coincide con su checksum.')
+        atomic_write(target, original, backup)
+        try:
+            restart()
+        except Exception:
+            atomic_write(target, current, target)
+            restart()
+            raise
+        print('[OK] Restaurada la visibilidad original del manager 000.')
+    else:
+        base, basic = api_settings()  # Comprueba credenciales locales antes de escribir.
+        if MARKER.encode() in current:
+            if not state or state['target'] != str(target) or digest(current) != state['patched_sha256']:
+                raise ValueError('El parche existente no coincide con la copia guardada.')
+        else:
+            candidate = patch(current.decode('utf-8'))
+            STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            backup = STATE_DIR / ('agent-' + digest(current) + '.py.original')
+            if backup.exists() and digest(backup.read_bytes()) != digest(current):
+                raise ValueError('La copia existente no coincide con la API original.')
+            if not backup.exists():
+                shutil.copy2(str(target), str(backup))
+                info = target.stat()
+                os.chown(str(backup), info.st_uid, info.st_gid)
+            state = {'target': str(target), 'version': match.group(1), 'backup': backup.name,
+                     'original_sha256': digest(current), 'patched_sha256': digest(candidate)}
+            atomic_write(target, candidate, target)
+            try:
+                atomic_write(state_file, json.dumps(state, indent=2).encode())
+            except Exception:
+                atomic_write(target, current, backup)
+                raise
+        try:
+            restart()
+            for attempt in range(15):
+                try:
+                    counts = verify(base, basic)
+                    break
+                except (urllib.error.URLError, TimeoutError, ConnectionError):
+                    if attempt == 14:
+                        raise
+                    time.sleep(1)
+        except Exception:
+            # Deshace un intento nuevo fallido; no elimina un parche previo.
+            if MARKER.encode() not in current:
+                atomic_write(target, current, STATE_DIR / state['backup'])
+                restart()
+                print('[*] Se restauro la API original tras fallar la comprobacion.', file=sys.stderr)
+            raise
+        print('[OK] Manager 000 visible en Agents. Active: {}; total: {}.'.format(
+              counts['active'], counts['total']))
+        print('[*] Actualiza el dashboard. Copia de la API: ' + str(STATE_DIR / state['backup']))
+        print('[*] Para revertir: sudo wazuhinst --hide-manager')
+except Exception as error:
+    # No imprime credenciales, tokens, configuraciones ni respuestas de la API.
+    if isinstance(error, (ValueError, SyntaxError)):
+        message = str(error)
+    else:
+        message = type(error).__name__
+    print('[!] No se pudo cambiar la visibilidad del manager: ' + message, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 REINSTALL=0
-if [[ $# -gt 1 ]]; then
-  usage >&2
-  exit 1
+WITH_MANAGER=0
+MODE="install"
+for option in "$@"; do
+  case "$option" in
+    -r) [[ "$REINSTALL" -eq 0 ]] || die "Opcion repetida: -r"; REINSTALL=1 ;;
+    --with-manager) [[ "$WITH_MANAGER" -eq 0 ]] || die "Opcion repetida: --with-manager"; WITH_MANAGER=1 ;;
+    --show-manager|--hide-manager)
+      [[ "$MODE" == install ]] || die "Usa una sola opcion de visibilidad."
+      MODE="${option#--}" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Opcion desconocida: $option" ;;
+  esac
+done
+if [[ "$MODE" != install && ( "$REINSTALL" -eq 1 || "$WITH_MANAGER" -eq 1 ) ]]; then
+  die "--show-manager y --hide-manager se usan solos, sin instalar ni reinstalar."
 fi
-case "${1:-}" in
-  "") ;;
-  -r) REINSTALL=1 ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; die "Opcion desconocida: $1" ;;
-esac
 
 [[ "$(uname -s)" == "Linux" ]] || die "Este instalador requiere Linux Ubuntu o Debian."
 [[ -r /etc/os-release ]] || die "No se puede detectar la distribucion (/etc/os-release)."
@@ -73,6 +364,11 @@ command -v systemctl >/dev/null 2>&1 || die "No se encontro systemctl."
 if [[ "$EUID" -ne 0 ]]; then
   command -v sudo >/dev/null 2>&1 || die "Ejecuta este script como root; sudo no esta instalado."
   exec sudo -- bash "$0" "$@"
+fi
+
+if [[ "$MODE" != install ]]; then
+  manager_visibility "${MODE%%-manager}"
+  exit 0
 fi
 
 WORKDIR=""
@@ -163,6 +459,10 @@ echo "[*] Comprobando el acceso de admin al indexer local..."
 # El asistente genera certificados autofirmados; esta comprobacion es local.
 curl --fail --show-error --silent --insecure --connect-timeout 5 --max-time 30 \
   --user "admin:$ADMIN_PASSWORD" https://127.0.0.1:9200/ >/dev/null
+
+if [[ "$WITH_MANAGER" -eq 1 ]]; then
+  manager_visibility show
+fi
 
 echo "[OK] Wazuh instalado; los cuatro servicios estan activos."
 echo "Dashboard: https://<IP-de-este-servidor>"
