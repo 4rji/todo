@@ -8,7 +8,7 @@ echo_msg() {
 }
 
 OPTIONS=(
-  "LocIp — Locate IPs from the CLI"
+  "locip — Locate IPs from the CLI"
   "trafico — Configurable traffic simulator for a specific target"
   "traficoS — HTTPS simulator with predefined domains"
   "sshc — Run same command across every host (module mode enabled)"
@@ -22,7 +22,7 @@ OPTIONS=(
 )
 
 commands=(
-  "go install github.com/4rji/LocIp@latest"
+  "go install github.com/4rji/locip@latest"
   "go install github.com/4rji/binarios-go/trafico/cmd/trafico@latest"
   "go install github.com/4rji/binarios-go/trafico/cmd/traficoS@latest"
   "GO111MODULE=on go install github.com/4rji/binarios-go/sshc@latest"
@@ -35,7 +35,7 @@ commands=(
 )
 
 bins=(
-  "LocIp"
+  "locip"
   "trafico"
   "traficoS"
   "sshc"
