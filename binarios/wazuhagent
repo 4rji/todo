@@ -213,6 +213,9 @@ install_binary() {
   case "$METHOD" in
     deb)
       if [[ "$PKG_MGR" == apt-get ]]; then
+        # Let _apt read the public package; other work files stay private.
+        chmod 711 "$tmpdir"
+        chmod 644 "$PACKAGE"
         DEBIAN_FRONTEND=noninteractive apt-get install -y "$PACKAGE"
       else
         dpkg -i "$PACKAGE"
