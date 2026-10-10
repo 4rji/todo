@@ -1,146 +1,450 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wazuh Agent (Linux) install/remove script
-# - Detects DEB vs RPM automatically
-# - Prompts only for Manager IP and Agent name
-# - Flag: -r (remove)
+# Wazuh Agent for Linux: official DEB/RPM packages, sources elsewhere.
+# https://documentation.wazuh.com/current/installation-guide/wazuh-agent/wazuh-agent-package-linux.html
+# https://documentation.wazuh.com/current/deployment-options/wazuh-from-sources/wazuh-agent/index.html
 
-WAZUH_VER="4.14.2-1"
+WAZUH_VER="${WAZUH_VER:-4.14.8-1}"
 GROUP="default"
-
-DEB_URL="https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_${WAZUH_VER}_amd64.deb"
-RPM_URL_X86_64="https://packages.wazuh.com/4.x/yum/wazuh-agent-${WAZUH_VER}.x86_64.rpm"
-RPM_URL_AARCH64="https://packages.wazuh.com/4.x/yum/wazuh-agent-${WAZUH_VER}.aarch64.rpm"
+WAZUH_DIR="/var/ossec"
+CONTROL="$WAZUH_DIR/bin/wazuh-control"
+tmpdir=""
 
 usage() {
-  echo "Usage: $0 [-r]"
-  echo "  -r    remove wazuh-agent and /var/ossec"
+  cat <<EOF
+Usage: $0 [-r | --source] [--logs]
+  -r             Remove the agent, its configuration and /var/ossec.
+  --source       Compile instead of installing a DEB/RPM package.
+  --logs         Follow the agent log after installation (Ctrl+C to exit).
+  -h, --help     Show this help.
+
+Prompts for the manager IP/hostname and agent name.
+Ubuntu/Debian and derivatives: DEB; Fedora/RHEL/SUSE and derivatives: RPM.
+Arch/Manjaro, Alpine and other Linux systems: build from official sources.
+Supports systemd, OpenRC, SysV init and manual startup.
+Source builds need GCC >= 9.4, CMake >= 3.12.4, Internet and build tools.
+For unknown package managers, install the prerequisites yourself first.
+
+Default version: $WAZUH_VER. Override with WAZUH_VER=4.14.2-1, for example.
+The manager version must be equal to or newer than the agent version.
+EOF
 }
 
-ask() { local p="$1" v; read -r -p "$p" v; printf '%s' "$v"; }
+die() { printf '[!] %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+need_cmd() { have "$1" || die "Missing required command: $1"; }
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
+first_available() {
+  local candidate
+  for candidate in "$@"; do
+    if have "$candidate"; then printf '%s' "$candidate"; return; fi
+  done
+  printf 'none'
 }
 
-arch_norm() {
-  case "$(uname -m)" in
-    x86_64|amd64) echo "x86_64" ;;
-    aarch64|arm64) echo "aarch64" ;;
-    *) echo "unknown" ;;
+# Prefer the distro's native manager, even if foreign dpkg/rpm tools exist.
+detect_pkg_mgr() {
+  case " ${ID:-} ${ID_LIKE:-} " in
+    *' alpine '*) first_available apk ;;
+    *' arch '*|*' manjaro '*) first_available pacman ;;
+    *' debian '*|*' ubuntu '*) first_available apt-get dpkg ;;
+    *' suse '*|*' opensuse '*|*' opensuse-leap '*|*' opensuse-tumbleweed '*|*' sles '*) first_available zypper rpm ;;
+    *' rhel '*|*' fedora '*|*' centos '*|*' rocky '*|*' almalinux '*|*' ol '*|*' amzn '*) first_available dnf yum rpm ;;
+    *) first_available apk pacman apt-get dnf yum zypper dpkg rpm ;;
   esac
 }
 
-detect_pkg_mgr() {
-  if command -v dpkg >/dev/null 2>&1; then
-    echo "deb"
-  elif command -v rpm >/dev/null 2>&1; then
-    echo "rpm"
+install_os_packages() {
+  case "$PKG_MGR" in
+    apt-get)
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+      ;;
+    dnf|yum) "$PKG_MGR" install -y "$@" ;;
+    zypper) zypper --non-interactive install "$@" ;;
+    pacman) pacman -S --needed --noconfirm "$@" ;;
+    apk) apk add --no-cache "$@" ;;
+    *) die "Install these prerequisites with your distro's tools, then rerun: $*" ;;
+  esac
+}
+
+ensure_runtime_deps() {
+  local deps=()
+  have curl || deps+=(curl)
+  if ! [[ -r /etc/ssl/certs/ca-certificates.crt || -r /etc/pki/tls/certs/ca-bundle.crt || -r /etc/ssl/ca-bundle.pem || -r /etc/ssl/cert.pem ]]; then
+    deps+=(ca-certificates)
+  fi
+  if ! have python3; then
+    if [[ "$PKG_MGR" == pacman ]]; then deps+=(python); else deps+=(python3); fi
+  fi
+  if [[ ${#deps[@]} -gt 0 ]]; then install_os_packages "${deps[@]}"; fi
+  need_cmd curl
+  need_cmd python3
+}
+
+download() {
+  curl --fail --show-error --location --retry 3 --connect-timeout 15 \
+    --max-time 900 --output "$2" "$1"
+  [[ -s "$2" ]] || die "Empty download: $1"
+}
+
+verify_package() {
+  local expected actual
+  download "https://packages.wazuh.com/4.x/checksums/wazuh/${WAZUH_VER%-*}/${URL##*/}.sha512" "$tmpdir/package.sha512"
+  expected="$(awk 'NR == 1 { print $1 }' "$tmpdir/package.sha512")"
+  [[ "$expected" =~ ^[[:xdigit:]]{128}$ ]] || die "Invalid SHA-512 checksum from Wazuh."
+  if have sha512sum; then
+    actual="$(sha512sum "$PACKAGE" | awk '{print $1}')"
+  elif have shasum; then
+    actual="$(shasum -a 512 "$PACKAGE" | awk '{print $1}')"
   else
-    echo "unknown"
+    die "Missing sha512sum or shasum to verify the package."
+  fi
+  [[ "$actual" == "$expected" ]] || die "Package checksum does not match; installation stopped."
+}
+
+detect_init() {
+  if have systemctl && [[ -d /run/systemd/system ]]; then
+    printf 'systemd'
+  elif have rc-service && have rc-update && [[ -d /run/openrc ]]; then
+    printf 'openrc'
+  elif have service; then
+    printf 'sysv'
+  else
+    printf 'manual'
   fi
 }
 
 start_agent() {
-  sudo systemctl daemon-reload
-  sudo systemctl enable wazuh-agent >/dev/null 2>&1 || true
-  sudo systemctl restart wazuh-agent
+  [[ -x "$CONTROL" ]] || die "The agent control script was not installed."
+  case "$INIT_SYSTEM" in
+    systemd)
+      systemctl daemon-reload
+      systemctl enable wazuh-agent
+      systemctl restart wazuh-agent
+      systemctl is-active --quiet wazuh-agent || die "The wazuh-agent service is not active."
+      ;;
+    openrc)
+      # The source installer may have created a SysV script; use an OpenRC service.
+      if ! [[ -f /etc/init.d/wazuh-agent ]] || ! head -n 1 /etc/init.d/wazuh-agent | grep -Eq 'openrc-run|runscript'; then
+        cat > /etc/init.d/wazuh-agent <<'OPENRC'
+#!/sbin/openrc-run
+description="Wazuh agent"
+depend() { need net; }
+start() { ebegin "Starting Wazuh agent"; /var/ossec/bin/wazuh-control start; eend $?; }
+stop() { ebegin "Stopping Wazuh agent"; /var/ossec/bin/wazuh-control stop; eend $?; }
+status() { /var/ossec/bin/wazuh-control status; }
+OPENRC
+        chmod 755 /etc/init.d/wazuh-agent
+      fi
+      rc-update add wazuh-agent default
+      rc-service wazuh-agent restart
+      ;;
+    sysv)
+      if [[ -x /etc/init.d/wazuh-agent ]]; then
+        if have update-rc.d; then
+          update-rc.d wazuh-agent defaults 95 10
+        elif have chkconfig; then
+          chkconfig --add wazuh-agent
+          chkconfig wazuh-agent on
+        fi
+        service wazuh-agent restart
+      else
+        "$CONTROL" restart
+        echo "[*] No init service found. Add $CONTROL start to your startup configuration."
+      fi
+      ;;
+    manual)
+      "$CONTROL" restart
+      echo "[*] No running service manager found. Add $CONTROL start to your startup configuration."
+      ;;
+  esac
+  "$CONTROL" status
 }
 
 remove_agent() {
-  echo "[*] Removing wazuh-agent..."
-  sudo systemctl stop wazuh-agent >/dev/null 2>&1 || true
-
-  local pm
-  pm="$(detect_pkg_mgr)"
-
-  if [[ "$pm" == "deb" ]]; then
-    sudo dpkg -r wazuh-agent >/dev/null 2>&1 || true
-    sudo dpkg -P wazuh-agent >/dev/null 2>&1 || true
-  elif [[ "$pm" == "rpm" ]]; then
-    sudo rpm -e wazuh-agent >/dev/null 2>&1 || true
-  else
-    echo "Could not detect DEB/RPM. Install dpkg or rpm tools." >&2
-    exit 1
+  local installed="source"
+  if have dpkg-query && dpkg-query -W wazuh-agent >/dev/null 2>&1; then
+    installed="deb"
+  elif have rpm && rpm -q wazuh-agent >/dev/null 2>&1; then
+    installed="rpm"
+  elif ! [[ -x "$CONTROL" ]]; then
+    [[ ! -e "$WAZUH_DIR" ]] || die "Unrecognized installation at $WAZUH_DIR; refusing to remove it."
+    echo "[*] No Wazuh agent installed."
+    return
   fi
 
-  sudo rm -rf /var/ossec
+  echo "[*] Removing wazuh-agent..."
+  if [[ "$INIT_SYSTEM" == systemd ]] && systemctl cat wazuh-agent >/dev/null 2>&1; then
+    systemctl stop wazuh-agent
+    systemctl disable wazuh-agent
+  elif [[ "$INIT_SYSTEM" == openrc && -f /etc/init.d/wazuh-agent ]]; then
+    rc-service wazuh-agent stop
+    if rc-update show default | grep -q wazuh-agent; then rc-update del wazuh-agent default; fi
+  fi
+  if [[ -x "$CONTROL" ]]; then "$CONTROL" stop; fi
+
+  # Do not delete data if the package manager reports an uninstall failure.
+  case "$installed" in
+    deb) dpkg --purge wazuh-agent ;;
+    rpm) rpm -e wazuh-agent ;;
+    source)
+      if have update-rc.d; then update-rc.d -f wazuh-agent remove; fi
+      if have chkconfig && [[ -f /etc/init.d/wazuh-agent ]]; then chkconfig --del wazuh-agent; fi
+      rm -f /etc/init.d/wazuh-agent /etc/systemd/system/wazuh-agent.service \
+        /usr/lib/systemd/system/wazuh-agent.service /lib/systemd/system/wazuh-agent.service
+      ;;
+  esac
+  rm -rf "$WAZUH_DIR"
+  if [[ -f /etc/ossec-init.conf ]] && grep -Eq '^TYPE=.*agent' /etc/ossec-init.conf; then
+    rm -f /etc/ossec-init.conf
+  fi
+  if [[ "$INIT_SYSTEM" == systemd ]]; then systemctl daemon-reload; fi
   echo "[+] Removed."
 }
 
+install_binary() {
+  PACKAGE="$tmpdir/${URL##*/}"
+  echo "[*] Downloading: $URL"
+  download "$URL" "$PACKAGE"
+  verify_package
+  export WAZUH_MANAGER="$MANAGER_IP" WAZUH_AGENT_NAME="$AGENT_NAME" WAZUH_AGENT_GROUP="$GROUP"
+  case "$METHOD" in
+    deb)
+      if [[ "$PKG_MGR" == apt-get ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$PACKAGE"
+      else
+        dpkg -i "$PACKAGE"
+      fi
+      ;;
+    rpm)
+      download "https://packages.wazuh.com/key/GPG-KEY-WAZUH" "$tmpdir/GPG-KEY-WAZUH"
+      rpm --import "$tmpdir/GPG-KEY-WAZUH"
+      rpm --checksig "$PACKAGE"
+      case "$PKG_MGR" in
+        dnf|yum) "$PKG_MGR" install -y "$PACKAGE" ;;
+        zypper) zypper --non-interactive install "$PACKAGE" ;;
+        *) rpm -Uvh --replacepkgs "$PACKAGE" ;;
+      esac
+      ;;
+  esac
+}
+
+install_sources() {
+  local source_dir="$tmpdir/wazuh-${WAZUH_VER%-*}" compiler=gcc cpp_compiler=g++
+  # Keep package databases consistent if --source is used on an installed agent.
+  if { have dpkg-query && dpkg-query -W wazuh-agent >/dev/null 2>&1; } || \
+     { have rpm && rpm -q wazuh-agent >/dev/null 2>&1; }; then
+    die "A packaged agent already exists. Use the native installation or remove it with -r first."
+  fi
+  echo "[*] Building from sources; this can take several minutes."
+  case "$PKG_MGR" in
+    apt-get) install_os_packages build-essential cmake automake autoconf libtool libssl-dev procps python3 curl ca-certificates ;;
+    dnf|yum) install_os_packages gcc gcc-c++ make cmake automake autoconf libtool openssl-devel procps-ng python3 curl ca-certificates ;;
+    zypper) install_os_packages gcc gcc-c++ make cmake automake autoconf libtool libopenssl-devel procps python3 curl ca-certificates ;;
+    pacman)
+      install_os_packages base-devel gcc14 cmake automake autoconf libtool openssl procps-ng python curl ca-certificates brotli libpsl nghttp2 inetutils
+      compiler=gcc-14
+      cpp_compiler=g++-14
+      ;;
+    apk) install_os_packages build-base cmake automake autoconf libtool openssl-dev linux-headers gettext-dev procps python3 curl ca-certificates perl tar gzip ;;
+  esac
+  local tool
+  for tool in "$compiler" "$cpp_compiler" make cmake tar gzip automake autoconf libtool; do need_cmd "$tool"; done
+  python3 - "$compiler" <<'PY'
+import re, subprocess, sys
+gcc = subprocess.check_output([sys.argv[1], '-dumpfullversion', '-dumpversion']).decode().strip()
+cmake = subprocess.check_output(['cmake', '--version']).decode().splitlines()[0]
+def version(text):
+    match = re.search(r'(\d+)\.(\d+)(?:\.(\d+))?', text)
+    if not match:
+        sys.exit('Cannot determine compiler/CMake version: ' + text)
+    return tuple(int(part or 0) for part in match.groups())
+if version(gcc) < (9, 4, 0) or version(cmake) < (3, 12, 4):
+    sys.exit('Source builds require GCC >= 9.4 and CMake >= 3.12.4.')
+PY
+  download "https://github.com/wazuh/wazuh/archive/v${WAZUH_VER%-*}.tar.gz" "$tmpdir/wazuh.tar.gz"
+  tar -xzf "$tmpdir/wazuh.tar.gz" -C "$tmpdir"
+  [[ -f "$source_dir/install.sh" && -d "$source_dir/src" ]] || die "Invalid source archive."
+  # Build every dependency locally so glibc binaries are not used on musl/Alpine.
+  make -C "$source_dir/src" deps TARGET=agent EXTERNAL_SRC_ONLY=yes
+  make -C "$source_dir/src" -j2 TARGET=agent INSTALLDIR="$WAZUH_DIR" \
+    CC="$compiler" CXX="$cpp_compiler" build
+  cat > "$source_dir/etc/preloaded-vars.conf" <<EOF
+USER_LANGUAGE="en"
+USER_NO_STOP="y"
+USER_INSTALL_TYPE="agent"
+USER_DIR="$WAZUH_DIR"
+USER_DELETE_DIR="n"
+USER_UPDATE="y"
+USER_ENABLE_SYSCHECK="y"
+USER_ENABLE_ROOTCHECK="y"
+USER_ENABLE_SYSCOLLECTOR="y"
+USER_ENABLE_SCA="y"
+USER_ENABLE_ACTIVE_RESPONSE="y"
+USER_CA_STORE="n"
+USER_AGENT_SERVER_IP="$MANAGER_IP"
+EOF
+  (cd "$source_dir" && bash ./install.sh binary-install </dev/null)
+}
+
+# The source installer does not set an enrollment name/group. Configure these on
+# every install, including repeated package installs, without replacing other sections.
+configure_agent() {
+  python3 - "$WAZUH_DIR/etc/ossec.conf" "$MANAGER_IP" "$AGENT_NAME" "$GROUP" <<'PY'
+import os, re, shutil, sys, tempfile, xml.etree.ElementTree as ET
+path, manager, name, group = sys.argv[1:]
+with open(path) as stream:
+    text = stream.read()
+# ossec.conf can contain multiple ossec_config roots; validate under a wrapper.
+ET.fromstring('<config>' + text + '</config>')
+matches = list(re.finditer(r'<client>.*?</client>', text, re.S))
+if len(matches) != 1:
+    sys.exit('Expected exactly one client section; configuration was not changed.')
+match = matches[0]
+class CommentedTreeBuilder(ET.TreeBuilder):
+    def comment(self, value):
+        self.start(ET.Comment, {})
+        self.data(value)
+        self.end(ET.Comment)
+client = ET.fromstring(match.group(), parser=ET.XMLParser(target=CommentedTreeBuilder()))
+def child(parent, tag):
+    result = parent.find(tag)
+    return result if result is not None else ET.SubElement(parent, tag)
+server = child(client, 'server')
+child(server, 'address').text = manager
+if server.find('port') is None:
+    child(server, 'port').text = '1514'
+if server.find('protocol') is None:
+    child(server, 'protocol').text = 'tcp'
+enrollment = child(client, 'enrollment')
+for tag, value in [('enabled', 'yes'), ('manager_address', manager), ('agent_name', name), ('groups', group)]:
+    child(enrollment, tag).text = value
+def indent(element, level=1):
+    padding = '\n' + '  ' * level
+    if len(element):
+        if not element.text or not element.text.strip():
+            element.text = padding + '  '
+        for nested in element:
+            indent(nested, level + 1)
+        if not nested.tail or not nested.tail.strip():
+            nested.tail = padding
+    if level > 1 and (not element.tail or not element.tail.strip()):
+        element.tail = padding
+indent(client)
+replacement = ET.tostring(client, encoding='unicode')
+updated = text[:match.start()] + replacement + text[match.end():]
+ET.fromstring('<config>' + updated + '</config>')
+directory = os.path.dirname(path)
+backup_fd, backup = tempfile.mkstemp(prefix='ossec.conf.wazuhagent-backup-', dir=directory)
+os.close(backup_fd)
+shutil.copy2(path, backup)
+fd, candidate = tempfile.mkstemp(prefix='ossec.conf.wazuhagent-', dir=directory)
+try:
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(updated)
+    metadata = os.stat(path)
+    os.chown(candidate, metadata.st_uid, metadata.st_gid)
+    shutil.copystat(path, candidate)
+    os.replace(candidate, path)
+finally:
+    if os.path.exists(candidate):
+        os.unlink(candidate)
+print('[*] Previous configuration saved at ' + backup)
+PY
+}
+
 REMOVE=0
-while getopts ":rh" opt; do
-  case "$opt" in
-    r) REMOVE=1 ;;
-    h) usage; exit 0 ;;
-    *) usage; exit 1 ;;
+FROM_SOURCE=0
+FOLLOW_LOGS=0
+for arg in "$@"; do
+  case "$arg" in
+    -r) REMOVE=1 ;;
+    --source) FROM_SOURCE=1 ;;
+    --logs) FOLLOW_LOGS=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Unknown argument: $arg" ;;
   esac
 done
-
-if [[ "$REMOVE" -eq 1 ]]; then
-  remove_agent
-  exit 0
+if [[ "$REMOVE" -eq 1 && ( "$FROM_SOURCE" -eq 1 || "$FOLLOW_LOGS" -eq 1 ) ]]; then
+  die "Use -r alone to remove the agent."
+fi
+[[ "$(uname -s)" == Linux ]] || die "This installer requires Linux."
+[[ "$WAZUH_VER" =~ ^4\.[0-9]+\.[0-9]+-[0-9]+$ ]] || die "Use WAZUH_VER in the form 4.x.y-1."
+if [[ "$EUID" -ne 0 ]]; then
+  need_cmd sudo
+  exec sudo -- env WAZUH_VER="$WAZUH_VER" bash "$0" "$@"
 fi
 
-echo "=== Wazuh Agent (Linux) installer (auto DEB/RPM) ==="
+if [[ -r /etc/os-release ]]; then . /etc/os-release; fi
+PKG_MGR="$(detect_pkg_mgr)"
+INIT_SYSTEM="$(detect_init)"
+if [[ -e "$WAZUH_DIR/bin/wazuh-analysisd" || -e "$WAZUH_DIR/bin/ossec-analysisd" ]] || \
+   { [[ -r /etc/ossec-init.conf ]] && grep -Eq '^TYPE=.*(server|manager|local|hybrid)' /etc/ossec-init.conf; } || \
+   { have dpkg-query && [[ "$(dpkg-query -W -f='${db:Status-Status}' wazuh-manager 2>/dev/null || true)" == installed ]]; } || \
+   { have rpm && rpm -q wazuh-manager >/dev/null 2>&1; }; then
+  die "A Wazuh/OSSEC manager is installed here. Run wazuhagent on the endpoint to monitor."
+fi
+if [[ "$REMOVE" -eq 1 ]]; then remove_agent; exit 0; fi
 
-MANAGER_IP="$(ask "Wazuh Manager IP: ")"
-AGENT_NAME="$(ask "Agent name: ")"
+METHOD="source"
+URL=""
+if [[ "$FROM_SOURCE" -eq 0 ]]; then
+  case "$PKG_MGR" in
+    apt-get|dpkg)
+      need_cmd dpkg
+      ARCH="$(dpkg --print-architecture)"
+      case "$ARCH" in
+        amd64|arm64|armhf|i386|ppc64el)
+          METHOD="deb"
+          URL="https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_${WAZUH_VER}_${ARCH}.deb"
+          ;;
+      esac
+      ;;
+    dnf|yum|zypper|rpm)
+      need_cmd rpm
+      ARCH="$(rpm --eval '%{_arch}')"
+      case "$ARCH" in
+        i586|i686) ARCH=i386 ;;
+      esac
+      case "$ARCH" in
+        x86_64|aarch64|i386|armv7hl|ppc64le)
+          METHOD="rpm"
+          RPM_SUFFIX="$ARCH"
+          case "${ID:-}:${VERSION_ID:-}" in
+            centos:5*|rhel:5*|ol:5*|sles:11*|suse:11*) RPM_SUFFIX="el5.$ARCH" ;;
+          esac
+          URL="https://packages.wazuh.com/4.x/yum/wazuh-agent-${WAZUH_VER}.${RPM_SUFFIX}.rpm"
+          ;;
+      esac
+      ;;
+  esac
+fi
 
-ARCH="$(arch_norm)"
-[[ "$ARCH" == "unknown" ]] && { echo "Unsupported architecture: $(uname -m)" >&2; exit 1; }
+printf '=== Wazuh Agent %s (%s; %s; %s) ===\n' "$WAZUH_VER" "${PRETTY_NAME:-Linux}" "$METHOD" "$INIT_SYSTEM"
+read -e -r -p "Wazuh Manager IP/hostname: " MANAGER_IP || die "No manager address provided."
+read -e -r -p "Agent name: " AGENT_NAME || die "No agent name provided."
+[[ "$MANAGER_IP" =~ ^[a-zA-Z0-9:][a-zA-Z0-9.:_-]*$ ]] || die "Enter a manager IP or hostname, without a URL, spaces or port."
+[[ "$AGENT_NAME" =~ ^[a-zA-Z0-9_.-]{2,}$ ]] || die "Agent names need at least two characters; use letters, digits, dot, dash or underscore."
 
-PKGTYPE="$(detect_pkg_mgr)"
-[[ "$PKGTYPE" == "unknown" ]] && { echo "Could not detect DEB/RPM (missing dpkg/rpm)." >&2; exit 1; }
-
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
-
-if [[ "$PKGTYPE" == "deb" ]]; then
-  need_cmd wget
-  if [[ "$ARCH" != "x86_64" ]]; then
-    echo "DEB link provided is amd64 only. Detected arch: $ARCH" >&2
-    exit 1
-  fi
-
-  DEB="wazuh-agent_${WAZUH_VER}_amd64.deb"
-  URL="$DEB_URL"
-
-  echo "Downloading: $URL"
-  wget -q -O "$tmpdir/$DEB" "$URL"
-
-  echo "Installing .deb..."
-  sudo WAZUH_MANAGER="$MANAGER_IP" WAZUH_AGENT_NAME="$AGENT_NAME" WAZUH_AGENT_GROUP="$GROUP" \
-    dpkg -i "$tmpdir/$DEB"
-
-  start_agent
-
-elif [[ "$PKGTYPE" == "rpm" ]]; then
-  need_cmd curl
-
-  if [[ "$ARCH" == "x86_64" ]]; then
-    URL="$RPM_URL_X86_64"
-    RPM="wazuh-agent-${WAZUH_VER}.x86_64.rpm"
+umask 077
+tmpdir="$(mktemp -d /var/tmp/wazuhagent.XXXXXX)"
+cleanup() {
+  local status=$?
+  if [[ "$status" -eq 0 ]]; then
+    rm -rf "$tmpdir"
   else
-    URL="$RPM_URL_AARCH64"
-    RPM="wazuh-agent-${WAZUH_VER}.aarch64.rpm"
+    printf '[!] Installation incomplete (code %s). Work files kept at %s\n' "$status" "$tmpdir" >&2
   fi
+}
+trap cleanup EXIT
+ensure_runtime_deps
+if [[ "$METHOD" == source ]]; then install_sources; else install_binary; fi
+configure_agent
+start_agent
 
-  echo "Downloading: $URL"
-  curl -fsSL -o "$tmpdir/$RPM" "$URL"
-
-  echo "Installing .rpm..."
-  # Use -Uvh to upgrade/replace cleanly (avoids file conflicts on re-run)
-  sudo WAZUH_MANAGER="$MANAGER_IP" WAZUH_AGENT_NAME="$AGENT_NAME" WAZUH_AGENT_GROUP="$GROUP" \
-    rpm -Uvh "$tmpdir/$RPM"
-
-  start_agent
-fi
-
-echo
-echo "Done."
-
-echo "logs"
-echo "sudo tail -f /var/ossec/logs/ossec.log"
-sudo tail -f /var/ossec/logs/ossec.log
+printf '\n[+] Agent installed and running. Manager: %s; name: %s; group: %s\n' "$MANAGER_IP" "$AGENT_NAME" "$GROUP"
+echo "[*] Enrollment/connectivity details: $WAZUH_DIR/logs/ossec.log"
+echo "sudo tail -f $WAZUH_DIR/logs/ossec.log"
+if [[ "$FOLLOW_LOGS" -eq 1 ]]; then tail -f "$WAZUH_DIR/logs/ossec.log"; fi

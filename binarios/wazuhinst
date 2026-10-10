@@ -1,55 +1,172 @@
 #!/usr/bin/env bash
-echo ""
-echo ""
-echo "flag -r to reinstall"
+set -euo pipefail
 
-
-echo ""
-echo ""
-sleep .5
-set -e
-               
-INSTALLER_URL="https://packages.wazuh.com/4.13/wazuh-install.sh"
+# Instala los componentes centrales de Wazuh en un servidor Ubuntu o Debian.
+# Referencia: https://documentation.wazuh.com/current/quickstart.html
+INSTALLER_URL="https://packages.wazuh.com/4.14/wazuh-install.sh"
 INSTALLER="wazuh-install.sh"
+# Wazuh exige mayuscula, minuscula, numero y simbolo; changeme123 no es valido.
+ADMIN_PASSWORD="Changeme123."
+PASSWORD_TOOL="/usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh"
 
 usage() {
-  echo "Usage:"
-  echo "  $0        -> install (all-in-one)"
-  echo "  $0 -r     -> reinstall (remove + install)"
+  cat <<EOF
+Uso: $0 [-r | -h]
+  Sin opciones  Instala manager, indexer, Filebeat y dashboard en este servidor.
+  -r            Reinstala: BORRA la configuracion y los datos de Wazuh existentes.
+  -h, --help    Muestra esta ayuda.
+
+Ubuntu: 16.04, 18.04, 20.04, 22.04 o 24.04.
+Debian: 8 o posterior (paquetes DEB; fuera de la lista recomendada del asistente).
+Ambos requieren systemd activo y arquitectura x86_64/ARM64.
+Recomendado para 1-25 agentes: 4 vCPU, 8 GiB de RAM y 50 GB de disco.
+Requiere acceso a Internet. Usa sudo si no se ejecuta como root.
+Al terminar, configura el acceso al dashboard como admin / $ADMIN_PASSWORD
+EOF
+}
+
+die() {
+  printf '[!] %s\n' "$*" >&2
   exit 1
 }
 
 REINSTALL=0
-[[ "${1:-}" == "-r" ]] && REINSTALL=1
-[[ $# -gt 1 ]] && usage
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+case "${1:-}" in
+  "") ;;
+  -r) REINSTALL=1 ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage >&2; die "Opcion desconocida: $1" ;;
+esac
 
-if [[ "$REINSTALL" -eq 1 ]]; then
-  echo "[*] Reinstall mode enabled"
-  echo "[*] Stopping services..."
-  sudo systemctl stop wazuh-manager wazuh-dashboard wazuh-indexer 2>/dev/null || true
+[[ "$(uname -s)" == "Linux" ]] || die "Este instalador requiere Linux Ubuntu o Debian."
+[[ -r /etc/os-release ]] || die "No se puede detectar la distribucion (/etc/os-release)."
+# shellcheck source=/dev/null
+. /etc/os-release
+case "${ID:-}" in
+  ubuntu)
+    DISTRO_NAME="Ubuntu"
+    case "${VERSION_ID:-}" in
+      16.04|18.04|20.04|22.04|24.04) ;;
+      *) die "Ubuntu ${VERSION_ID:-desconocido} no esta en la lista admitida por Wazuh 4.14." ;;
+    esac
+    ;;
+  debian)
+    DISTRO_NAME="Debian"
+    [[ "${VERSION_ID:-}" =~ ^[0-9]+$ ]] || die "No se pudo detectar una version estable de Debian."
+    (( 10#$VERSION_ID >= 8 )) || die "Los paquetes de Wazuh requieren Debian 8 o posterior."
+    ;;
+  *) die "Solo se admite Ubuntu o Debian (detectado: ${ID:-desconocido})." ;;
+esac
+case "$(uname -m)" in
+  x86_64|aarch64) ;;
+  *) die "Se necesita una arquitectura de 64 bits: x86_64 o ARM64 (aarch64)." ;;
+esac
 
-  echo "[*] Removing Wazuh packages..."
-  if command -v apt >/dev/null 2>&1; then
-    sudo apt purge -y wazuh-manager wazuh-dashboard wazuh-indexer
-    sudo apt autoremove -y
-  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
-    sudo dnf remove -y wazuh-manager wazuh-dashboard wazuh-indexer || \
-    sudo yum remove -y wazuh-manager wazuh-dashboard wazuh-indexer
-  fi
+command -v apt-get >/dev/null 2>&1 || die "No se encontro apt-get."
+command -v systemctl >/dev/null 2>&1 || die "No se encontro systemctl."
+[[ -d /run/systemd/system ]] || die "Se necesita systemd activo; usa un servidor o VM Ubuntu/Debian."
 
-  echo "[*] Removing leftover data..."
-  sudo rm -rf /var/ossec /var/lib/wazuh-indexer /usr/share/wazuh-dashboard
+if [[ "$EUID" -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || die "Ejecuta este script como root; sudo no esta instalado."
+  exec sudo -- bash "$0" "$@"
 fi
 
-echo "[*] Downloading installer..."
-curl -sO "$INSTALLER_URL"
+WORKDIR=""
+report_failure() {
+  local status="$1"
+  printf '[!] La instalacion no se completo (codigo %s).\n' "$status" >&2
+  if [[ -n "$WORKDIR" ]]; then
+    printf '[!] Archivos conservados en: %s\n' "$WORKDIR" >&2
+  fi
+  printf '[!] Si el asistente llego a ejecutarse, revisa /var/log/wazuh-install.log.\n' >&2
+  exit "$status"
+}
+trap 'report_failure "$?"' ERR
 
-echo "[*] Running installer (all-in-one)..."
-sudo bash ./$INSTALLER -a
+# Un directorio nuevo evita ejecutar una descarga vieja o pisar certificados.
+# Se conserva porque el asistente genera aqui el archivo con las credenciales.
+umask 077
+WORKDIR="$(mktemp -d /var/tmp/wazuhinst.XXXXXX)"
+cd "$WORKDIR"
+printf '[*] %s %s: Wazuh 4.14 en un solo servidor.\n' "$DISTRO_NAME" "$VERSION_ID"
+if [[ "$ID" == "debian" ]]; then
+  echo "[*] Se usaran paquetes DEB; el asistente puede avisar que Debian no esta en su lista recomendada."
+fi
+printf '[*] Archivos de instalacion: %s\n' "$WORKDIR"
 
-echo "[✓] Done"
+if ! command -v curl >/dev/null 2>&1 || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+  echo "[*] Instalando curl y certificados CA..."
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
+fi
 
+echo "[*] Descargando el asistente oficial..."
+curl --fail --show-error --silent --location --retry 3 \
+  --connect-timeout 15 --max-time 120 --output "$INSTALLER" "$INSTALLER_URL"
+[[ -s "$INSTALLER" ]] || die "La descarga del asistente esta vacia."
+IFS= read -r FIRST_LINE < "$INSTALLER" || die "La descarga no tiene una cabecera valida."
+[[ "$FIRST_LINE" == '#!'* ]] || die "La descarga no es un script; no se ejecutara."
+bash -n "$INSTALLER"
 
-sudo systemctl restart wazuh-indexer wazuh-dashboard
+INSTALL_ARGS=(-a)
+if [[ "$REINSTALL" -eq 1 ]]; then
+  echo "[!] Reinstalacion: el asistente borrara la configuracion y los datos existentes."
+  INSTALL_ARGS+=(-o)
+fi
 
-#sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh -u admin -p M3tro123*.a
+echo "[*] Ejecutando el asistente (all-in-one)..."
+bash "./$INSTALLER" "${INSTALL_ARGS[@]}"
+
+# Prepara una copia actualizada del archivo de recuperacion antes de rotar la
+# clave. Conserva los certificados y las contrasenas de las otras cuentas.
+[[ -r "$PASSWORD_TOOL" ]] || die "No se encontro la herramienta de contrasenas de Wazuh. Archivos: $WORKDIR"
+[[ -f wazuh-install-files.tar ]] || die "No se encontro wazuh-install-files.tar. Archivos: $WORKDIR"
+PASSWORD_UPDATE_DIR="$(mktemp -d "$WORKDIR/admin-password.XXXXXX")"
+tar -xf wazuh-install-files.tar -C "$PASSWORD_UPDATE_DIR"
+PASSWORD_FILE="$PASSWORD_UPDATE_DIR/wazuh-install-files/wazuh-passwords.txt"
+[[ -f "$PASSWORD_FILE" ]] || die "No se encontro wazuh-passwords.txt en el archivo de recuperacion."
+if ! awk -v password="$ADMIN_PASSWORD" '
+  /^[[:space:]]*(indexer_username|api_username):/ {
+    admin = ($1 == "indexer_username:" &&
+             ($2 == "admin" || $2 == "\047admin\047" || $2 == "\"admin\""))
+  }
+  admin && /^[[:space:]]*indexer_password:/ {
+    sub(/indexer_password:.*/, "indexer_password: \047" password "\047")
+    updated++
+    admin = 0
+  }
+  { print }
+  END { if (updated != 1) exit 1 }
+' "$PASSWORD_FILE" > "$PASSWORD_FILE.new"; then
+  die "No se pudo preparar una unica clave admin en wazuh-passwords.txt; no se cambio la contrasena."
+fi
+mv "$PASSWORD_FILE.new" "$PASSWORD_FILE"
+tar -cf wazuh-install-files.tar.new -C "$PASSWORD_UPDATE_DIR" wazuh-install-files
+
+# En una instalacion all-in-one, la herramienta oficial sincroniza la clave
+# con Filebeat y el keystore del manager, y reinicia esos servicios.
+echo "[*] Configurando la contrasena corta de admin..."
+bash "$PASSWORD_TOOL" -u admin -p "$ADMIN_PASSWORD"
+mv wazuh-install-files.tar.new wazuh-install-files.tar
+
+for service in wazuh-indexer wazuh-manager filebeat wazuh-dashboard; do
+  if ! systemctl is-active --quiet "$service"; then
+    die "$service no esta activo. Revisa systemctl status $service y /var/log/wazuh-install.log. Archivos: $WORKDIR"
+  fi
+done
+
+echo "[*] Comprobando el acceso de admin al indexer local..."
+# El asistente genera certificados autofirmados; esta comprobacion es local.
+curl --fail --show-error --silent --insecure --connect-timeout 5 --max-time 30 \
+  --user "admin:$ADMIN_PASSWORD" https://127.0.0.1:9200/ >/dev/null
+
+echo "[OK] Wazuh instalado; los cuatro servicios estan activos."
+echo "Dashboard: https://<IP-de-este-servidor>"
+echo "Usuario: admin"
+printf 'Contrasena: %s\n' "$ADMIN_PASSWORD"
+printf 'Conserva los certificados y credenciales en: %s/wazuh-install-files.tar\n' "$WORKDIR"
+printf 'Para consultar las contrasenas: sudo tar -O -xf %s/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt\n' "$WORKDIR"

@@ -31,8 +31,8 @@ hardening_agent.sh  Collects Linux hardening state and sends or prints JSON repo
 ipv6b               Bloquea ipv6 en linux. 
 ccdcinst            Instala los scripts en la bash de todob.
 dcusercreate        Crea usuario en el ccdcteam dominio, tener hosts 172.20.240.102 domain.local
-wazuhagent          Instala el agente en linux fedora/ubuntu
-wazuhinst           Instala wazuh. asistente. automatico
+wazuhagent          Instala el agente Wazuh en Linux con DEB/RPM o desde fuentes (Arch/Alpine); admite systemd/OpenRC/SysV y -r para desinstalar
+wazuhinst           Instala Wazuh 4.14 en Ubuntu/Debian con clave admin corta (Changeme123.); -r reinstala borrando datos y configuracion
 wazuhinstdock       instala docker compose y wazuh en ubuntu 24
 crondir             Hace un dir y cat a los cron del sistema
 logs-check          Visor de TACACS, syslog y FreeRADIUS; filtra despues de ver logs y usa fzf si existe
