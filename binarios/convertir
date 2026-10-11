@@ -31,6 +31,7 @@ show_menu() {
     echo -e "  ${GREEN}./convertir archivo.mp4${NC}   → Convierte MP4 → MP3 → TXT"
     echo -e "  ${GREEN}./convertir -s archivo.mov${NC} → Convierte video a MP4 (máx calidad)"
     echo -e "  ${GREEN}./convertir -c archivo.video${NC} → Reduce tamaño (H.265, alta calidad visual)"
+    echo -e "  ${GREEN}./convertir -m archivo${NC}    → Convierte cualquier audio/video a MP3"
     echo -e "  ${GREEN}./convertir -t archivo.mp4${NC} → Transcribe con marcas de tiempo (SRT + búsqueda)"
     echo -e "  ${GREEN}./convertir -r salida.json${NC} → JSON de Whisper → Markdown con timestamps (RAG)"
     echo ""
@@ -47,6 +48,7 @@ show_menu() {
     echo -e "  ${CYAN}./convertir podcast.mp3${NC}"
     echo -e "  ${CYAN}./convertir -s pelicula.mov${NC}"
     echo -e "  ${CYAN}./convertir -c pelicula.mp4${NC}"
+    echo -e "  ${CYAN}./convertir -m audio.wma${NC}"
     echo -e "  ${CYAN}./convertir -t charla.mp4${NC}"
     echo -e "  ${CYAN}grep -i 'firewall' charla.busqueda.txt${NC}   ${YELLOW}# → [00:12:34] ...${NC}"
     echo ""
@@ -152,6 +154,32 @@ convert_and_transcribe() {
     else
         echo -e "${RED}${BOLD}❌ Error al transcribir. ¿Está Whisper instalado y activado?${NC}"
         echo -e "${YELLOW}   Corre: ${CYAN}./whisper.sh i${YELLOW} para ver instrucciones${NC}"
+    fi
+}
+
+convert_to_mp3() {
+    local file="$1"
+    local name="${file%.*}"
+    local output="${name}.mp3"
+
+    if [ -e "$output" ]; then
+        echo -e "${RED}${BOLD}❌ La salida ya existe; no se sobrescribe:${NC} $output"
+        return 1
+    fi
+
+    echo -e "${BOLD}🎵 Audio detectado:${NC} $file"
+    echo -e "${YELLOW}   Convirtiendo a MP3...${NC}"
+    echo ""
+
+    ffmpeg -i "$file" -vn -acodec libmp3lame -q:a 0 "$output"
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}${BOLD}✅ ¡Listo! Audio guardado en: ${output}${NC}"
+    else
+        echo -e "${RED}${BOLD}❌ Error al convertir. ¿Está ffmpeg instalado?${NC}"
+        echo -e "${YELLOW}   Instala con: ${CYAN}sudo apt install ffmpeg${NC}"
+        exit 1
     fi
 }
 
@@ -420,6 +448,26 @@ if [ "$1" = "-c" ] || [ "$1" = "--comprimir" ]; then
         exit 1
     fi
     compress_video "$2"
+    exit $?
+fi
+
+if [ "$1" = "-m" ]; then
+    if [ -z "$2" ]; then
+        echo -e "${RED}${BOLD}❌ Debes indicar un archivo con -m${NC}"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    FILE="$2"
+    if [ ! -f "$FILE" ]; then
+        echo -e "${RED}${BOLD}❌ Archivo no encontrado:${NC} $FILE"
+        echo ""
+        show_menu
+        exit 1
+    fi
+
+    convert_to_mp3 "$FILE"
     exit $?
 fi
 
