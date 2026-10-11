@@ -1,4 +1,18 @@
 {
+    "brave": {
+        "name": "brave",
+        "short_desc": "Installs Brave Browser from its official APT repository on Debian/Ubuntu.",
+        "detailed_desc": [
+            "Updates APT package lists and installs curl.",
+            "",
+            "Downloads the Brave signing key to /usr/share/keyrings/brave-browser-archive-keyring.gpg.",
+            "Downloads the repository definition to /etc/apt/sources.list.d/brave-browser-release.sources.",
+            "",
+            "Refreshes APT package lists again and installs brave-browser.",
+            "Uses sudo for system changes and stops if a command fails.",
+            "Prints a Spanish confirmation message after installation succeeds."
+        ]
+    },
     "ctsearch": {
         "name": "ctsearch",
         "short_desc": "Searches Certificate Transparency logs for one or several domains in resumable blocks, with a disk/time guide and separate results per domain.",

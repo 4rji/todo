@@ -60,6 +60,7 @@ timeshiftinst       Instala y configura timeshift solo con directorios basicos.
 doasinst            Instala doas y con -i remueve sudo
 wallpaperinst       Instala wallpaper del grub de kali
 browshinst          Browsh para ver el browser en ssh terminal necesita firefox
+brave               Installs Brave Browser from its official APT repository on Debian/Ubuntu.
 rasp-kios           Launches Chromium in Wayland kiosk mode pointed at 4rji.com.
 rasp-kios2          Launches Chromium in X11 kiosk mode pointed at 10.0.4.107:8888.
 rasp-kiosinst       Installs desktop autostart for rasp-kios on Raspberry Pi.
