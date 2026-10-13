@@ -872,3 +872,4 @@ updatecentos7       Para actualizar centos7
 updatecentos7-2     otra version
 itcpd               Enmascara ssh o cualquier puerto con tcpd, version ssh nmap -sV -sC
 sitescrapy          Scrapy para bajar paginas web completas con crawl y scrapy
+wazuhinstfedora     Wazuh 4.14 Fedora admin hangeme123 
