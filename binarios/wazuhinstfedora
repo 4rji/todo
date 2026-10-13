@@ -1,0 +1,536 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Instala los componentes centrales de Wazuh en Fedora con paquetes RPM.
+# Fedora queda fuera de la lista recomendada por Wazuh para sus servidores.
+# Referencia: https://documentation.wazuh.com/current/quickstart.html
+INSTALLER_URL="https://packages.wazuh.com/4.14/wazuh-install.sh"
+INSTALLER="wazuh-install.sh"
+# Wazuh exige mayuscula, minuscula, numero y simbolo; changeme123 no es valido.
+ADMIN_PASSWORD="Changeme123."
+PASSWORD_TOOL="/usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh"
+
+usage() {
+  cat <<EOF
+Uso: $0 [-r] [--with-manager] [--open-firewall] | --show-manager | --hide-manager | -h
+  Sin opciones  Instala manager, indexer, Filebeat y dashboard en este servidor.
+  -r            Reinstala: BORRA la configuracion y los datos de Wazuh existentes.
+  --with-manager Incluye al manager 000 en Agents y sus contadores al instalar.
+  --show-manager Aplica ese cambio a Wazuh instalado, sin reinstalar.
+  --hide-manager Restaura la visibilidad original usando la copia guardada.
+  --open-firewall Abre 443/tcp, 1514/tcp y 1515/tcp en la zona predeterminada
+                  de firewalld, en la configuracion activa y permanente.
+  -h, --help    Muestra esta ayuda.
+
+Fedora Server/Workstation con DNF, systemd activo y arquitectura x86_64/ARM64.
+No admite sistemas inmutables como CoreOS, Silverblue o Kinoite.
+Fedora no esta en la lista recomendada para los servidores de Wazuh.
+Usa DNF4 para las llamadas YUM del asistente; lo instala si falta.
+Recomendado para 1-25 agentes: 4 vCPU, 8 GiB de RAM y 50 GB de disco.
+Requiere acceso a Internet. Usa sudo si no se ejecuta como root.
+Al terminar, configura el acceso al dashboard como admin / $ADMIN_PASSWORD
+--open-firewall requiere firewalld activo. Sin esa opcion no cambia sus reglas.
+
+Visibilidad del manager: personalizacion local de la API de Wazuh 4.14.
+Requiere manager y dashboard en este servidor; reinicia wazuh-manager.
+--show-manager y --hide-manager no necesitan Internet.
+Conserva una copia para revertir; una actualizacion de Wazuh puede quitarla.
+El ID 000 sigue siendo el manager local, con sus restricciones originales.
+EOF
+}
+
+die() {
+  printf '[!] %s\n' "$*" >&2
+  exit 1
+}
+
+manager_visibility() {
+  local action="$1"
+  local python="/var/ossec/framework/python/bin/python3"
+  [[ -x "$python" ]] || die "No se encontro el Python incluido con Wazuh."
+  systemctl is-active --quiet wazuh-manager || die "wazuh-manager debe estar activo."
+  "$python" - "$action" <<'PY'
+import ast
+import base64
+import hashlib
+import inspect
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+ROOT = Path('/var/ossec')
+STATE_DIR = ROOT / 'var/wazuhinst-manager-dashboard'
+MARKER = '# wazuhinst: mostrar manager 000 v1'
+action = sys.argv[1]
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_write(target, data, metadata=None):
+    fd, name = tempfile.mkstemp(prefix='.' + target.name + '-', dir=str(target.parent))
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if metadata:
+            info = metadata.stat()
+            os.chown(str(temporary), info.st_uid, info.st_gid)
+            shutil.copystat(str(metadata), str(temporary))
+        os.replace(str(temporary), str(target))
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def patch(source):
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    lines = source.splitlines(keepends=True)
+    edits = []
+
+    # Solo funciones de lectura; no cambia permisos ni operaciones sobre 000.
+    for name in ('get_agents', 'get_agents_summary_status', 'get_agents_summary_os'):
+        if name not in functions:
+            raise ValueError('Estructura de la API no reconocida: ' + name)
+    listing = functions['get_agents']
+    queries = [node for node in ast.walk(listing) if isinstance(node, ast.keyword)
+               and node.arg == 'query' and isinstance(node.value, ast.Name)
+               and node.value.id == 'q']
+    if len(queries) != 1:
+        raise ValueError('Consulta de Agents no reconocida; no se modifico la API.')
+    # El dashboard envia id!=000. Mantiene el resto del filtro y el RBAC.
+    insertion = listing.body[0].end_lineno if isinstance(listing.body[0], ast.Expr) \
+        and isinstance(listing.body[0].value, ast.Constant) \
+        and isinstance(listing.body[0].value.value, str) else listing.body[0].lineno - 1
+    edits.append((insertion, insertion, [
+        '    ' + MARKER + '\n',
+        '    if q:\n',
+        '        import re as _wazuhinst_re\n',
+        '        q = _wazuhinst_re.sub(r"(^|[;(,])\\s*id\\s*!=\\s*000(?=\\s*(?:[;),]|$))", '
+        'r"\\1id>=000", q)\n',
+    ]))
+    for name in ('get_agents_summary_status', 'get_agents_summary_os'):
+        function = functions[name]
+        queries = [node for node in ast.walk(function) if isinstance(node, ast.keyword)
+                   and node.arg == 'query' and isinstance(node.value, ast.Constant)
+                   and node.value.value == 'id!=000']
+        expected = 2 if name.endswith('_status') else 1
+        if len(queries) != expected:
+            raise ValueError('Contadores no reconocidos: ' + name)
+        # En status, la segunda consulta es sincronizacion de grupos: el
+        # manager no pertenece a grupos y debe quedar fuera de ese calculo.
+        value = sorted(queries, key=lambda node: node.lineno)[0].value
+        line = lines[value.lineno - 1]
+        before = line[:value.col_offset]
+        after = line[value.end_col_offset:]
+        edits.append((value.lineno - 1, value.lineno, [before + "'id>=000'" + after]))
+    status = functions['get_agents_summary_status']
+    totals = [node for node in ast.walk(status) if isinstance(node, ast.Assign)
+              and len(node.targets) == 2
+              and ast.unparse(node.targets[0]) == "connection['total']"
+              and ast.unparse(node.targets[1]) == "sync_configuration['total']"
+              and isinstance(node.value, ast.Name) and node.value.id == 'total']
+    if len(totals) != 1:
+        raise ValueError('Totales de los contadores no reconocidos.')
+    node = totals[0]
+    edits.append((node.lineno - 1, node.end_lineno, [
+        "        connection['total'] = total\n",
+        "        sync_configuration['total'] = (sync_configuration['synced']\n",
+        "                                       + sync_configuration['not_synced'])\n",
+    ]))
+    for start, end, replacement in sorted(edits, reverse=True):
+        lines[start:end] = replacement
+    candidate = ''.join(lines)
+    compile(candidate, 'wazuh/agent.py', 'exec')
+    return candidate.encode('utf-8')
+
+
+def api_settings():
+    import yaml  # Incluido en el Python de Wazuh; no instala dependencias.
+    config = Path('/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml')
+    data = yaml.safe_load(config.read_text())
+    local_addresses = {'localhost', '127.0.0.1', '::1'}
+    checked_addresses = False
+    for record in data.get('hosts', []):
+        for host in record.values():
+            url = urllib.parse.urlsplit(host.get('url', ''))
+            if url.scheme != 'https':
+                continue
+            if url.hostname not in local_addresses and not checked_addresses:
+                checked_addresses = True
+                try:
+                    addresses = subprocess.check_output(['hostname', '-I'], text=True, timeout=5)
+                    local_addresses.update(addresses.split())
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            if url.hostname not in local_addresses:
+                continue
+            username, password = host.get('username'), host.get('password')
+            if not isinstance(username, str) or not isinstance(password, str):
+                continue
+            try:
+                port = int(host.get('port', url.port or 55000))
+            except (TypeError, ValueError):
+                raise ValueError('Puerto local de la API no valido.') from None
+            if not 1 <= port <= 65535:
+                raise ValueError('Puerto local de la API no valido.')
+            address = '[' + url.hostname + ']' if ':' in url.hostname else url.hostname
+            basic = base64.b64encode((username + ':' + password).encode()).decode()
+            return 'https://' + address + ':' + str(port), basic
+    raise ValueError('No se encontro una conexion HTTPS local en wazuh.yml.')
+
+
+def verify(base, basic):
+    context = ssl._create_unverified_context()  # API de este servidor, certificado de Wazuh.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                        urllib.request.HTTPSHandler(context=context))
+    request = urllib.request.Request(base + '/security/user/authenticate?raw=true',
+                                    headers={'Authorization': 'Basic ' + basic}, method='POST')
+    with opener.open(request, timeout=5) as response:
+        token = response.read().decode().strip()
+    if not token:
+        raise ValueError('La API no devolvio un token.')
+
+    def get(route):
+        request = urllib.request.Request(base + route, headers={'Authorization': 'Bearer ' + token})
+        with opener.open(request, timeout=5) as response:
+            result = json.load(response)
+        if result.get('error') != 0:
+            raise ValueError('La API rechazo la comprobacion.')
+        return result['data']
+
+    query = urllib.parse.urlencode({'agents_list': '000', 'q': 'id!=000', 'limit': 1})
+    listing = get('/agents?' + query)
+    manager = [item for item in listing['affected_items'] if item['id'] == '000']
+    if len(manager) != 1 or manager[0].get('status') != 'active':
+        raise ValueError('El manager 000 no aparece activo en GET /agents.')
+    counts = get('/agents/summary/status')['connection']
+    if counts['active'] < 1 or counts['total'] != sum(counts[name] for name in
+            ('active', 'disconnected', 'pending', 'never_connected')):
+        raise ValueError('Los contadores de la API no son consistentes.')
+    return counts
+
+
+def restart():
+    subprocess.run(['systemctl', 'restart', 'wazuh-manager'], check=True, timeout=180)
+    subprocess.run(['systemctl', 'is-active', '--quiet', 'wazuh-manager'], check=True, timeout=10)
+
+
+try:
+    info = subprocess.check_output([str(ROOT / 'bin/wazuh-control'), 'info'], text=True)
+    match = re.search(r'WAZUH_VERSION=["\']?(v?4\.14\.\d+)["\']?', info)
+    if not match:
+        raise ValueError('Esta personalizacion solo admite Wazuh 4.14.x.')
+    config = ET.fromstring('<root>' + (ROOT / 'etc/ossec.conf').read_text() + '</root>')
+    for cluster in config.findall('.//cluster'):
+        if cluster.findtext('disabled', 'no').strip() != 'yes':
+            raise ValueError('Esta opcion requiere un manager sin cluster.')
+    import wazuh.agent
+    target = Path(inspect.getsourcefile(wazuh.agent)).resolve()
+    if not target.is_relative_to(ROOT / 'framework') or not target.is_file():
+        raise ValueError('Ruta de la API de Wazuh no reconocida.')
+    current = target.read_bytes()
+    state_file = STATE_DIR / 'state.json'
+    state = json.loads(state_file.read_text()) if state_file.exists() else None
+    if action == 'hide':
+        if MARKER.encode() not in current:
+            print('[OK] El manager ya tiene la visibilidad original.')
+            sys.exit(0)
+        if not state or state['target'] != str(target) or digest(current) != state['patched_sha256']:
+            raise ValueError('La API cambio desde el parche; no se sobrescribira con una copia antigua.')
+        backup = STATE_DIR / state['backup']
+        original = backup.read_bytes()
+        if digest(original) != state['original_sha256']:
+            raise ValueError('La copia de la API no coincide con su checksum.')
+        atomic_write(target, original, backup)
+        try:
+            restart()
+        except Exception:
+            atomic_write(target, current, target)
+            restart()
+            raise
+        print('[OK] Restaurada la visibilidad original del manager 000.')
+    else:
+        base, basic = api_settings()  # Comprueba credenciales locales antes de escribir.
+        if MARKER.encode() in current:
+            if not state or state['target'] != str(target) or digest(current) != state['patched_sha256']:
+                raise ValueError('El parche existente no coincide con la copia guardada.')
+        else:
+            candidate = patch(current.decode('utf-8'))
+            STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            backup = STATE_DIR / ('agent-' + digest(current) + '.py.original')
+            if backup.exists() and digest(backup.read_bytes()) != digest(current):
+                raise ValueError('La copia existente no coincide con la API original.')
+            if not backup.exists():
+                shutil.copy2(str(target), str(backup))
+                info = target.stat()
+                os.chown(str(backup), info.st_uid, info.st_gid)
+            state = {'target': str(target), 'version': match.group(1), 'backup': backup.name,
+                     'original_sha256': digest(current), 'patched_sha256': digest(candidate)}
+            atomic_write(target, candidate, target)
+            try:
+                atomic_write(state_file, json.dumps(state, indent=2).encode())
+            except Exception:
+                atomic_write(target, current, backup)
+                raise
+        try:
+            restart()
+            for attempt in range(15):
+                try:
+                    counts = verify(base, basic)
+                    break
+                except (urllib.error.URLError, TimeoutError, ConnectionError):
+                    if attempt == 14:
+                        raise
+                    time.sleep(1)
+        except Exception:
+            # Deshace un intento nuevo fallido; no elimina un parche previo.
+            if MARKER.encode() not in current:
+                atomic_write(target, current, STATE_DIR / state['backup'])
+                restart()
+                print('[*] Se restauro la API original tras fallar la comprobacion.', file=sys.stderr)
+            raise
+        print('[OK] Manager 000 visible en Agents. Active: {}; total: {}.'.format(
+              counts['active'], counts['total']))
+        print('[*] Actualiza el dashboard. Copia de la API: ' + str(STATE_DIR / state['backup']))
+        print('[*] Para revertir: sudo wazuhinstfedora --hide-manager')
+except Exception as error:
+    # No imprime credenciales, tokens, configuraciones ni respuestas de la API.
+    if isinstance(error, (ValueError, SyntaxError)):
+        message = str(error)
+    else:
+        message = type(error).__name__
+    print('[!] No se pudo cambiar la visibilidad del manager: ' + message, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+REINSTALL=0
+WITH_MANAGER=0
+OPEN_FIREWALL=0
+MODE="install"
+for option in "$@"; do
+  case "$option" in
+    -r) [[ "$REINSTALL" -eq 0 ]] || die "Opcion repetida: -r"; REINSTALL=1 ;;
+    --with-manager) [[ "$WITH_MANAGER" -eq 0 ]] || die "Opcion repetida: --with-manager"; WITH_MANAGER=1 ;;
+    --open-firewall) [[ "$OPEN_FIREWALL" -eq 0 ]] || die "Opcion repetida: --open-firewall"; OPEN_FIREWALL=1 ;;
+    --show-manager|--hide-manager)
+      [[ "$MODE" == install ]] || die "Usa una sola opcion de visibilidad."
+      MODE="${option#--}" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Opcion desconocida: $option" ;;
+  esac
+done
+if [[ "$MODE" != install && ( "$REINSTALL" -eq 1 || "$WITH_MANAGER" -eq 1 || "$OPEN_FIREWALL" -eq 1 ) ]]; then
+  die "--show-manager y --hide-manager se usan solos, sin instalar ni cambiar el firewall."
+fi
+
+[[ "$(uname -s)" == "Linux" ]] || die "Este instalador requiere Linux Fedora."
+[[ -r /etc/os-release ]] || die "No se puede detectar la distribucion (/etc/os-release)."
+# shellcheck source=/dev/null
+. /etc/os-release
+[[ "${ID:-}" == fedora ]] || die "Solo se admite Fedora (detectado: ${ID:-desconocido})."
+[[ "${VERSION_ID:-}" =~ ^[0-9]+$ ]] || die "No se pudo detectar una version estable de Fedora."
+case "${VARIANT_ID:-}" in
+  coreos|silverblue|kinoite|sericea|onyx|iot)
+    die "Fedora ${VARIANT_ID} es inmutable; usa Fedora Server o Workstation con DNF." ;;
+esac
+[[ ! -e /run/ostree-booted ]] || die "No se admite Fedora Atomic/OSTree; usa un sistema con paquetes RPM instalables por DNF."
+case "$(uname -m)" in
+  x86_64|aarch64) ;;
+  *) die "Se necesita una arquitectura de 64 bits: x86_64 o ARM64 (aarch64)." ;;
+esac
+
+command -v systemctl >/dev/null 2>&1 || die "No se encontro systemctl."
+[[ -d /run/systemd/system ]] || die "Se necesita systemd activo; usa un servidor o VM Fedora."
+
+if [[ "$EUID" -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || die "Ejecuta este script como root; sudo no esta instalado."
+  exec sudo -- bash "$0" "$@"
+fi
+
+if [[ "$MODE" != install ]]; then
+  manager_visibility "${MODE%%-manager}"
+  exit 0
+fi
+
+command -v rpm >/dev/null 2>&1 || die "No se encontro rpm."
+DNF_BIN=""
+for candidate in dnf4 dnf-3 dnf dnf5; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    DNF_BIN="$(command -v "$candidate")"
+    break
+  fi
+done
+[[ -n "$DNF_BIN" ]] || die "No se encontro DNF; usa una instalacion normal de Fedora Server/Workstation."
+
+FIREWALL_ZONE=""
+if [[ "$OPEN_FIREWALL" -eq 1 ]]; then
+  command -v firewall-cmd >/dev/null 2>&1 || die "--open-firewall requiere firewall-cmd instalado."
+  systemctl is-active --quiet firewalld || die "--open-firewall requiere firewalld activo."
+  FIREWALL_ZONE="$(firewall-cmd --get-default-zone)"
+  [[ -n "$FIREWALL_ZONE" ]] || die "No se pudo detectar la zona predeterminada de firewalld."
+fi
+
+WORKDIR=""
+report_failure() {
+  local status="$1"
+  printf '[!] La instalacion no se completo (codigo %s).\n' "$status" >&2
+  if [[ -n "$WORKDIR" ]]; then
+    printf '[!] Archivos conservados en: %s\n' "$WORKDIR" >&2
+  fi
+  printf '[!] Si el asistente llego a ejecutarse, revisa /var/log/wazuh-install.log.\n' >&2
+  if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == Enforcing ]]; then
+    printf '[!] Para revisar bloqueos de SELinux: sudo ausearch -m AVC,USER_AVC -ts recent\n' >&2
+  fi
+  exit "$status"
+}
+trap 'report_failure "$?"' ERR
+
+# Un directorio nuevo evita ejecutar una descarga vieja o pisar certificados.
+# Se conserva porque el asistente genera aqui el archivo con las credenciales.
+umask 077
+WORKDIR="$(mktemp -d /var/tmp/wazuhinstfedora.XXXXXX)"
+cd "$WORKDIR"
+printf '[*] Fedora %s: Wazuh 4.14 en un solo servidor.\n' "$VERSION_ID"
+echo "[*] Se usaran paquetes RPM; Fedora no esta en la lista recomendada del asistente."
+printf '[*] Archivos de instalacion: %s\n' "$WORKDIR"
+
+# El asistente 4.14 detecta yum y usa su interfaz/salida clasica. DNF4 se
+# distribuye en python3-dnf y puede coexistir con el DNF5 predeterminado.
+COMPAT_DNF=""
+for candidate in dnf4 dnf-3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    COMPAT_DNF="$(command -v "$candidate")"
+    break
+  fi
+done
+if [[ -z "$COMPAT_DNF" ]]; then
+  echo "[*] Instalando DNF4 para el asistente de Wazuh..."
+  "$DNF_BIN" install -y python3-dnf
+  for candidate in dnf4 dnf-3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      COMPAT_DNF="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+[[ -n "$COMPAT_DNF" ]] || die "No se encontro DNF4 despues de instalar python3-dnf. Archivos: $WORKDIR"
+
+# Solo esta ejecucion resuelve yum a DNF4, sin cambiar /usr/bin ni DNF5.
+mkdir "$WORKDIR/compat-bin"
+ln -s "$COMPAT_DNF" "$WORKDIR/compat-bin/yum"
+export PATH="$WORKDIR/compat-bin:$PATH"
+
+# El asistente consulta paquetes por nombre: curl-minimal no satisface su
+# comprobacion de curl, aunque el comando exista en una imagen Fedora Cloud.
+if rpm -q curl-minimal --quiet; then
+  echo "[*] Sustituyendo curl-minimal por curl para las dependencias del asistente..."
+  "$COMPAT_DNF" swap -y curl-minimal curl
+fi
+echo "[*] Preparando curl, certificados CA, OpenSSL y tar..."
+"$COMPAT_DNF" install -y curl ca-certificates openssl tar
+command -v curl >/dev/null 2>&1 || die "No se encontro curl despues de instalarlo."
+[[ -s /etc/pki/tls/certs/ca-bundle.crt ]] || die "No se encontro el archivo de certificados CA de Fedora."
+
+# El RPM del manager carga su propia politica si SELinux esta habilitado.
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" != Disabled ]]; then
+  "$COMPAT_DNF" install -y policycoreutils
+fi
+
+echo "[*] Descargando el asistente oficial..."
+curl --fail --show-error --silent --location --retry 3 \
+  --connect-timeout 15 --max-time 120 --output "$INSTALLER" "$INSTALLER_URL"
+[[ -s "$INSTALLER" ]] || die "La descarga del asistente esta vacia."
+IFS= read -r FIRST_LINE < "$INSTALLER" || die "La descarga no tiene una cabecera valida."
+[[ "$FIRST_LINE" == '#!'* ]] || die "La descarga no es un script; no se ejecutara."
+bash -n "$INSTALLER"
+
+INSTALL_ARGS=(-a)
+if [[ "$REINSTALL" -eq 1 ]]; then
+  echo "[!] Reinstalacion: el asistente borrara la configuracion y los datos existentes."
+  INSTALL_ARGS+=(-o)
+fi
+
+echo "[*] Ejecutando el asistente (all-in-one)..."
+bash "./$INSTALLER" "${INSTALL_ARGS[@]}"
+
+# Prepara una copia actualizada del archivo de recuperacion antes de rotar la
+# clave. Conserva los certificados y las contrasenas de las otras cuentas.
+[[ -r "$PASSWORD_TOOL" ]] || die "No se encontro la herramienta de contrasenas de Wazuh. Archivos: $WORKDIR"
+[[ -f wazuh-install-files.tar ]] || die "No se encontro wazuh-install-files.tar. Archivos: $WORKDIR"
+PASSWORD_UPDATE_DIR="$(mktemp -d "$WORKDIR/admin-password.XXXXXX")"
+tar -xf wazuh-install-files.tar -C "$PASSWORD_UPDATE_DIR"
+PASSWORD_FILE="$PASSWORD_UPDATE_DIR/wazuh-install-files/wazuh-passwords.txt"
+[[ -f "$PASSWORD_FILE" ]] || die "No se encontro wazuh-passwords.txt en el archivo de recuperacion."
+if ! awk -v password="$ADMIN_PASSWORD" '
+  /^[[:space:]]*(indexer_username|api_username):/ {
+    admin = ($1 == "indexer_username:" &&
+             ($2 == "admin" || $2 == "\047admin\047" || $2 == "\"admin\""))
+  }
+  admin && /^[[:space:]]*indexer_password:/ {
+    sub(/indexer_password:.*/, "indexer_password: \047" password "\047")
+    updated++
+    admin = 0
+  }
+  { print }
+  END { if (updated != 1) exit 1 }
+' "$PASSWORD_FILE" > "$PASSWORD_FILE.new"; then
+  die "No se pudo preparar una unica clave admin en wazuh-passwords.txt; no se cambio la contrasena."
+fi
+mv "$PASSWORD_FILE.new" "$PASSWORD_FILE"
+tar -cf wazuh-install-files.tar.new -C "$PASSWORD_UPDATE_DIR" wazuh-install-files
+
+# En una instalacion all-in-one, la herramienta oficial sincroniza la clave
+# con Filebeat y el keystore del manager, y reinicia esos servicios.
+echo "[*] Configurando la contrasena corta de admin..."
+bash "$PASSWORD_TOOL" -u admin -p "$ADMIN_PASSWORD"
+mv wazuh-install-files.tar.new wazuh-install-files.tar
+
+for service in wazuh-indexer wazuh-manager filebeat wazuh-dashboard; do
+  if ! systemctl is-active --quiet "$service"; then
+    die "$service no esta activo. Revisa systemctl status $service y /var/log/wazuh-install.log. Archivos: $WORKDIR"
+  fi
+done
+
+echo "[*] Comprobando el acceso de admin al indexer local..."
+# El asistente genera certificados autofirmados; esta comprobacion es local.
+curl --fail --show-error --silent --insecure --connect-timeout 5 --max-time 30 \
+  --user "admin:$ADMIN_PASSWORD" https://127.0.0.1:9200/ >/dev/null
+
+if [[ "$WITH_MANAGER" -eq 1 ]]; then
+  manager_visibility show
+fi
+
+if [[ "$OPEN_FIREWALL" -eq 1 ]]; then
+  printf '[*] Abriendo puertos Wazuh en firewalld (zona %s)...\n' "$FIREWALL_ZONE"
+  for port in 443/tcp 1514/tcp 1515/tcp; do
+    firewall-cmd --permanent --zone="$FIREWALL_ZONE" --add-port="$port"
+    firewall-cmd --zone="$FIREWALL_ZONE" --add-port="$port"
+  done
+elif systemctl is-active --quiet firewalld; then
+  echo "[*] Firewalld esta activo: permite 443/tcp (dashboard), 1514/tcp y 1515/tcp (agentes) en la zona de tu interfaz."
+  echo "[*] Puedes usar --open-firewall al instalar para abrirlos en la zona predeterminada."
+fi
+
+echo "[OK] Wazuh instalado; los cuatro servicios estan activos."
+echo "Dashboard: https://<IP-de-este-servidor>"
+echo "Usuario: admin"
+printf 'Contrasena: %s\n' "$ADMIN_PASSWORD"
+printf 'Conserva los certificados y credenciales en: %s/wazuh-install-files.tar\n' "$WORKDIR"
+printf 'Para consultar las contrasenas: sudo tar -O -xf %s/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt\n' "$WORKDIR"
