@@ -6,6 +6,19 @@ AMARILLO='\033[1;33m'
 AZUL='\033[0;34m'
 NC='\033[0m' # Sin Color
 
+# Mostrar lista de comandos disponibles
+echo -e "${VERDE}Comandos disponibles para la máquina virtual '$vm_name':${NC}"
+echo "1. sudo virsh list  #running vm"
+echo "2. sudo virsh list --all #all VM"
+echo "3. sudo virsh start $vm_name #start"
+echo "4. sudo virsh shutdown $vm_name #shutdown"
+echo "5. sudo virsh destroy $vm_name #stop"
+echo "6. sudo virsh snapshot-list $vm_name #list snapshots"
+echo "7. sudo virsh snapshot-delete $vm_name nombre_snapshot"
+echo "8. sudo virsh undefine $vm_name #delete vm"
+echo "9. sudo virsh undefine $vm_name --remove-all-storage #delete storage too"
+echo "10. sudo virsh console $vm_name #consola"
+
 # Espacio para una mejor visualización
 echo ""
 
