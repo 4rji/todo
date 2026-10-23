@@ -22,9 +22,9 @@ case "${1:-}" in
     *)              echo -e "\033[1;31mOpcion invalida: $1\033[0m"; usage 1 ;;
 esac
 
+# Auto-eleva a root con sudo
 if [ "$EUID" -ne 0 ]; then
-    echo -e "\033[1;31mEjecutá con sudo:\033[0m sudo $(readlink -f "$0") ${1:-}"
-    exit 1
+    exec sudo bash "$(readlink -f "$0")" "$@"
 fi
 
 keyring="/etc/apt/keyrings/mwt-desktop.gpg"
