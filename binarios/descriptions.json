@@ -1,4 +1,22 @@
 {
+    "cafe": {
+        "name": "cafe",
+        "short_desc": "Keeps macOS or Linux awake indefinitely, for a process, a command, or a timed session.",
+        "detailed_desc": [
+            "Uses caffeinate -dimsu on macOS and systemd-inhibit on Linux.",
+            "Linux requires active systemd/logind and does not guarantee that the display stays on.",
+            "",
+            "Use -p with an existing PID or exact process name; ambiguous names require a PID.",
+            "Use -t SECONDS for a timed session, optionally combined with -p.",
+            "Use -- COMMAND ARGUMENTS to keep the system awake while a command runs and preserve its exit status.",
+            "Use -s to allow display and disk sleep on macOS or inhibit only system sleep on Linux.",
+            "",
+            "Finds the native macOS tool at /usr/bin/caffeinate even when it is outside PATH.",
+            "Installs the systemd package on Linux when systemd-inhibit is missing, using apt-get, dnf, yum, pacman, or zypper.",
+            "Use -n to disable automatic installation, -q for quiet output, and -h for Spanish help.",
+            "Stops with Ctrl+C and makes no permanent power configuration changes."
+        ]
+    },
     "brave": {
         "name": "brave",
         "short_desc": "Installs Brave Browser from its official APT repository on Debian/Ubuntu.",
