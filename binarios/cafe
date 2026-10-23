@@ -6,17 +6,14 @@ help() {
 Uso: cafe [opciones] [-- comando argumentos...]
 
 Mantiene la computadora despierta hasta Ctrl+C o hasta terminar la tarea.
-macOS: caffeinate -dimsu. Linux: systemd-inhibit (requiere systemd/logind).
-En Linux bloquea suspension e inactividad, sin garantizar pantalla encendida.
+Usa caffeinate -dimsu; requiere caffeinate compatible con las opciones de macOS.
 
   -h, --help          Muestra esta ayuda.
   -p, --process PROC  Espera un PID o nombre exacto de proceso existente.
                       Si hay varios con ese nombre, pedi un PID concreto.
   -t, --time SEG      Termina despues de SEG segundos (entero positivo).
                       Con -p, termina cuando finalice el proceso o el tiempo.
-  -s, --system-only   En macOS permite apagar pantalla y discos (-is).
-                      En Linux bloquea solo suspension, no inactividad.
-  -n, --no-install    No instala dependencias faltantes.
+  -s, --system-only   Permite apagar pantalla y discos (caffeinate -is).
   -q, --quiet         Omite mensajes informativos.
   -- comando ...     Mantiene despierta la maquina mientras corre el comando.
                       Conserva su codigo de salida; no combina con -p ni -t.
@@ -30,14 +27,15 @@ Ejemplos:
   cafe -- rsync -av origen/ destino/
 
 En macOS busca tambien /usr/bin/caffeinate, incluido con el sistema.
-En Linux instala systemd con apt-get, dnf, yum, pacman o zypper si falta
-systemd-inhibit. La instalacion puede pedir sudo; el bloqueo usa tu usuario.
+En Linux requiere una implementacion compatible de caffeinate en PATH.
+Si falta caffeinate en Linux, lo compila e instala en ~/.local/bin.
+Requiere curl, cc, pkg-config y los headers de dbus-1; no instala systemd.
 No cambia la configuracion permanente de energia ni evita cerrar la tapa.
 EOF
 }
 die() { printf 'cafe: %s\n' "$*" >&2; exit 1; }
 info() { if [[ $quiet == 0 ]]; then printf 'cafe: %s\n' "$*" >&2; fi; }
-process='' duration=0 system_only=0 no_install=0 quiet=0
+process='' duration=0 system_only=0 quiet=0
 while (($#)); do
     case "$1" in
         -h|--help) help; exit 0 ;;
@@ -52,7 +50,6 @@ while (($#)); do
             fi
             shift 2 ;;
         -s|--system-only) system_only=1; shift ;;
-        -n|--no-install) no_install=1; shift ;;
         -q|--quiet) quiet=1; shift ;;
         --) shift; (($#)) || die 'Falta el comando despues de --.'; break ;;
         *) die "Opcion desconocida: $1. Usa cafe -h." ;;
@@ -76,66 +73,33 @@ if [[ -n $process ]]; then
     kill -0 "$pid" 2>/dev/null || die "El PID $pid no existe o no es accesible por tu usuario."
 fi
 
-case "$(uname -s)" in
-    Darwin)
-        backend=$(command -v caffeinate || true)
-        [[ -n $backend ]] || backend=/usr/bin/caffeinate
-        [[ -x $backend ]] || die 'Falta caffeinate, componente nativo de macOS; restaura /usr/bin/caffeinate desde macOS.'
-        flags=(-dimsu)
-        [[ $system_only == 0 ]] || flags=(-is)
-        [[ -z $pid ]] || flags+=(-w "$pid")
-        [[ $duration == 0 ]] || flags+=(-t "$duration")
-        info 'Manteniendo macOS despierto. Ctrl+C para detener.'
-        exec "$backend" "${flags[@]}" "$@"
-        ;;
-    Linux)
-        [[ -d /run/systemd/system ]] || die 'Este Linux requiere systemd/logind activo para usar systemd-inhibit.'
-        if ! command -v systemd-inhibit >/dev/null 2>&1; then
-            [[ $no_install == 0 ]] || die 'Falta systemd-inhibit y --no-install esta activo.'
-            elevate=()
-            if ((EUID != 0)); then
-                command -v sudo >/dev/null 2>&1 || die 'Falta sudo para instalar systemd.'
-                elevate=(sudo)
-            fi
-            info 'Instalando systemd para obtener systemd-inhibit...'
-            if command -v apt-get >/dev/null 2>&1; then
-                "${elevate[@]}" apt-get update
-                "${elevate[@]}" apt-get install -y systemd
-            elif command -v dnf >/dev/null 2>&1; then
-                "${elevate[@]}" dnf install -y systemd
-            elif command -v yum >/dev/null 2>&1; then
-                "${elevate[@]}" yum install -y systemd
-            elif command -v pacman >/dev/null 2>&1; then
-                "${elevate[@]}" pacman -S --needed --noconfirm systemd
-            elif command -v zypper >/dev/null 2>&1; then
-                "${elevate[@]}" zypper --non-interactive install systemd
-            else
-                die 'Instala systemd-inhibit con el gestor de paquetes de tu distribucion.'
-            fi
-            command -v systemd-inhibit >/dev/null 2>&1 || die 'La instalacion no dejo systemd-inhibit en PATH.'
-        fi
-        what=sleep:idle
-        [[ $system_only == 0 ]] || what=sleep
-        info 'Manteniendo Linux despierto. Ctrl+C para detener.'
-        if (($#)); then
-            exec systemd-inhibit --what="$what" --who=cafe --why='Tarea en curso' --mode=block -- "$@"
-        fi
-        # El monitor vive dentro del inhibidor: al salir libera el bloqueo.
-        exec systemd-inhibit --what="$what" --who=cafe --why='Tarea en curso' --mode=block -- \
-            bash -c '
-                pid=$1; duration=$2; SECONDS=0
-                trap "exit 130" INT
-                trap "exit 143" TERM
-                while :; do
-                    if [[ -n $pid ]]; then
-                        kill -0 "$pid" 2>/dev/null || exit 0
-                        state=$(ps -o stat= -p "$pid" 2>/dev/null) || exit 0
-                        [[ $state != *Z* ]] || exit 0
-                    fi
-                    ((duration == 0 || SECONDS < duration)) || exit 0
-                    sleep 1
-                done
-            ' cafe-monitor "$pid" "$duration"
-        ;;
-    *) die 'Sistema no compatible; usa macOS o Linux.' ;;
-esac
+backend=$(command -v caffeinate || true)
+if [[ -z $backend && -x /usr/bin/caffeinate ]]; then
+    backend=/usr/bin/caffeinate
+fi
+if [[ -z $backend && $(uname -s) == Linux ]]; then
+    backend="$HOME/.local/bin/caffeinate"
+    if [[ ! -x $backend ]]; then
+        for dependency in curl cc pkg-config; do
+            command -v "$dependency" >/dev/null 2>&1 || die "Falta la dependencia $dependency para instalar caffeinate."
+        done
+        pkg-config --exists dbus-1 || die 'Faltan los headers de dbus-1 (libdbus-1-dev o dbus-devel).'
+        info 'Instalando caffeinate en ~/.local/bin (sin systemd)...'
+        workdir=$(mktemp -d)
+        trap 'rm -rf -- "$workdir"' EXIT
+        curl -fsSL https://raw.githubusercontent.com/DavidBalishyan/caffeinate/main/caffeinate.c -o "$workdir/caffeinate.c"
+        # pkg-config devuelve listas de argumentos para el compilador.
+        cc -O2 "$workdir/caffeinate.c" -o "$workdir/caffeinate" $(pkg-config --cflags --libs dbus-1)
+        mkdir -p "$HOME/.local/bin"
+        install -m 755 "$workdir/caffeinate" "$backend"
+        rm -rf -- "$workdir"
+        trap - EXIT
+    fi
+fi
+[[ -n $backend ]] || die 'Falta /usr/bin/caffeinate, incluido con macOS; restaura este componente del sistema.'
+flags=(-dimsu)
+[[ $system_only == 0 ]] || flags=(-is)
+[[ -z $pid ]] || flags+=(-w "$pid")
+[[ $duration == 0 ]] || flags+=(-t "$duration")
+info 'Manteniendo la computadora despierta. Ctrl+C para detener.'
+exec "$backend" "${flags[@]}" "$@"
