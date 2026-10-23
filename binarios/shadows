@@ -17,14 +17,38 @@ Usage: shadows [option] [args]
 Use the redir script to redirect all machine traffic on Linux: \033[31mredir\033[0m.
 
 Options:
-  -s              Install and prepare the Shadowsocks server (Debian/Ubuntu).
+  -s              Install and prepare the Shadowsocks server (Debian/Ubuntu/macOS).
   -c              Install the Shadowsocks client (Debian/Arch).
   -f [ips|file]   Generate client configs for Linux.
   -m [ips|file]   Generate client configs for macOS.
   -r              Run a client using a saved config.
-  -i              Install the systemd ss-server service.
+  -i              Install the systemd ss-server service (Linux only).
   -d              Download configuration files into ~/.ssha (from GitHub ZIP).
   -cf             Install client + generate configs (Linux).
+
+How it works:
+  Server and client talk Shadowsocks on port 8388. The client opens a local
+  SOCKS5 proxy on 127.0.0.1:1080 that tunnels your traffic to the server.
+
+Server side (run once on the VPS):
+  shadows -s                 Install + start the server on port 8388.
+                             Linux: systemd service. macOS: foreground (shows
+                             logs; click "Allow" on the firewall prompt).
+                             Open/allow TCP 8388 in the firewall.
+
+Client side (macOS):
+  shadows -m <SERVER_IP>     Install client (brew) + save a config in ~/.ssha.
+  shadows -r                 Pick a saved config and connect. Shows online/offline.
+                             Leaves ss-local running in the foreground (Ctrl-C to stop).
+
+Client side (Linux):
+  shadows -cf <SERVER_IP>    Install client + save a config.
+  shadows -r                 Pick a config and connect.
+
+Use the tunnel (while a client is running):
+  curl --socks5 127.0.0.1:1080 https://ifconfig.me    Test (shows server IP).
+  Set your browser/app SOCKS5 proxy to 127.0.0.1:1080.
+  Linux only: run 'redir' to send ALL system traffic through the tunnel.
 
 "
   exit 1
@@ -334,6 +358,60 @@ install_client_linux() {
   exit 1
 }
 
+# --- Server install (macOS, foreground) ---
+install_server_macos() {
+  echo_msg "SERVER INSTALL (macOS)"
+
+  if ! have_cmd brew; then
+    echo -e "\033[31mHomebrew not found. Install Homebrew first.\033[0m"
+    exit 1
+  fi
+
+  brew list shadowsocks-libev >/dev/null 2>&1 || brew install shadowsocks-libev
+
+  local brew_prefix ss_bin cfg_dir cfg_path
+  brew_prefix="$(brew --prefix)"
+  ss_bin="$brew_prefix/bin/ss-server"
+  cfg_dir="$brew_prefix/etc/shadowsocks-libev"
+  cfg_path="$cfg_dir/config.json"
+
+  if ! have_cmd "$ss_bin"; then
+    echo -e "\033[31mss-server not found at $ss_bin after install.\033[0m"
+    exit 1
+  fi
+
+  mkdir -p "$cfg_dir"
+  cat > "$cfg_path" <<'EOF'
+{
+  "server": "0.0.0.0",
+  "server_port": 8388,
+  "password": "nalanga12",
+  "method": "aes-256-gcm",
+  "timeout": 300
+}
+EOF
+  echo -e "\033[32mConfig written:\033[0m $cfg_path"
+
+  # macOS Application Firewall blocks incoming by binary, not by port.
+  # Try to whitelist (fails silently if locked by an MDM profile); running
+  # ss-server in the foreground as your user triggers the GUI "allow
+  # incoming connections" prompt, which works even under a locked profile.
+  local fw=/usr/libexec/ApplicationFirewall/socketfilterfw
+  if [ -x "$fw" ]; then
+    sudo "$fw" --add "$ss_bin" >/dev/null 2>&1 || true
+    sudo "$fw" --unblockapp "$ss_bin" >/dev/null 2>&1 || true
+  fi
+
+  echo ""
+  echo -e "\033[32mSTARTING SERVER ON PORT 8388 (foreground)\033[0m"
+  echo -e "\033[33mIf macOS prompts, click \"Allow\" to accept incoming connections.\033[0m"
+  echo -e "\033[36mStop with Ctrl-C. Logs print below.\033[0m"
+  echo ""
+  echo -e "\033[36mRun again later with:\033[0m shadows -s    (or: $ss_bin -c $cfg_path -v)"
+  echo ""
+  exec "$ss_bin" -c "$cfg_path" -v
+}
+
 # --- Parse options ---
 [ $# -eq 0 ] && usage
 
@@ -369,6 +447,11 @@ case "$MODE" in
     ;;
 
   s)
+    if [ "$(uname -s)" = "Darwin" ]; then
+      install_server_macos
+      exit 0
+    fi
+
     echo_msg "SERVER INSTALL (Debian/Ubuntu)"
 
     if ! dpkg -s shadowsocks-libev >/dev/null 2>&1; then
@@ -408,7 +491,7 @@ EOF
       exit 1
     fi
     brew list shadowsocks-libev >/dev/null 2>&1 || brew install shadowsocks-libev
-    parse_ips_input "${ARGS[@]}"
+    parse_ips_input ${ARGS[@]+"${ARGS[@]}"}
     for ip in "${IP_LIST[@]}"; do
       write_client_config "$ip" "macos"
     done
@@ -419,6 +502,10 @@ EOF
     ;;
 
   i)
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo -e "\033[33mmacOS has no systemd. On macOS the server runs in the foreground via 'shadows -s'.\033[0m"
+      exit 1
+    fi
     echo_msg "INSTALL SYSTEMD SERVICE (ss-server)"
     sudo tee /etc/systemd/system/ss-server.service >/dev/null <<'EOF'
 [Unit]
@@ -452,7 +539,7 @@ EOF
     if [ "$DO_CLIENT_CONFIG" = true ]; then
       ensure_dir
       echo_msg "CLIENT CONFIGURATION (Linux)"
-      parse_ips_input "${ARGS[@]}"
+      parse_ips_input ${ARGS[@]+"${ARGS[@]}"}
       for ip in "${IP_LIST[@]}"; do
         write_client_config "$ip" "linux"
       done

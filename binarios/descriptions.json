@@ -1408,8 +1408,10 @@
     },
     "voces": {
         "name": "voces",
-        "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
+        "short_desc": "Generates voices using OpenAI.",
         "detailed_desc": [
+            "Generates voices using OpenAI.",
+            "",
             "Runs /opt/4rji/bin/voces_mac on macOS and /opt/4rji/bin/voces_amd on Linux.",
             "",
             "It checks that the selected executable exists and is executable before handing off all supplied arguments.",
