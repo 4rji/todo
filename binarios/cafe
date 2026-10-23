@@ -6,7 +6,8 @@ help() {
 Uso: cafe [opciones] [-- comando argumentos...]
 
 Mantiene la computadora despierta hasta Ctrl+C o hasta terminar la tarea.
-Usa caffeinate -dimsu; requiere caffeinate compatible con las opciones de macOS.
+Usa caffeinate -dimsu en macOS y -dims en Linux (sin limite implicito de -u).
+Requiere caffeinate compatible con las opciones de macOS.
 
   -h, --help          Muestra esta ayuda.
   -p, --process PROC  Espera un PID o nombre exacto de proceso existente.
@@ -30,6 +31,7 @@ En macOS busca tambien /usr/bin/caffeinate, incluido con el sistema.
 En Linux requiere una implementacion compatible de caffeinate en PATH.
 Si falta caffeinate en Linux, lo compila e instala en ~/.local/bin.
 Requiere curl, cc, pkg-config y los headers de dbus-1; no instala systemd.
+Si faltan los headers, intenta instalarlos (puede pedir sudo).
 No cambia la configuracion permanente de energia ni evita cerrar la tapa.
 EOF
 }
@@ -83,7 +85,29 @@ if [[ -z $backend && $(uname -s) == Linux ]]; then
         for dependency in curl cc pkg-config; do
             command -v "$dependency" >/dev/null 2>&1 || die "Falta la dependencia $dependency para instalar caffeinate."
         done
-        pkg-config --exists dbus-1 || die 'Faltan los headers de dbus-1 (libdbus-1-dev o dbus-devel).'
+        if ! pkg-config --exists dbus-1; then
+            elevate=()
+            if ((EUID != 0)); then
+                command -v sudo >/dev/null 2>&1 || die 'Falta sudo para instalar los headers de dbus-1.'
+                elevate=(sudo)
+            fi
+            info 'Instalando los headers de dbus-1...'
+            if command -v apt-get >/dev/null 2>&1; then
+                "${elevate[@]}" apt-get update
+                "${elevate[@]}" apt-get install -y --no-install-recommends libdbus-1-dev
+            elif command -v dnf >/dev/null 2>&1; then
+                "${elevate[@]}" dnf install -y dbus-devel
+            elif command -v yum >/dev/null 2>&1; then
+                "${elevate[@]}" yum install -y dbus-devel
+            elif command -v pacman >/dev/null 2>&1; then
+                "${elevate[@]}" pacman -S --needed --noconfirm dbus
+            elif command -v zypper >/dev/null 2>&1; then
+                "${elevate[@]}" zypper --non-interactive install dbus-1-devel
+            else
+                die 'Instala los headers de dbus-1 con el gestor de tu distribucion.'
+            fi
+            pkg-config --exists dbus-1 || die 'Los headers de dbus-1 siguen sin estar disponibles para pkg-config.'
+        fi
         info 'Instalando caffeinate en ~/.local/bin (sin systemd)...'
         workdir=$(mktemp -d)
         trap 'rm -rf -- "$workdir"' EXIT
@@ -98,6 +122,8 @@ if [[ -z $backend && $(uname -s) == Linux ]]; then
 fi
 [[ -n $backend ]] || die 'Falta /usr/bin/caffeinate, incluido con macOS; restaura este componente del sistema.'
 flags=(-dimsu)
+# En la implementacion Linux, -u limita todo el proceso a 5 s sin -t.
+[[ $(uname -s) != Linux ]] || flags=(-dims)
 [[ $system_only == 0 ]] || flags=(-is)
 [[ -z $pid ]] || flags+=(-w "$pid")
 [[ $duration == 0 ]] || flags+=(-t "$duration")

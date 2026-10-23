@@ -48,7 +48,7 @@ ttyinicio           Crea mensaje de inicio de tty para ver la ip del servidor de
 
 
 ###------linux
-cafe                Keeps the system awake with caffeinate and installs it locally on Linux if missing.
+cafe                Keeps the system awake until stopped or a task finishes, installing caffeinate locally on Linux if missing.
 quartz              Script para manejar obsidian y quartz
 searchip            Busca una IP en toda la maquina para ver si se utilizo alguna vez
 frpinst             Instala frp y descarga dotfiles
