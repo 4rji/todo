@@ -12,6 +12,10 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+WHITE='\033[0;37m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { echo -e "${BLUE}[+]${NC} $1"; }
@@ -296,20 +300,20 @@ menu() {
     while true; do
 
         echo
-        echo "========================================="
-        echo " Vulnerability Scanner"
-        echo "========================================="
+        echo -e "${CYAN}=========================================${NC}"
+        echo -e "${BOLD}${CYAN} Vulnerability Scanner${NC}"
+        echo -e "${CYAN}=========================================${NC}"
         echo
-        echo "1) Snyk scan"
-        echo "2) Grype filesystem scan"
-        echo "3) Generate SBOM + scan with Grype"
-        echo "4) Generate SBOM only (sin Grype)"
-        echo "5) Run ALL"
-        echo "6) Show tool versions"
-        echo "0) Exit"
+        echo -e "${MAGENTA}1) Snyk scan${NC}"
+        echo -e "${BLUE}2) Grype filesystem scan${NC}"
+        echo -e "${CYAN}3) Generate SBOM + scan with Grype${NC}"
+        echo -e "${YELLOW}4) Generate SBOM only (sin Grype)${NC}"
+        echo -e "${BOLD}5) Run ALL${NC}"
+        echo -e "${WHITE}6) Show tool versions${NC}"
+        echo -e "${RED}0) Exit${NC}"
         echo
 
-        read -r -p "Select option: " choice
+        read -r -p "$(echo -e "${YELLOW}Select option: ${NC}")" choice
 
         case "$choice" in
             1)
