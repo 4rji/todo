@@ -3,7 +3,6 @@
 set -u
 
 INSTALL_DIR="/usr/local/bin"
-SBOM_FILE="sbom.json"
 
 # ─────────────────────────────────────────────
 # Colors
@@ -76,6 +75,17 @@ detect_platform() {
     esac
 
     ok "Detected: $PLATFORM / $ARCH"
+}
+
+# ─────────────────────────────────────────────
+# SBOM filename: <project-folder>-<date>.json
+# ─────────────────────────────────────────────
+
+set_sbom_filename() {
+    local project_name
+    project_name="$(basename "$PWD")"
+    SBOM_FILE="sbom-${project_name}-$(date +%Y%m%d).json"
+    ok "SBOM file: $SBOM_FILE"
 }
 
 # ─────────────────────────────────────────────
@@ -227,26 +237,35 @@ run_grype() {
     echo
 }
 
-run_sbom() {
+create_sbom() {
 
     if ! command -v syft >/dev/null 2>&1; then
         error "Syft is not installed."
-        return
-    fi
-
-    if ! command -v grype >/dev/null 2>&1; then
-        error "Grype is not installed."
-        return
+        return 1
     fi
 
     echo
     info "Generating CycloneDX SBOM..."
     echo "────────────────────────────────────────"
 
-    printf '+ syft . -o cyclonedx-json > %q\n' "$SBOM_FILE" >&2
-    syft . -o cyclonedx-json > "$SBOM_FILE"
+    run_command syft . -o "cyclonedx-json=$SBOM_FILE"
 
     ok "SBOM created: $SBOM_FILE"
+}
+
+run_sbom_only() {
+    create_sbom
+    echo
+}
+
+run_sbom() {
+
+    if ! command -v grype >/dev/null 2>&1; then
+        error "Grype is not installed."
+        return
+    fi
+
+    create_sbom || return
 
     echo
     info "Scanning SBOM with Grype..."
@@ -284,8 +303,9 @@ menu() {
         echo "1) Snyk scan"
         echo "2) Grype filesystem scan"
         echo "3) Generate SBOM + scan with Grype"
-        echo "4) Run ALL"
-        echo "5) Show tool versions"
+        echo "4) Generate SBOM only (sin Grype)"
+        echo "5) Run ALL"
+        echo "6) Show tool versions"
         echo "0) Exit"
         echo
 
@@ -302,9 +322,12 @@ menu() {
                 run_sbom
                 ;;
             4)
-                run_all
+                run_sbom_only
                 ;;
             5)
+                run_all
+                ;;
+            6)
                 echo
                 command -v snyk >/dev/null && run_command snyk --version
                 command -v grype >/dev/null && run_command grype version
@@ -327,6 +350,7 @@ menu() {
 detect_platform
 check_basic_tools
 ensure_tools
+set_sbom_filename
 
 echo
 info "Scanning directory:"
