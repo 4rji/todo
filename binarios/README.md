@@ -27,6 +27,7 @@ ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
 ###------CCDC
 clamv               Installs, configures, updates, and runs ClamAV scans with logs and optional quarantine.
 hardening_agent.sh  Collects Linux hardening state and sends or prints JSON reports for CCDC triage. github proyect
+systemd-persist-audit Audits systemd services, timers, drop-ins, risky directives, and file permissions with color-coded triage.
 ipv6b               Bloquea ipv6 en linux. 
 ccdcinst            Instala los scripts en la bash de todob.
 dcusercreate        Crea usuario en el ccdcteam dominio, tener hosts 172.20.240.102 domain.local
