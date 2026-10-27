@@ -1,4 +1,30 @@
 {
+    "decloak.py": {
+        "name": "decloak.py",
+        "short_desc": "Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.",
+        "detailed_desc": [
+            "4rji Decloaking Utility - Version 1.1, based on Sandfly Security's file decloaking concept.",
+            "Reads complete file contents in bounded chunks through standard I/O and read-only mmap, comparing byte counts and SHA-256 hashes.",
+            "Repeats mismatches and checks file identity, size and modification metadata. Non-reproducible differences and changing files are reported as inconclusive.",
+            "Runs comparisons in a separate process with a 30-second per-file timeout; worker failures do not terminate the scanner.",
+            "",
+            "Usage: decloak.py [DIRECTORY|FILE]. Automatically requests sudo unless already root or --no-sudo is supplied.",
+            "Requests confirmation before scanning; -y/--yes skips confirmation. Help does not request sudo.",
+            "With no custom target, scans /etc, /var/spool/cron, /etc/cron.d, /etc/cron.daily, /etc/cron.hourly, /etc/cron.weekly, /etc/cron.monthly and /root when present.",
+            "Suggested high-value files include /etc/passwd, /etc/shadow, /etc/group, /etc/ld.so.preload, /etc/modules, /etc/crontab and /etc/ssh/sshd_config.",
+            "",
+            "Skips /proc, /sys, /dev and /run, symbolic-link files, nested symbolic-link directories and non-regular files. Avoids duplicate inode comparisons and scanning its own report.",
+            "Limits files to 50 MiB by default, including explicit file targets; --max-size MIB changes the limit.",
+            "Reports read errors, changes, skipped files and reproducible differences separately. Alerts include byte counts and SHA-256 hashes for both views.",
+            "",
+            "Writes ESCANEO_<timestamp>.txt in the invoking user's home, owned by that user with permissions 0600, including when elevated through sudo.",
+            "Use -o/--output PATH for another report location. Existing reports and symbolic-link destinations are never overwritten.",
+            "File contents are omitted by default; --show-content includes up to 256 bytes from each suspicious view, escaped for display.",
+            "Ctrl+C during scanning preserves a partial report and summary.",
+            "Exit codes: 0 for a completed scan without findings, 1 for suspicious files, 2 for incomplete scans or errors, and 130 for interruption.",
+            "Differences require investigation and do not confirm a rootkit. A scan without findings does not prove the system is clean."
+        ]
+    },
     "cafe": {
         "name": "cafe",
         "short_desc": "Keeps the system awake with caffeinate, optionally until a process, command, or timer finishes.",

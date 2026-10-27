@@ -14,8 +14,7 @@ scan_folders        Analiza carpetas y repositorios Git en busca de secretos y d
 cvesinst            Installs Snyk, Grype, and Syft and provides an interactive vulnerability scanning menu.
 lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
-decloaktools        Post-detection investigation checklist for decloak analysis
-decloak.py          File decloaking tool to identify possible rootkit-based content hiding
+decloak.py          Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.
 copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
 galletapython       Serves galleta.js and logs base64 cookie callbacks for lab testing.
 processdecloak      Busca procesos ocultos en linux
