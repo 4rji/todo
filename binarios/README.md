@@ -541,7 +541,7 @@ siegee              Genera trafico como hping3 para ddos, webmonitor, como inund
 monitcp             Muestra captura.cap en colores con python, integrado en chismes
 monitcpl            Muestra una lista de todos los archivos pcap cap 
 autorun-no          Crea un archivo para usb, autorun. NO funcional yet.
-decoyfile           Detecta cambios en archivos (CCDC). -u passwd/shadow/sudoers/keys, -p cron/systemd/pam, -w 30 vigila, <archivo> agrega, -c verifica
+decoyfile           Detecta cambios en archivos (CCDC). -u passwd/shadow/sudoers/keys, -p cron/systemd/pam, -m macOS LaunchAgents/login items, -w 30 vigila
 wdefensas           Se supone desactiva el antivirus de windows, no probado
 telnetftppass       Windows: Encuentra contrasenas usadas en telnet y ftp python
 userdiscovery       win: Encuentra contrasenas en python no probado dumppassword

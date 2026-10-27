@@ -262,17 +262,31 @@ def sync_presets(entries, names, quiet=False):
     for name in names:
         matches = expand(PRESETS[name])
         initialized = any(e["source"] == name for e in entries.values())
-        new = [p for p in matches if p not in entries]
-        for path in new:
+        added = 0
+        for path in (p for p in matches if p not in entries):
             try:
                 entries[path] = snapshot(path, name)
             except PermissionError:
                 continue
+            added += 1
             if initialized:
-                alerts.append(("NEW", path, [f"appeared in '{name}' set"], (path, "NEW")))
+                alerts.append(("NEW", path, [f"appeared in '{name}' set"] + preview(entries[path]), (path, "NEW")))
         if not initialized and not quiet:
-            print(f"{BLUE}[*] Baseline '{name}': {len(new)} files tracked.{RESET}")
+            print(f"{BLUE}[*] Baseline '{name}': {added} files tracked.{RESET}")
     return alerts
+
+
+def preview(e):
+    """First lines of a new text file, shown as '+' lines like a diff."""
+    copy = os.path.join(SNAPDIR, e["sha256"])
+    if not os.path.exists(copy):
+        return []
+    with open(copy, "rb") as f:
+        lines = f.read().decode(errors="replace").splitlines()
+    out = ["+" + line for line in lines[:MAX_DIFF_LINES]]
+    if len(lines) > MAX_DIFF_LINES:
+        out.append(f"... ({len(lines) - MAX_DIFF_LINES} more lines)")
+    return out
 
 
 def make_diff(e, new_data):
