@@ -3,7 +3,6 @@
 set -u
 
 INSTALL_DIR="/usr/local/bin"
-SBOM_FILE="sbom.json"
 
 # ─────────────────────────────────────────────
 # Colors
@@ -13,6 +12,10 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+WHITE='\033[0;37m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { echo -e "${BLUE}[+]${NC} $1"; }
@@ -76,6 +79,17 @@ detect_platform() {
     esac
 
     ok "Detected: $PLATFORM / $ARCH"
+}
+
+# ─────────────────────────────────────────────
+# SBOM filename: <project-folder>-<date>.json
+# ─────────────────────────────────────────────
+
+set_sbom_filename() {
+    local project_name
+    project_name="$(basename "$PWD")"
+    SBOM_FILE="sbom-${project_name}-$(date +%Y%m%d).json"
+    ok "SBOM file: $SBOM_FILE"
 }
 
 # ─────────────────────────────────────────────
@@ -227,26 +241,35 @@ run_grype() {
     echo
 }
 
-run_sbom() {
+create_sbom() {
 
     if ! command -v syft >/dev/null 2>&1; then
         error "Syft is not installed."
-        return
-    fi
-
-    if ! command -v grype >/dev/null 2>&1; then
-        error "Grype is not installed."
-        return
+        return 1
     fi
 
     echo
     info "Generating CycloneDX SBOM..."
     echo "────────────────────────────────────────"
 
-    printf '+ syft . -o cyclonedx-json > %q\n' "$SBOM_FILE" >&2
-    syft . -o cyclonedx-json > "$SBOM_FILE"
+    run_command syft . -o "cyclonedx-json=$SBOM_FILE"
 
     ok "SBOM created: $SBOM_FILE"
+}
+
+run_sbom_only() {
+    create_sbom
+    echo
+}
+
+run_sbom() {
+
+    if ! command -v grype >/dev/null 2>&1; then
+        error "Grype is not installed."
+        return
+    fi
+
+    create_sbom || return
 
     echo
     info "Scanning SBOM with Grype..."
@@ -277,19 +300,20 @@ menu() {
     while true; do
 
         echo
-        echo "========================================="
-        echo " Vulnerability Scanner"
-        echo "========================================="
+        echo -e "${CYAN}=========================================${NC}"
+        echo -e "${BOLD}${CYAN} Vulnerability Scanner${NC}"
+        echo -e "${CYAN}=========================================${NC}"
         echo
-        echo "1) Snyk scan"
-        echo "2) Grype filesystem scan"
-        echo "3) Generate SBOM + scan with Grype"
-        echo "4) Run ALL"
-        echo "5) Show tool versions"
-        echo "0) Exit"
+        echo -e "${MAGENTA}1) Snyk scan${NC}"
+        echo -e "${BLUE}2) Grype filesystem scan${NC}"
+        echo -e "${CYAN}3) Generate SBOM + scan with Grype${NC}"
+        echo -e "${YELLOW}4) Generate SBOM only (sin Grype)${NC}"
+        echo -e "${BOLD}5) Run ALL${NC}"
+        echo -e "${WHITE}6) Show tool versions${NC}"
+        echo -e "${RED}0) Exit${NC}"
         echo
 
-        read -r -p "Select option: " choice
+        read -r -p "$(echo -e "${YELLOW}Select option: ${NC}")" choice
 
         case "$choice" in
             1)
@@ -302,9 +326,12 @@ menu() {
                 run_sbom
                 ;;
             4)
-                run_all
+                run_sbom_only
                 ;;
             5)
+                run_all
+                ;;
+            6)
                 echo
                 command -v snyk >/dev/null && run_command snyk --version
                 command -v grype >/dev/null && run_command grype version
@@ -327,6 +354,7 @@ menu() {
 detect_platform
 check_basic_tools
 ensure_tools
+set_sbom_filename
 
 echo
 info "Scanning directory:"

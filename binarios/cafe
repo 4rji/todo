@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+help() {
+    cat <<'EOF'
+Uso: cafe [opciones] [-- comando argumentos...]
+
+Mantiene la computadora despierta hasta Ctrl+C o hasta terminar la tarea.
+Usa caffeinate -dimsu en macOS y -dims en Linux (sin limite implicito de -u).
+Requiere caffeinate compatible con las opciones de macOS.
+
+  -h, --help          Muestra esta ayuda.
+  -p, --process PROC  Espera un PID o nombre exacto de proceso existente.
+                      Si hay varios con ese nombre, pedi un PID concreto.
+  -t, --time SEG      Termina despues de SEG segundos (entero positivo).
+                      Con -p, termina cuando finalice el proceso o el tiempo.
+  -s, --system-only   Permite apagar pantalla y discos (caffeinate -is).
+  -q, --quiet         Omite mensajes informativos.
+  -- comando ...     Mantiene despierta la maquina mientras corre el comando.
+                      Conserva su codigo de salida; no combina con -p ni -t.
+
+Ejemplos:
+  cafe
+  cafe -p 1234
+  cafe -p ffmpeg
+  cafe -t 3600
+  cafe -s -p 1234 -t 7200
+  cafe -- rsync -av origen/ destino/
+
+En macOS busca tambien /usr/bin/caffeinate, incluido con el sistema.
+En Linux requiere una implementacion compatible de caffeinate en PATH.
+Si falta caffeinate en Linux, lo compila e instala en ~/.local/bin.
+Requiere curl, cc, pkg-config y los headers de dbus-1; no instala systemd.
+Si faltan los headers, intenta instalarlos (puede pedir sudo).
+No cambia la configuracion permanente de energia ni evita cerrar la tapa.
+EOF
+}
+die() { printf 'cafe: %s\n' "$*" >&2; exit 1; }
+info() { if [[ $quiet == 0 ]]; then printf 'cafe: %s\n' "$*" >&2; fi; }
+process='' duration=0 system_only=0 quiet=0
+while (($#)); do
+    case "$1" in
+        -h|--help) help; exit 0 ;;
+        -p|--process|-t|--time)
+            (($# >= 2)) || die "Falta el valor para $1."
+            if [[ $1 == -p || $1 == --process ]]; then
+                [[ -n $2 ]] || die 'El proceso no puede estar vacio.'
+                process=$2
+            else
+                [[ $2 =~ ^[1-9][0-9]*$ && ${#2} -le 9 ]] || die 'El tiempo debe ser un entero entre 1 y 999999999.'
+                duration=$2
+            fi
+            shift 2 ;;
+        -s|--system-only) system_only=1; shift ;;
+        -q|--quiet) quiet=1; shift ;;
+        --) shift; (($#)) || die 'Falta el comando despues de --.'; break ;;
+        *) die "Opcion desconocida: $1. Usa cafe -h." ;;
+    esac
+done
+if (($#)) && [[ -n $process || $duration != 0 ]]; then
+    die 'Usa -- comando sin -p ni -t.'
+fi
+pid=''
+if [[ -n $process ]]; then
+    if [[ $process =~ ^[0-9]+$ ]]; then
+        [[ $process =~ ^[1-9][0-9]*$ ]] || die 'El PID debe ser positivo, sin ceros iniciales.'
+        pid=$process
+    else
+        command -v pgrep >/dev/null 2>&1 || die 'Falta pgrep; usa -p con un PID.'
+        matches=$(pgrep -x -- "$process" || true)
+        [[ -n $matches ]] || die "No hay procesos con nombre exacto: $process."
+        [[ $matches != *$'\n'* ]] || die "Hay varios procesos llamados $process. Usa -p PID."
+        pid=$matches
+    fi
+    kill -0 "$pid" 2>/dev/null || die "El PID $pid no existe o no es accesible por tu usuario."
+fi
+
+backend=$(command -v caffeinate || true)
+if [[ -z $backend && -x /usr/bin/caffeinate ]]; then
+    backend=/usr/bin/caffeinate
+fi
+if [[ -z $backend && $(uname -s) == Linux ]]; then
+    backend="$HOME/.local/bin/caffeinate"
+    if [[ ! -x $backend ]]; then
+        for dependency in curl cc pkg-config; do
+            command -v "$dependency" >/dev/null 2>&1 || die "Falta la dependencia $dependency para instalar caffeinate."
+        done
+        if ! pkg-config --exists dbus-1; then
+            elevate=()
+            if ((EUID != 0)); then
+                command -v sudo >/dev/null 2>&1 || die 'Falta sudo para instalar los headers de dbus-1.'
+                elevate=(sudo)
+            fi
+            info 'Instalando los headers de dbus-1...'
+            if command -v apt-get >/dev/null 2>&1; then
+                "${elevate[@]}" apt-get update
+                "${elevate[@]}" apt-get install -y --no-install-recommends libdbus-1-dev
+            elif command -v dnf >/dev/null 2>&1; then
+                "${elevate[@]}" dnf install -y dbus-devel
+            elif command -v yum >/dev/null 2>&1; then
+                "${elevate[@]}" yum install -y dbus-devel
+            elif command -v pacman >/dev/null 2>&1; then
+                "${elevate[@]}" pacman -S --needed --noconfirm dbus
+            elif command -v zypper >/dev/null 2>&1; then
+                "${elevate[@]}" zypper --non-interactive install dbus-1-devel
+            else
+                die 'Instala los headers de dbus-1 con el gestor de tu distribucion.'
+            fi
+            pkg-config --exists dbus-1 || die 'Los headers de dbus-1 siguen sin estar disponibles para pkg-config.'
+        fi
+        info 'Instalando caffeinate en ~/.local/bin (sin systemd)...'
+        workdir=$(mktemp -d)
+        trap 'rm -rf -- "$workdir"' EXIT
+        curl -fsSL https://raw.githubusercontent.com/DavidBalishyan/caffeinate/main/caffeinate.c -o "$workdir/caffeinate.c"
+        # pkg-config devuelve listas de argumentos para el compilador.
+        cc -O2 "$workdir/caffeinate.c" -o "$workdir/caffeinate" $(pkg-config --cflags --libs dbus-1)
+        mkdir -p "$HOME/.local/bin"
+        install -m 755 "$workdir/caffeinate" "$backend"
+        rm -rf -- "$workdir"
+        trap - EXIT
+    fi
+fi
+[[ -n $backend ]] || die 'Falta /usr/bin/caffeinate, incluido con macOS; restaura este componente del sistema.'
+flags=(-dimsu)
+# En la implementacion Linux, -u limita todo el proceso a 5 s sin -t.
+[[ $(uname -s) != Linux ]] || flags=(-dims)
+[[ $system_only == 0 ]] || flags=(-is)
+[[ -z $pid ]] || flags+=(-w "$pid")
+[[ $duration == 0 ]] || flags+=(-t "$duration")
+info 'Manteniendo la computadora despierta. Ctrl+C para detener.'
+exec "$backend" "${flags[@]}" "$@"

@@ -1,4 +1,22 @@
 {
+    "cafe": {
+        "name": "cafe",
+        "short_desc": "Keeps the system awake with caffeinate, optionally until a process, command, or timer finishes.",
+        "detailed_desc": [
+            "Runs caffeinate -dimsu on macOS and -dims on Linux, avoiding the Linux implementation's implicit five-second timeout from -u.",
+            "Finds caffeinate in PATH or at /usr/bin/caffeinate. On Linux also reuses ~/.local/bin/caffeinate.",
+            "",
+            "Use -p with an existing PID or exact process name; ambiguous names require a PID.",
+            "Name lookup requires pgrep; a numeric PID does not.",
+            "If missing on Linux, downloads DavidBalishyan/caffeinate source from GitHub, compiles it and installs it in ~/.local/bin without systemd.",
+            "Requires curl, cc and pkg-config. Automatically installs missing D-Bus development headers with apt-get, dnf, yum, pacman or zypper; may require sudo.",
+            "Use -t SECONDS for a timed session, optionally combined with -p.",
+            "Use -- COMMAND ARGUMENTS to keep the system awake while a command runs and preserve its exit status.",
+            "",
+            "Use -s to allow display and disk sleep (-is), -q for quiet output, and -h for Spanish help.",
+            "Stops with Ctrl+C and makes no permanent power configuration changes."
+        ]
+    },
     "brave": {
         "name": "brave",
         "short_desc": "Installs Brave Browser from its official APT repository on Debian/Ubuntu.",
@@ -1408,8 +1426,10 @@
     },
     "voces": {
         "name": "voces",
-        "short_desc": "Dispatches to the platform-specific voces executable from /opt/4rji/bin.",
+        "short_desc": "Generates voices using OpenAI.",
         "detailed_desc": [
+            "Generates voices using OpenAI.",
+            "",
             "Runs /opt/4rji/bin/voces_mac on macOS and /opt/4rji/bin/voces_amd on Linux.",
             "",
             "It checks that the selected executable exists and is executable before handing off all supplied arguments.",
