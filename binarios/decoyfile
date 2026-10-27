@@ -1,57 +1,422 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# decoyfile - baseline files (decoys or critical ones like /etc/passwd) and
+# detect when they are modified, deleted, read, or when new ones show up.
+# Built for CCDC: track account/persistence files and get alerted on changes.
+#
+# Usage:
+#   decoyfile <file> [file...]   add (or re-baseline) files
+#   decoyfile -u                 track account files (passwd, shadow, sudoers, authorized_keys...) and check
+#   decoyfile -p                 track persistence files (cron, systemd, rc.local, ld.so.preload, pam...) and check
+#   decoyfile -c                 check every tracked file
+#   decoyfile -u -p -w 30        watch mode: re-check every 30s, alert only on new changes
+#   decoyfile -A                 accept current state of all tracked files as the new baseline
+#   decoyfile -l                 list tracked files
+#   decoyfile -d <file> [...]    stop tracking files
+#
+# Data lives in /opt/decoys/ (override with --db or DECOYS_DB):
+#   decoys.txt   baseline, one tab-separated line per file
+#   snap/        copies of small text files, used to show diffs
+#   alerts.log   every alert with timestamp (also sent to syslog)
+# Re-runs itself with sudo when it needs root. Exit code: 0 clean, 1 alerts.
 
+import argparse
+import difflib
+import glob
+import hashlib
 import os
+import shutil
+import signal
+import sys
 import time
 
-def getTimestamps(filename):
-    fname = os.path.expanduser(filename)
-    stats = os.stat(fname)
-    if not os.path.exists(fname): # File deleted
+try:
+    import syslog
+except ImportError:
+    syslog = None
+
+DEFAULT_DB = "/opt/decoys/decoys.txt"
+FIELDS = ["path", "sha256", "size", "mode", "uid", "gid", "mtime_ns", "ctime_ns", "atime_ns", "source"]
+MAX_COPY = 1024 * 1024  # only keep copies (for diffs) of text files up to 1MB
+MAX_DIFF_LINES = 40
+
+PRESETS = {
+    "users": [
+        "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow",
+        "/etc/sudoers", "/etc/sudoers.d/*",
+        "/root/.ssh/authorized_keys*", "/home/*/.ssh/authorized_keys*",
+        "/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d/*",
+    ],
+    "persistence": [
+        "/etc/crontab", "/etc/cron.d/*", "/etc/cron.hourly/*", "/etc/cron.daily/*",
+        "/etc/cron.weekly/*", "/etc/cron.monthly/*", "/etc/anacrontab",
+        "/var/spool/cron/*", "/var/spool/cron/crontabs/*",
+        "/etc/systemd/system/*", "/etc/systemd/system/*/*",
+        "/lib/systemd/system/*.service", "/usr/lib/systemd/system/*.service",
+        "/etc/rc.local", "/etc/ld.so.preload", "/etc/hosts",
+        "/etc/profile", "/etc/profile.d/*", "/etc/bash.bashrc", "/etc/bashrc", "/etc/environment",
+        "/root/.bashrc", "/root/.profile", "/root/.bash_profile", "/root/.zshrc",
+        "/home/*/.bashrc", "/home/*/.profile", "/home/*/.bash_profile", "/home/*/.zshrc",
+        "/etc/pam.d/*", "/etc/security/*.conf",
+    ],
+}
+
+RED = "\033[1;31m"
+GREEN = "\033[1;32m"
+YELLOW = "\033[1;33m"
+BLUE = "\033[1;34m"
+RESET = "\033[0m"
+
+DB = DEFAULT_DB
+SNAPDIR = ""
+LOGFILE = ""
+
+
+def set_paths(db):
+    global DB, SNAPDIR, LOGFILE
+    DB = os.path.abspath(db)
+    SNAPDIR = os.path.join(os.path.dirname(DB), "snap")
+    LOGFILE = os.path.join(os.path.dirname(DB), "alerts.log")
+
+
+def can_write(path):
+    if os.path.exists(path):
+        return os.access(path, os.R_OK | os.W_OK)
+    parent = os.path.dirname(path)
+    while not os.path.exists(parent):
+        parent = os.path.dirname(parent)
+    return os.access(parent, os.W_OK)
+
+
+def ensure_root(args):
+    if os.name != "posix" or os.geteuid() == 0:
+        return
+    if not (args.users or args.persist or not can_write(DB)):
+        return
+    if shutil.which("sudo") is None:
+        print(f"{RED}[-] Needs root. Run as root: {os.path.realpath(sys.argv[0])}{RESET}")
+        sys.exit(1)
+    print(f"{YELLOW}[*] Needs root, re-running with sudo...{RESET}")
+    os.execvp("sudo", ["sudo", sys.executable, os.path.realpath(sys.argv[0])] + sys.argv[1:] + ["--db", DB])
+
+
+def read_file(path):
+    # O_NOATIME (Linux) keeps our own reads from touching the file's atime
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOATIME", 0))
+    except PermissionError:
+        fd = os.open(path, os.O_RDONLY)  # O_NOATIME needs owner or root
+    h = hashlib.sha256()
+    chunks, size = [], 0
+    with os.fdopen(fd, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+            size += len(chunk)
+            if size <= MAX_COPY:
+                chunks.append(chunk)
+    data = b"".join(chunks) if size <= MAX_COPY else None
+    if data is not None and b"\0" in data[:8192]:
+        data = None  # binary, no diff
+    return h.hexdigest(), data
+
+
+def snapshot(path, source):
+    digest, data = read_file(path)
+    if data is not None:
+        os.makedirs(SNAPDIR, mode=0o700, exist_ok=True)
+        copy = os.path.join(SNAPDIR, digest)
+        if not os.path.exists(copy):
+            fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+    st = os.stat(path)  # stat after reading so the stored atime includes our read
+    return {
+        "path": path, "sha256": digest, "size": st.st_size, "mode": st.st_mode,
+        "uid": st.st_uid, "gid": st.st_gid, "mtime_ns": st.st_mtime_ns,
+        "ctime_ns": st.st_ctime_ns, "atime_ns": st.st_atime_ns, "source": source,
+    }
+
+
+def load():
+    entries = {}
+    if not os.path.exists(DB):
+        return entries
+    with open(DB) as f:
+        for n, line in enumerate(f, 1):
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            vals = line.split("\t")
+            if len(vals) == len(FIELDS) - 1:
+                vals.append("manual")
+            if len(vals) != len(FIELDS):
+                print(f"{YELLOW}[!] Line {n} in old/invalid format, ignored. Re-add that file.{RESET}")
+                continue
+            e = dict(zip(FIELDS, vals))
+            for k in FIELDS[2:-1]:
+                e[k] = int(e[k])
+            entries[e["path"]] = e
+    return entries
+
+
+def save(entries):
+    os.makedirs(os.path.dirname(DB), mode=0o700, exist_ok=True)
+    tmp = DB + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        for e in entries.values():
+            f.write("\t".join(str(e[k]) for k in FIELDS) + "\n")
+    os.replace(tmp, DB)
+
+
+def ts(ns):
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ns / 1e9))
+
+
+def log_alert(kind, path, details):
+    line = f"[{kind}] {path}" + (" | " + "; ".join(details) if details else "")
+    try:
+        with open(LOGFILE, "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
+    except OSError:
+        pass
+    if syslog:
+        syslog.openlog("decoyfile")
+        syslog.syslog(syslog.LOG_WARNING, line)
+
+
+def add(entries, files, source="manual"):
+    for a in files:
+        path = os.path.abspath(os.path.expanduser(a))
+        if "\t" in path or "\n" in path:
+            print(f"{RED}[-] Paths with tabs/newlines not supported: {path!r}{RESET}")
+            continue
+        if not os.path.isfile(path):
+            print(f"{RED}[-] Not found or not a regular file: {path}{RESET}")
+            continue
+        try:
+            entries[path] = snapshot(path, entries.get(path, {}).get("source", source))
+        except PermissionError:
+            print(f"{RED}[-] Permission denied reading {path}. Run with sudo.{RESET}")
+            continue
+        print(f"{GREEN}[+] Tracking: {path}{RESET}")
+
+
+def remove(entries, files):
+    for a in files:
+        path = os.path.abspath(os.path.expanduser(a))
+        if entries.pop(path, None):
+            print(f"{GREEN}[+] Removed: {path}{RESET}")
+        else:
+            print(f"{YELLOW}[!] Not tracked: {path}{RESET}")
+
+
+def accept(entries):
+    for path, e in list(entries.items()):
+        if not os.path.isfile(path):
+            del entries[path]
+            print(f"{YELLOW}[-] Gone, dropped from baseline: {path}{RESET}")
+            continue
+        entries[path] = snapshot(path, e["source"])
+    print(f"{GREEN}[+] Baseline updated: {len(entries)} files.{RESET}")
+
+
+def expand(patterns):
+    found = set()
+    for pat in patterns:
+        for p in glob.glob(pat):
+            if os.path.isfile(p):
+                found.add(os.path.abspath(p))
+    return sorted(found)
+
+
+def sync_presets(entries, names, quiet=False):
+    """First run baselines the preset. Later runs flag files that appeared since."""
+    alerts = []
+    for name in names:
+        matches = expand(PRESETS[name])
+        initialized = any(e["source"] == name for e in entries.values())
+        new = [p for p in matches if p not in entries]
+        for path in new:
+            try:
+                entries[path] = snapshot(path, name)
+            except PermissionError:
+                continue
+            if initialized:
+                alerts.append(("NEW", path, [f"appeared in '{name}' set"], (path, "NEW")))
+        if not initialized and not quiet:
+            print(f"{BLUE}[*] Baseline '{name}': {len(new)} files tracked.{RESET}")
+    return alerts
+
+
+def make_diff(e, new_data):
+    copy = os.path.join(SNAPDIR, e["sha256"])
+    if new_data is None or not os.path.exists(copy):
         return []
-    return (stats.st_ctime, stats.st_mtime, stats.st_atime)
+    with open(copy, "rb") as f:
+        old = f.read().decode(errors="replace").splitlines()
+    new = new_data.decode(errors="replace").splitlines()
+    diff = list(difflib.unified_diff(old, new, "baseline", "current", lineterm="", n=0))[2:]
+    if len(diff) > MAX_DIFF_LINES:
+        diff = diff[:MAX_DIFF_LINES] + [f"... ({len(diff) - MAX_DIFF_LINES} more lines)"]
+    return diff
 
-def checkTimestamps(filename, create, modify, access):
-    stats = getTimestamps(filename)
-    if len(stats) == 0:
-        return False # File deleted
-    (ctime, mtime, atime) = stats
-    if float(create) != float(ctime):
-        return False    # File creation time is incorrect
-    elif float(modify) != float(mtime):
-        return False    # File modify time is incorrect
-    elif float(access) != float(atime):
-        return False    # File access time is incorrect
-    return True
 
-def addDecoyToDecoysTxt(filename, create, modify, access):
-    decoys_dir = "/opt/decoys/"
-    decoys_txt_path = os.path.join(decoys_dir, "decoys.txt")
+def inspect(e):
+    """Returns (kind, path, details, key) or None if unchanged."""
+    path = e["path"]
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return ("DELETED", path, [], (path, "DELETED"))
+    except PermissionError:
+        return ("NOPERM", path, ["run with sudo"], (path, "NOPERM"))
 
-    # Crear el directorio si no existe
-    if not os.path.exists(decoys_dir):
-        os.makedirs(decoys_dir)
+    changes = []
+    if st.st_size != e["size"]:
+        changes.append(f"size {e['size']} -> {st.st_size}")
+    if st.st_mode != e["mode"]:
+        changes.append(f"mode {oct(e['mode'])} -> {oct(st.st_mode)}")
+    if st.st_uid != e["uid"] or st.st_gid != e["gid"]:
+        changes.append(f"owner {e['uid']}:{e['gid']} -> {st.st_uid}:{st.st_gid}")
+    if st.st_mtime_ns != e["mtime_ns"]:
+        changes.append(f"mtime {ts(e['mtime_ns'])} -> {ts(st.st_mtime_ns)}")
+    if st.st_ctime_ns != e["ctime_ns"]:
+        # ctime can't be faked with touch: if it moved, someone touched the inode
+        changes.append(f"ctime {ts(e['ctime_ns'])} -> {ts(st.st_ctime_ns)}")
 
-    with open(decoys_txt_path, "a") as f:
-        f.write("{},{},{},{}\n".format(filename, create, modify, access))
+    if changes:
+        # Only read the file once something already looks off
+        try:
+            digest, data = read_file(path)
+            if digest != e["sha256"]:
+                changes.insert(0, "CONTENT CHANGED")
+                changes += make_diff(e, data)
+            else:
+                changes.insert(0, "content unchanged, metadata only")
+        except PermissionError:
+            changes.insert(0, "could not hash (permission denied)")
+        return ("MODIFIED", path, changes, (path, "MODIFIED", st.st_ctime_ns))
+    if st.st_atime_ns != e["atime_ns"]:
+        return ("READ", path, [f"atime {ts(e['atime_ns'])} -> {ts(st.st_atime_ns)}"], (path, "READ", st.st_atime_ns))
+    return None
+
+
+def report(alert):
+    kind, path, details, _ = alert
+    color = YELLOW if kind in ("READ", "NOPERM") else RED
+    print(f"{color}[{kind}]{' ' * (9 - len(kind))}{path}{RESET}")
+    for d in details:
+        if d.startswith("+"):
+            print(f"{GREEN}            {d}{RESET}")
+        elif d.startswith("-"):
+            print(f"{RED}            {d}{RESET}")
+        else:
+            print(f"            {d}")
+    if kind != "NOPERM":
+        log_alert(kind, path, [d for d in details if not d.startswith(("+", "-", "@"))])
+
+
+def check(entries, alerts):
+    alerts = alerts + [a for a in map(inspect, entries.values()) if a]
+    for a in alerts:
+        report(a)
+    bad = sum(1 for a in alerts if a[0] in ("MODIFIED", "DELETED", "NEW"))
+    print("_" * 60)
+    print(f"{BLUE}{len(entries)} tracked, {len(entries) - len(alerts)} OK.{RESET}")
+    if bad:
+        print(f"{RED}{bad} file(s) modified, deleted or new.{RESET}")
+    else:
+        print(f"{GREEN}All intact.{RESET}")
+    return 1 if bad else 0
+
+
+def watch(entries, presets, interval, alerts):
+    print(f"{BLUE}[*] Watching {len(entries)} files every {interval}s. Ctrl+C to stop. Alerts -> {LOGFILE}{RESET}")
+    seen = set()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        while True:
+            alerts += sync_presets(entries, presets, quiet=True)
+            if alerts:
+                save(entries)
+            alerts += [a for a in map(inspect, entries.values()) if a]
+            fresh = [a for a in alerts if a[3] not in seen]
+            if fresh:
+                print(f"\a{BLUE}--- {time.strftime('%H:%M:%S')} ---{RESET}")
+                for a in fresh:
+                    report(a)
+                    seen.add(a[3])
+            alerts = []
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print()
+        return 0
+
+
+def list_entries(entries):
+    if not entries:
+        print(f"{YELLOW}Nothing tracked ({DB}).{RESET}")
+        return
+    for e in sorted(entries.values(), key=lambda e: (e["source"], e["path"])):
+        print(f"{BLUE}{e['path']}{RESET}  [{e['source']}]  mtime={ts(e['mtime_ns'])}  sha256={e['sha256'][:16]}…")
+
 
 def main():
-    # Solicitar al usuario el archivo que desea verificar
-    file_to_check = input("Ingrese la ruta del archivo que desea verificar: ")
+    p = argparse.ArgumentParser(
+        prog="decoyfile",
+        description="Baseline decoy/critical files and detect modifications, deletions, reads and new files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  decoyfile /etc/hosts /opt/secret.txt   track specific files\n"
+            "  decoyfile -u -p                        baseline + check users and persistence sets\n"
+            "  decoyfile -u -p -w 30                  watch every 30s (CCDC)\n"
+            "  decoyfile /etc/shadow                  re-baseline one file after a legit change\n"
+            "  decoyfile -A                           re-baseline everything\n"
+            "  cron: */5 * * * * /opt/4rji/bin/decoyfile -u -p >/dev/null   (alerts go to alerts.log + syslog)"
+        ),
+    )
+    p.add_argument("files", nargs="*", help="files to add or re-baseline")
+    p.add_argument("-u", "--users", action="store_true", help="track account files: " + ", ".join(PRESETS["users"]))
+    p.add_argument("-p", "--persist", action="store_true", help="track persistence files: cron, systemd, rc.local, ld.so.preload, shell rc, pam...")
+    p.add_argument("-c", "--check", action="store_true", help="check every tracked file")
+    p.add_argument("-w", "--watch", type=int, metavar="SECONDS", help="keep checking every SECONDS, alert only on new changes")
+    p.add_argument("-A", "--accept", action="store_true", help="accept current state of all tracked files as baseline")
+    p.add_argument("-l", "--list", action="store_true", help="list tracked files")
+    p.add_argument("-d", "--del", dest="remove", nargs="+", metavar="FILE", help="stop tracking files")
+    p.add_argument("--db", help=f"baseline file (default: $DECOYS_DB or {DEFAULT_DB})")
+    args = p.parse_args()
 
-    # Obtener las marcas de tiempo del archivo
-    ctime = os.path.getctime(file_to_check)
-    mtime = os.path.getmtime(file_to_check)
-    atime = os.path.getatime(file_to_check)
+    set_paths(args.db or os.environ.get("DECOYS_DB") or DEFAULT_DB)
+    ensure_root(args)
 
-    # Convertir las marcas de tiempo a formato legible
-    ctime_str = time.ctime(ctime)
-    mtime_str = time.ctime(mtime)
-    atime_str = time.ctime(atime)
+    presets = [n for n, on in (("users", args.users), ("persistence", args.persist)) if on]
+    if presets and not sys.platform.startswith("linux"):
+        print(f"{YELLOW}[!] -u/-p sets are built for Linux; on {sys.platform} some paths won't exist.{RESET}")
 
-    # Agregar el archivo a la lista en decoys.txt
-    addDecoyToDecoysTxt(file_to_check, ctime_str, mtime_str, atime_str)
+    try:
+        entries = load()
+        if args.remove:
+            remove(entries, args.remove)
+        if args.files:
+            add(entries, args.files)
+        if args.accept:
+            accept(entries)
+        alerts = sync_presets(entries, presets)
+        if args.remove or args.files or args.accept or presets:
+            save(entries)
+        if args.list:
+            list_entries(entries)
+        if args.watch:
+            sys.exit(watch(entries, presets, args.watch, alerts))
+        if args.check or presets:
+            sys.exit(check(entries, alerts))
+        if not (args.files or args.remove or args.list or args.accept):
+            p.print_help()
+    except PermissionError as err:
+        print(f"{RED}[-] Permission denied: {err.filename}. Run with sudo: sudo {os.path.realpath(sys.argv[0])} ...{RESET}")
+        sys.exit(1)
 
-    print("Archivo agregado a decoys.txt en /opt/decoys/.")
 
 if __name__ == "__main__":
     main()

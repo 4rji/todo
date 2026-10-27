@@ -376,8 +376,8 @@
     },
     "decoyfile": {
         "name": "decoyfile",
-        "short_desc": "Recopila metadatos de archivos para crear señuelos de tiempos de acceso.",
-        "detailed_desc": "Este script solicita al usuario la ruta de un archivo, obtiene sus marcas de tiempo (creación, modificación y acceso) en formato legible y las agrega a un archivo de registro.\n\nUso: agregararchivo\n\nEl proceso:\n1. Solicita al usuario la ruta del archivo a analizar\n2. Extrae las marcas de tiempo (creación, modificación y acceso) del archivo\n3. Formatea las fechas de manera legible\n4. Guarda esta información en /opt/decoys/decoys.txt\n5. Crea automáticamente el directorio de destino si no existe\n\nÚtil para análisis forense y creación de señuelos con marcas de tiempo específicas. Usar decoyfilecheck para ver si se modificó el archivo, útil para detectar si alguien cambió archivos importantes como hosts o dns."
+        "short_desc": "Detecta cambios en archivos críticos/señuelo (CCDC): usuarios, sudoers, cron, systemd, etc.",
+        "detailed_desc": "Guarda un baseline (sha256, tamaño, permisos, dueño, mtime, ctime, atime + copia de archivos de texto para diff) en /opt/decoys/ y alerta cuando algo cambia. Se re-ejecuta con sudo solo.\n\nUso:\n  decoyfile -u              trackea y verifica passwd, shadow, group, gshadow, sudoers, sudoers.d, authorized_keys, sshd_config\n  decoyfile -p              trackea y verifica persistencia: cron, systemd, rc.local, ld.so.preload, profile/bashrc, pam, hosts\n  decoyfile -u -p -w 30     modo watch: revisa cada 30s y alerta solo cambios nuevos\n  decoyfile <archivo...>    agrega o re-baselinea archivos\n  decoyfile -c              verifica todo (exit 1 si hay cambios)\n  decoyfile -A              acepta el estado actual como baseline\n  decoyfile -l / -d <arch>  lista / quita\n\nReporta [MODIFIED] con diff de líneas (ej. +evil:x:0:0 en passwd), [DELETED], [NEW] (archivo nuevo en sudoers.d, cron.d, authorized_keys...) y [READ]. Alertas a /opt/decoys/alerts.log y syslog. ctime no se puede falsear con touch. Cron: */5 * * * * /opt/4rji/bin/decoyfile -u -p"
     },
     "adio": {
         "name": "adio",
