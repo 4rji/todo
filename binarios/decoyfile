@@ -7,6 +7,7 @@
 #   decoyfile <file> [file...]   add (or re-baseline) files
 #   decoyfile -u                 track account files (passwd, shadow, sudoers, authorized_keys...) and check
 #   decoyfile -p                 track persistence files (cron, systemd, rc.local, ld.so.preload, pam...) and check
+#   decoyfile -m                 macOS: track LaunchAgents/Daemons, login items, sudoers, admin group, shell rc... and check
 #   decoyfile -c                 check every tracked file
 #   decoyfile -u -p -w 30        watch mode: re-check every 30s, alert only on new changes
 #   decoyfile -A                 accept current state of all tracked files as the new baseline
@@ -58,7 +59,33 @@ PRESETS = {
         "/home/*/.bashrc", "/home/*/.profile", "/home/*/.bash_profile", "/home/*/.zshrc",
         "/etc/pam.d/*", "/etc/security/*.conf",
     ],
+    "macos": [
+        # launchd persistence
+        "/Library/LaunchAgents/*", "/Library/LaunchDaemons/*", "/Users/*/Library/LaunchAgents/*",
+        "/Library/StartupItems/*/*", "/etc/launchd.conf",
+        # login items (Ventura+ and older), login hooks
+        "/private/var/db/com.apple.backgroundtaskmanagement/BackgroundItems-v*.btm",
+        "/Users/*/Library/Application Support/com.apple.backgroundtaskmanagementagent/backgrounditems.btm",
+        "/Library/Preferences/com.apple.loginwindow.plist", "/var/root/Library/Preferences/com.apple.loginwindow.plist",
+        # privileges and auth
+        "/etc/sudoers", "/etc/sudoers.d/*", "/etc/pam.d/*",
+        "/private/var/db/dslocal/nodes/Default/groups/admin.plist",
+        "/Library/Security/SecurityAgentPlugins/*/Contents/Info.plist",
+        # ssh
+        "/etc/ssh/sshd_config", "/etc/ssh/sshd_config.d/*",
+        "/Users/*/.ssh/authorized_keys*", "/var/root/.ssh/authorized_keys*",
+        # kernel/system extensions
+        "/Library/Extensions/*/Contents/Info.plist", "/Library/SystemExtensions/db.plist",
+        # scheduled jobs
+        "/etc/crontab", "/usr/lib/cron/tabs/*", "/etc/periodic/*/*",
+        # shell startup, PATH and DNS hijacks
+        "/etc/zshrc", "/etc/zprofile", "/etc/zshenv", "/etc/profile", "/etc/bashrc",
+        "/Users/*/.zshrc", "/Users/*/.zprofile", "/Users/*/.zshenv", "/Users/*/.zlogin",
+        "/Users/*/.bashrc", "/Users/*/.bash_profile", "/Users/*/.profile",
+        "/etc/paths", "/etc/paths.d/*", "/etc/hosts", "/etc/resolver/*",
+    ],
 }
+LINUX_PRESETS = ("users", "persistence")
 
 RED = "\033[1;31m"
 GREEN = "\033[1;32m"
@@ -90,7 +117,7 @@ def can_write(path):
 def ensure_root(args):
     if os.name != "posix" or os.geteuid() == 0:
         return
-    if not (args.users or args.persist or not can_write(DB)):
+    if not (args.users or args.persist or args.macos or not can_write(DB)):
         return
     if shutil.which("sudo") is None:
         print(f"{RED}[-] Needs root. Run as root: {os.path.realpath(sys.argv[0])}{RESET}")
@@ -371,6 +398,7 @@ def main():
             "  decoyfile /etc/hosts /opt/secret.txt   track specific files\n"
             "  decoyfile -u -p                        baseline + check users and persistence sets\n"
             "  decoyfile -u -p -w 30                  watch every 30s (CCDC)\n"
+            "  decoyfile -m -w 60                     macOS: watch persistence every 60s\n"
             "  decoyfile /etc/shadow                  re-baseline one file after a legit change\n"
             "  decoyfile -A                           re-baseline everything\n"
             "  cron: */5 * * * * /opt/4rji/bin/decoyfile -u -p >/dev/null   (alerts go to alerts.log + syslog)"
@@ -379,6 +407,7 @@ def main():
     p.add_argument("files", nargs="*", help="files to add or re-baseline")
     p.add_argument("-u", "--users", action="store_true", help="track account files: " + ", ".join(PRESETS["users"]))
     p.add_argument("-p", "--persist", action="store_true", help="track persistence files: cron, systemd, rc.local, ld.so.preload, shell rc, pam...")
+    p.add_argument("-m", "--macos", action="store_true", help="macOS: track LaunchAgents/Daemons, login items, sudoers, admin group, ssh, kexts, cron, shell rc, hosts")
     p.add_argument("-c", "--check", action="store_true", help="check every tracked file")
     p.add_argument("-w", "--watch", type=int, metavar="SECONDS", help="keep checking every SECONDS, alert only on new changes")
     p.add_argument("-A", "--accept", action="store_true", help="accept current state of all tracked files as baseline")
@@ -390,9 +419,11 @@ def main():
     set_paths(args.db or os.environ.get("DECOYS_DB") or DEFAULT_DB)
     ensure_root(args)
 
-    presets = [n for n, on in (("users", args.users), ("persistence", args.persist)) if on]
-    if presets and not sys.platform.startswith("linux"):
-        print(f"{YELLOW}[!] -u/-p sets are built for Linux; on {sys.platform} some paths won't exist.{RESET}")
+    presets = [n for n, on in (("users", args.users), ("persistence", args.persist), ("macos", args.macos)) if on]
+    if any(n in LINUX_PRESETS for n in presets) and not sys.platform.startswith("linux"):
+        print(f"{YELLOW}[!] -u/-p sets are built for Linux; on {sys.platform} use -m.{RESET}")
+    if "macos" in presets and sys.platform != "darwin":
+        print(f"{YELLOW}[!] -m set is built for macOS; on {sys.platform} use -u/-p.{RESET}")
 
     try:
         entries = load()
