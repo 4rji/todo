@@ -18,6 +18,7 @@ OPTIONS=(
   "lanwatchgo — Detect network changes and devices"
   "mann — Install github.com/4rji/mann"
   "autoteclado — Install github.com/4rji/binarios-go/autoteclado"
+  "systemd-persist-audit — Audit systemd persistence with risk-sorted views"
   "Quit"
 )
 
@@ -32,6 +33,7 @@ commands=(
   "go install github.com/4rji/binarios-go/lanwatchgo@latest"
   "go install github.com/4rji/mann@latest"
   "go install github.com/4rji/binarios-go/autoteclado@latest"
+  "go install github.com/4rji/binarios-go/systemd-persist-audit@latest && if ! command -v fzf >/dev/null 2>&1; then go install github.com/junegunn/fzf@latest; fi"
 )
 
 bins=(
@@ -45,6 +47,7 @@ bins=(
   "lanwatchgo"
   "mann"
   "autoteclado"
+  "systemd-persist-audit"
 )
 
 echo ""
@@ -99,6 +102,7 @@ case $idx in
   7) echo -e "  \033[36mDetect network changes and devices; run with lanwatchgo serve.\033[0m" ;;
   8) echo -e "  \033[36mInstall mann from github.com/4rji/mann.\033[0m" ;;
   9) echo -e "  \033[36mInstall autoteclado from github.com/4rji/binarios-go/autoteclado.\033[0m" ;;
+  10) echo -e "  \033[36mRead-only systemd persistence audit with color, fzf, and a built-in menu.\033[0m" ;;
 esac
 
 echo ""

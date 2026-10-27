@@ -1136,20 +1136,21 @@
     },
     "systemd-persist-audit": {
         "name": "systemd-persist-audit",
-        "short_desc": "Audits systemd services, timers, drop-ins, risky directives, and file permissions with color-coded triage.",
+        "short_desc": "Audits systemd persistence with risk scoring, color, fzf previews, a fallback menu, and JSON output.",
         "detailed_desc": [
-            "Performs a read-only Linux systemd persistence audit for CCDC triage.",
-            "Inventories all services and the effective definitions of enabled services.",
-            "Reviews active and installed timers, each enabled timer configuration, and its triggered service.",
-            "Finds drop-ins across /etc, /run, /usr/local/lib, /usr/lib and /lib systemd paths and includes systemd-delta results when available.",
+            "Performs read-only Linux systemd persistence triage with risk scores and English color output.",
             "",
-            "Marks clean checks green, items requiring validation yellow, and high-priority suspicious indicators red on terminals.",
-            "Flags execution from temporary or user directories, downloader/network utilities, shell -c commands, world-writable unit files and unit files not owned by root.",
-            "Matches are triage indicators and do not prove malicious persistence.",
+            "Scans services, timers, drop-ins, local units, permissions, ownership, symlinks, restart policies, and suspicious execution directives.",
+            "On live systems, it also uses systemctl to collect enabled and active unit state.",
             "",
-            "Use -q/--quiet for concise output and -n/--no-interactive to disable pauses.",
-            "Pager modes are auto, always and never. Use --no-color or set NO_COLOR to disable ANSI colors.",
-            "Running with sudo is recommended to reduce false negatives caused by unreadable files."
+            "Interactive terminals open a risk-sorted fzf browser when available or a dependency-free category menu otherwise.",
+            "Redirected output uses a compact summary; full, JSON, fzf, and menu views can be selected explicitly.",
+            "",
+            "Filter by category or minimum severity, audit an offline root with --root, and use --fail-on for automation.",
+            "NO_COLOR and --no-color disable ANSI colors.",
+            "",
+            "The goinst entry installs the Go command and installs fzf when it is not already available.",
+            "Findings are triage signals, not proof of compromise."
         ]
     },
     "cloudt": {
