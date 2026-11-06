@@ -11,7 +11,7 @@ script for snmp netw07t
 
 ###-----Detecciones
 scan_folders        Analiza carpetas y repositorios Git en busca de secretos y datos sensibles; genera informes y permite ampliar el analisis con ClamAV, SBOM y CVEs.
-cvesinst            Installs Snyk, Grype, and Syft and provides an interactive vulnerability scanning menu.
+cvesinst            Installs Snyk, Grype, Syft, and jq and provides an interactive vulnerability scanning menu. `cvesinst SBOM.json TERM` searches SBOM components.
 lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloak.py          Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.

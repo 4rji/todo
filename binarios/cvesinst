@@ -50,6 +50,7 @@ detect_platform() {
             case "$ARCH" in
                 arm64)
                     SNYK_BINARY="snyk-macos-arm64"
+                    JQ_BINARY="jq-macos-arm64"
                     ;;
                 *)
                     error "Unsupported macOS architecture: $ARCH"
@@ -64,6 +65,7 @@ detect_platform() {
             case "$ARCH" in
                 x86_64|amd64)
                     SNYK_BINARY="snyk-linux"
+                    JQ_BINARY="jq-linux-amd64"
                     ;;
                 *)
                     error "Unsupported Linux architecture: $ARCH"
@@ -169,12 +171,56 @@ install_syft() {
 }
 
 # ─────────────────────────────────────────────
+# Install jq
+# ─────────────────────────────────────────────
+
+install_jq() {
+    info "Installing jq..."
+
+    local base_url="https://github.com/jqlang/jq/releases/latest/download"
+    local tmp_dir status
+
+    tmp_dir="$(run_command mktemp -d)"
+
+    # Subshell with set -e: any failed step (download, checksum) aborts the install.
+    (
+        set -e
+        cd "$tmp_dir"
+
+        run_command curl -fsSLO "${base_url}/${JQ_BINARY}"
+        run_command curl -fsSLO "${base_url}/sha256sum.txt"
+
+        info "Verifying jq checksum..."
+        grep " ${JQ_BINARY}\$" sha256sum.txt > "${JQ_BINARY}.sha256"
+
+        if command -v sha256sum >/dev/null 2>&1; then
+            run_command sha256sum -c "${JQ_BINARY}.sha256"
+        else
+            run_command shasum -a 256 -c "${JQ_BINARY}.sha256"
+        fi
+
+        run_command sudo mkdir -p "$INSTALL_DIR"
+        run_command sudo install -m 0755 "$JQ_BINARY" "$INSTALL_DIR/jq"
+    )
+    status=$?
+
+    run_command rm -rf "$tmp_dir"
+
+    if [ "$status" -ne 0 ]; then
+        error "jq installation failed."
+        return 1
+    fi
+
+    ok "jq installed."
+}
+
+# ─────────────────────────────────────────────
 # Check / Install
 # ─────────────────────────────────────────────
 
 ensure_tools() {
 
-    for tool in snyk grype syft; do
+    for tool in snyk grype syft jq; do
 
         if command -v "$tool" >/dev/null 2>&1; then
             ok "$tool found: $(command -v "$tool")"
@@ -196,6 +242,9 @@ ensure_tools() {
                     ;;
                 syft)
                     install_syft
+                    ;;
+                jq)
+                    install_jq
                     ;;
             esac
         else
@@ -292,6 +341,34 @@ run_all() {
 }
 
 # ─────────────────────────────────────────────
+# Search SBOM components: cvesinst SBOM.json TERM
+# ─────────────────────────────────────────────
+
+search_sbom() (
+    set -euo pipefail
+
+    if ! command -v jq >/dev/null 2>&1; then
+        error "jq is required. Run $0 without arguments to install it." >&2
+        exit 1
+    fi
+
+    if ! command -v column >/dev/null 2>&1; then
+        error "column is required." >&2
+        exit 1
+    fi
+
+    if [ ! -r "$1" ]; then
+        error "Cannot read file: $1" >&2
+        exit 1
+    fi
+
+    jq -r --arg t "$2" '
+      (.components // [])[]
+      | select([.name,.purl,.description] | map(. // "") | join(" ") | ascii_downcase | contains($t | ascii_downcase))
+      | [.name, (.version // "-"), (.purl // "-")] | @tsv' "$1" | column -t -s $'\t'
+)
+
+# ─────────────────────────────────────────────
 # Menu
 # ─────────────────────────────────────────────
 
@@ -336,6 +413,7 @@ menu() {
                 command -v snyk >/dev/null && run_command snyk --version
                 command -v grype >/dev/null && run_command grype version
                 command -v syft >/dev/null && run_command syft version
+                command -v jq >/dev/null && run_command jq --version
                 ;;
             0)
                 exit 0
@@ -350,6 +428,19 @@ menu() {
 # ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
+
+USAGE="Usage: $0 [SBOM.json TERM]"
+
+if [ $# -eq 2 ]; then
+    search_sbom "$1" "$2"
+    exit $?
+elif [ $# -ne 0 ]; then
+    echo "$USAGE" >&2
+    exit 2
+fi
+
+echo "$USAGE"
+echo
 
 detect_platform
 check_basic_tools
