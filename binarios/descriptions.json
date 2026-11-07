@@ -1469,6 +1469,22 @@
             "Continues monitoring until Ctrl+C; requires pgrep, ps, and lsof, and visibility depends on permissions and whether the process is still running."
         ]
     },
+    "descargar_dockerlabs.sh": {
+        "name": "descargar_dockerlabs.sh",
+        "short_desc": "Downloads DockerLabs machines with resume support, filtering, and integrity checks.",
+        "detailed_desc": [
+            "Downloads the built-in catalog of 214 DockerLabs machines to ./maquinas or a specified destination directory.",
+            "Use --lista to show available machines and sizes without downloading, or --solo with comma-separated archive names to select specific machines.",
+            "Use --pausa to control the delay between downloads and --forzar to proceed when the initial free-space check fails.",
+            "",
+            "Downloads each archive to a .part file and resumes interrupted transfers with curl.",
+            "Checks the remote size, verifies ZIP or TAR integrity when supporting tools are available, and renames damaged archives with an .invalido suffix.",
+            "Stops on server rate-limit responses, disk write failures, or five consecutive errors while preserving completed and partial downloads.",
+            "",
+            "Requires curl; unzip is optional but enables ZIP integrity checks.",
+            "It does not extract or execute downloaded archives."
+        ]
+    },
     "voces": {
         "name": "voces",
         "short_desc": "Generates voices using OpenAI.",

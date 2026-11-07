@@ -93,6 +93,7 @@ mann                Wrapper que usa mannm en macOS y mann_amd en Linux desde /op
 voces               Generates voices using OpenAI.
 
 ###------descargar_cosas
+descargar_dockerlabs.sh Downloads DockerLabs machines with resume support, filtering, and integrity checks.
 wgett               Descarga archivos con wget, carpeta completa reescribiendo o no
 wgetf               Descarga (FUNCTION) - HTTP minimo que hace GET via TCP - /dev/tcp, http only
 wgetraw             Descarga HTTP minimo que hace GET via TCP - /dev/tcp
