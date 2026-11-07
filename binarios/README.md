@@ -652,6 +652,7 @@ archivar            Enviar por ssh una pagina web al servidor archivebox.
 spiderfoot          Inicia spiderfoot, para instalar -i, funciona en Docker
 javainject          Python que injecta comandos java ascii por terminal, modifica IP en script web busqueda
 spray               Una funcion de bash que prueba una contrasena en los usuarios, necesita users archivo
+suforce             Tests dictionary passwords against a local Linux account using su.
 chiseld             Descarga chisel y lo compila
 chisel              El binario. curl https://i.jpillora.com/chisel\! | bash  
 chiselinst          Instrucciones para port forwarding chisel

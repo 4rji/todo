@@ -1496,5 +1496,18 @@
             "It checks that the selected executable exists and is executable before handing off all supplied arguments.",
             "Unsupported operating systems and missing platform executables produce an error message."
         ]
+    },
+    "suforce": {
+        "name": "suforce",
+        "short_desc": "Tests dictionary passwords against a local Linux account using su.",
+        "detailed_desc": [
+            "Usage: suforce USER DICTIONARY.",
+            "Reads the dictionary line by line and tests each password against the specified local account with su.",
+            "Each attempt has a 0.1-second timeout.",
+            "",
+            "Prints each password as it is tested and stops after reporting the first successful password.",
+            "Ctrl+C prints a termination message and exits.",
+            "Requires Bash, timeout, su, and permission to authenticate as the target user."
+        ]
     }
 }
