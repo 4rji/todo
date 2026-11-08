@@ -667,6 +667,11 @@
         "short_desc": "Monitorea el estado de hosts definidos en el archivo de configuración SSH.",
         "detailed_desc": "ping -c 1 <host>\nssh -p <puerto> <host>"
     },
+    "pingsw": {
+        "name": "pingsw",
+        "short_desc": "Barrido de ping en una subred /24, muestra hosts vivos.",
+        "detailed_desc": "pingsw <subred>\nEj: pingsw 10.10.10 recorre 10.10.10.1-254 con ping -c 1 -W 1 en paralelo, imprime solo los hosts que responden (grep 'bytes from')."
+    },
     "hashf": {
         "name": "hashf",
         "short_desc": "Monitorea y verifica hashes de archivos en un directorio.",

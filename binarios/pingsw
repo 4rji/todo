@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -z "${1:-}" ]; then
+  echo -e "\033[1;31mUso: $(basename "$0") <subred>\033[0m"
+  echo -e "Ej:  $(basename "$0") 10.10.10"
+  exit 1
+fi
+
+subred="$1"
+
+echo -e "\033[1;34mBarriendo ${subred}.1-254 ...\033[0m"
+
+for i in $(seq 1 254); do
+  (ping -c 1 -W 1 "${subred}.${i}" 2>/dev/null | grep -i "bytes from" &)
+done
+
+wait

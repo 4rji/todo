@@ -468,6 +468,7 @@ miwl                copia wlan0 al portapapeles
 cdns	            Cambia el DNS comentando lineas y tambien quita banderas chattr +i PONE / -i QUITA 
 ppt                 Checa lsof netstat nmap y puertos que estan escuchando en el sistema nmap RND:20
 newprocess          Servicios - encuentra nuevos procesos en pantalla para ver que se ejecuta 
+pingsw              Barrido de ping en /24, uso: pingsw 10.10.10, muestra hosts vivos
 
 
 
