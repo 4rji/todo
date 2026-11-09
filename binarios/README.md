@@ -654,8 +654,7 @@ spiderfoot          Inicia spiderfoot, para instalar -i, funciona en Docker
 javainject          Python que injecta comandos java ascii por terminal, modifica IP en script web busqueda
 spray               Una funcion de bash que prueba una contrasena en los usuarios, necesita users archivo
 suforce             Tests dictionary passwords against a local Linux account using su.
-chiseld             Descarga chisel y lo compila (detecta apt/yum/dnf/pacman, no corre en macOS)
-chiselinst          Instala chisel (-i build, -d descarga binario GitHub) o muestra cheatsheet (-e)
+chiselinst          Instala chisel (-i build desde source, -d descarga binario GitHub) o muestra cheatsheet (-e)
 privado             Instrucciones para dirtpipe, tienes que tener gcc, para root
 4rjivuln            comprueba simple file inclusion
 pspy64              procesos servicios newprocess pspy 

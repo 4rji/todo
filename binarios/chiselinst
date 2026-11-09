@@ -11,7 +11,6 @@ NC='\033[0m'
 
 CHISEL_VERSION="1.12.0"
 GITHUB_BASE_URL="https://github.com/jpillora/chisel/releases/download/v${CHISEL_VERSION}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 print_help() {
     echo -e "${C_TITLE}chiselinst${NC} - chisel installer / port-forwarding cheatsheet"
@@ -163,6 +162,50 @@ download_chisel() {
     echo -e "${C_NOTE}Move it into your PATH, e.g.: sudo mv $tmp/chisel /usr/local/bin/chisel${NC}"
 }
 
+build_from_source() {
+    if [ ! -f /etc/os-release ]; then
+        echo -e "${C_ERR}Error: cannot detect OS (/etc/os-release missing).${NC}" >&2
+        return 1
+    fi
+    . /etc/os-release
+    local os_id="${ID:-unknown}"
+
+    if ! command -v go &>/dev/null; then
+        echo "Go not found, installing..."
+        case "$os_id" in
+            debian|ubuntu|kali)
+                sudo apt update -qq
+                sudo apt install -y golang-go
+                ;;
+            centos|rhel)
+                sudo yum install -y golang
+                ;;
+            fedora)
+                sudo dnf install -y golang
+                ;;
+            arch)
+                sudo pacman -Sy --noconfirm go
+                ;;
+            *)
+                echo -e "${C_ERR}Error: distro '$os_id' not auto-supported. Install Go manually and retry.${NC}" >&2
+                return 1
+                ;;
+        esac
+    fi
+
+    local workdir
+    workdir="$(mktemp -d)"
+    git clone --depth 1 https://github.com/jpillora/chisel.git "$workdir/chisel"
+    (cd "$workdir/chisel" && go build -ldflags "-s -w" .)
+
+    if command -v upx &>/dev/null; then
+        upx "$workdir/chisel/chisel"
+    fi
+
+    echo -e "${C_OK}chisel built at: $workdir/chisel/chisel${NC}"
+    echo -e "${C_NOTE}Move it into your PATH, e.g.: sudo mv $workdir/chisel/chisel /usr/local/bin/chisel${NC}"
+}
+
 install_flow() {
     if already_installed; then
         echo -e "${C_OK}chisel is already installed: $(command -v chisel)${NC}"
@@ -177,11 +220,11 @@ install_flow() {
 
     echo
     echo "This will install Go (via your distro's package manager, auto-detected)"
-    echo "then git clone + go build jpillora/chisel from source (chiseld)."
+    echo "then git clone + go build jpillora/chisel from source."
     read -rp "Install chisel now by building from source? [y/N]: " ans
     case "$ans" in
         [Yy]*)
-            bash "$SCRIPT_DIR/chiseld"
+            build_from_source
             ;;
         *)
             echo "Skipping source build."
