@@ -4,26 +4,12 @@ set -e
 # Siempre abre solo esta URL (sin portapapeles, sin mullvad check)
 START_URL="https://www.google.com"
 
-# ----------- red & SearXNG ------------
+# ----------- red (para el run de Firefox) ------------
 NETWORK="searchnet"
-PORT=8080
-CONTAINER="searxng"
-SEARXNG_DIR="/tmp/searxng"
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
-docker image inspect searxng/searxng >/dev/null 2>&1 || docker pull searxng/searxng
 
 CID=""
-if ! docker ps --format '{{.Names}}' | grep -qw "$CONTAINER"; then
-  mkdir -p "$SEARXNG_DIR"
-  CID=$(docker run -d --rm \
-        --name "$CONTAINER" \
-        --network "$NETWORK" \
-        -p "${PORT}:8080" \
-        -v "${SEARXNG_DIR}:/etc/searxng" \
-        -e "BASE_URL=http://${CONTAINER}:${PORT}/" \
-        searxng/searxng)
-fi
 
 # ----------- idioma -------------------
 LANG_CODES=( "en-US" "es-ES" "ja" "zh-CN" "ru" "fr-FR" "de-DE" "pt-BR" "it-IT" "ko" )
