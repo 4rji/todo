@@ -9,3 +9,4 @@ binarios/.atl/skill-registry.md
 .atl/skill-registry.md
 binarios/sbom.json
 binarios/__pycache__/decoyfilecpython-315.pyc
+binarios/Dockerfile
