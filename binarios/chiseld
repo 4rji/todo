@@ -1,19 +1,58 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Instalar Go
-sudo apt install golang-go
+# Compila chisel desde el repo oficial (jpillora/chisel).
+# Detecta el gestor de paquetes para instalar Go (no asume apt).
+# No soportado en macOS: usar `chiselinst -d` para bajar el binario precompilado.
 
-# Clonar el repositorio de chisel
-git clone https://github.com/jpillora/chisel.git
+if [ "$(uname -s)" = "Darwin" ]; then
+    echo "Error: macOS no soporta este build desde source. Usa 'chiselinst -d' para el binario precompilado." >&2
+    exit 1
+fi
 
-# Navegar al directorio de chisel
-cd chisel
+if command -v chisel &>/dev/null; then
+    echo "chisel ya está instalado: $(command -v chisel)"
+    exit 0
+fi
 
-# Compilar chisel
-go build
+if ! command -v go &>/dev/null; then
+    if [ ! -f /etc/os-release ]; then
+        echo "Error: no se puede detectar el OS (/etc/os-release no existe)." >&2
+        exit 1
+    fi
+    . /etc/os-release
+    OS="${ID:-unknown}"
 
-# Compilar chisel con flags de enlace
+    echo "Go no encontrado, instalando..."
+    case "$OS" in
+        debian|ubuntu|kali)
+            sudo apt update -qq
+            sudo apt install -y golang-go
+            ;;
+        centos|rhel)
+            sudo yum install -y golang
+            ;;
+        fedora)
+            sudo dnf install -y golang
+            ;;
+        arch)
+            sudo pacman -Sy --noconfirm go
+            ;;
+        *)
+            echo "Error: distro '$OS' no soportada automáticamente. Instalá Go a mano y reintentá." >&2
+            exit 1
+            ;;
+    esac
+fi
+
+WORKDIR="$(mktemp -d)"
+git clone --depth 1 https://github.com/jpillora/chisel.git "$WORKDIR/chisel"
+cd "$WORKDIR/chisel"
 go build -ldflags "-s -w" .
 
-# Comprimir chisel con UPX
-upx chisel
+if command -v upx &>/dev/null; then
+    upx chisel
+fi
+
+echo "chisel compilado en: $WORKDIR/chisel/chisel"
+echo "Movelo a tu PATH, ej: sudo mv $WORKDIR/chisel/chisel /usr/local/bin/chisel"
