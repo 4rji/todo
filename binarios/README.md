@@ -20,6 +20,7 @@ galletapython       Serves galleta.js and logs base64 cookie callbacks for lab t
 processdecloak      Busca procesos ocultos en linux
 processwatch        Continuously watches a named process and logs its command, details, parent chain, connections, and files.
 tlscheck            TLS cert check using SHA256 Useful for detecting TLS interception - MITM.
+snicheck            Compares TLS certificate subjects and issuers from an IP address with and without SNI.
 ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
 
 

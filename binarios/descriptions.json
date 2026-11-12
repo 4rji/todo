@@ -1,4 +1,20 @@
 {
+    "snicheck": {
+        "name": "snicheck",
+        "short_desc": "Compares TLS certificate subjects and issuers from an IP address with and without SNI.",
+        "detailed_desc": [
+            "Connects to the same IP and port twice using OpenSSL, once with a hostname for SNI and once with SNI disabled.",
+            "Displays each certificate's subject and issuer, followed by extracted subject common names.",
+            "Compares the subject and issuer output to report a match or a difference; it does not compare full certificates or fingerprints.",
+            "",
+            "Usage: snicheck <IP> [hostname] [port].",
+            "Default hostname: argdeploy.pavlonix.io. Default port: 443.",
+            "Checks for openssl and awk; also uses sed and grep.",
+            "",
+            "Exits with status 1 if either connection produces no certificate data.",
+            "Uses colored output in a terminal unless NO_COLOR is set to a nonempty value."
+        ]
+    },
     "decloak.py": {
         "name": "decloak.py",
         "short_desc": "Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.",
