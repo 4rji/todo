@@ -1,0 +1,108 @@
+
+#!/usr/bin/env bash
+
+# TLS SNI Certificate Inspector
+# Usage: ./script <IP> [hostname] [port]
+
+IP="${1:?Usage: $0 <IP> [hostname] [port]}"
+HOST="${2:-argdeploy.pavlonix.io}"
+PORT="${3:-443}"
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  RED=$'\033[31m'
+  GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'
+  CYAN=$'\033[36m'
+  BOLD=$'\033[1m'
+  RESET=$'\033[0m'
+else
+  RED="" GREEN="" YELLOW="" CYAN="" BOLD="" RESET=""
+fi
+
+for cmd in openssl awk; do
+  command -v "$cmd" >/dev/null || {
+    echo "Missing dependency: $cmd" >&2
+    exit 1
+  }
+done
+
+get_cert() {
+  local mode="$1"
+  local args=()
+
+  if [[ "$mode" == "sni" ]]; then
+    args=(-servername "$HOST")
+  else
+    args=(-noservername)
+  fi
+
+  openssl s_client \
+    -connect "${IP}:${PORT}" \
+    "${args[@]}" \
+    </dev/null 2>/dev/null |
+    openssl x509 -noout -subject -issuer 2>/dev/null
+}
+
+extract_cn() {
+  printf '%s\n' "$1" |
+    awk -F 'CN=' '/^subject=/{print $2}' |
+    sed 's/,.*//;s/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+show_cert() {
+  local title="$1"
+  local data="$2"
+
+  printf "\n${BOLD}${CYAN}%s${RESET}\n" "$title"
+  printf '%s\n' "------------------------------------------------"
+
+  if [[ -z "$data" ]]; then
+    printf "${RED}ERROR${RESET}  Unable to retrieve certificate\n"
+    return
+  fi
+
+  local subject issuer
+  subject=$(printf '%s\n' "$data" | grep '^subject=')
+  issuer=$(printf '%s\n' "$data" | grep '^issuer=')
+
+  printf "${GREEN}Subject:${RESET} %s\n" "${subject#subject=}"
+  printf "${CYAN}Issuer: ${RESET} %s\n" "${issuer#issuer=}"
+}
+
+printf "\n${BOLD}${CYAN}"
+printf "===============================================\n"
+printf "       TLS SNI Certificate Inspector\n"
+printf "===============================================${RESET}\n"
+
+printf "Target IP : ${BOLD}%s${RESET}\n" "$IP"
+printf "Hostname  : ${BOLD}%s${RESET}\n" "$HOST"
+printf "Port      : %s\n" "$PORT"
+
+WITH_SNI=$(get_cert sni)
+NO_SNI=$(get_cert nosni)
+
+show_cert "01  CERTIFICATE WITH SNI" "$WITH_SNI"
+show_cert "02  CERTIFICATE WITHOUT SNI" "$NO_SNI"
+
+printf "\n${BOLD}${YELLOW}03  COMPARISON RESULTS${RESET}\n"
+printf '%s\n' "------------------------------------------------"
+
+if [[ -z "$WITH_SNI" || -z "$NO_SNI" ]]; then
+  printf "${RED}[ERROR]${RESET} Incomplete certificate data.\n"
+  exit 1
+fi
+
+SNI_CN=$(extract_cn "$WITH_SNI")
+DEFAULT_CN=$(extract_cn "$NO_SNI")
+
+printf "With SNI    : ${GREEN}%s${RESET}\n" "$SNI_CN"
+printf "Without SNI : ${YELLOW}%s${RESET}\n" "$DEFAULT_CN"
+
+if [[ "$WITH_SNI" == "$NO_SNI" ]]; then
+  printf "\n${GREEN}[MATCH]${RESET} Certificates are identical.\n"
+else
+  printf "\n${YELLOW}[DIFFERENT]${RESET} TLS certificate changes based on SNI.\n"
+  printf "${CYAN}[INFO]${RESET} IP-based scanners may observe a different certificate.\n"
+fi
+
+printf "\n"
