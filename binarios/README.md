@@ -589,7 +589,9 @@ msmb                monta un smb o samba
 smbcomm             Explota samba, sarregla s tty, consola interactiva, control c    
 enviarnc            Envia archivos con bash puro, NO NC, hace sha256sum
 recibenc            recibe archivos con nc, usando enviarnc hace sha256sum  
-receiver            Recibidor de go para recibir archivos por nc
+receiver            Runs receiver-amd on Linux x86-64 or receiver_mac on macOS ARM64 from /opt/4rji/bin.
+receiver-amd        Linux x86-64 file receiver binary.
+receiver_mac        macOS ARM64 file receiver binary.
 nalaservicio        Crea un systemctl servicio para la app nala electron.
 bincrypter          encripta binarios, tambien hacer contrasenas, ofusca y ejecuta /dev/shm
 wifiaircrack        Aplica aircrack para redes wifi

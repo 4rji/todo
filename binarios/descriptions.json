@@ -1012,8 +1012,31 @@
     },
     "receiver": {
         "name": "receiver",
-        "short_desc": "Escucha en 0.0.0.0:1235 para recibir archivos via netcat.",
-        "detailed_desc": "Este binario inicia un listener en 0.0.0.0:1235 y muestra las interfaces IPv4 disponibles. Indica como enviar un archivo desde otro host con: nc -q 0 <listener-ip> 1235 < archivo. Util para recibir archivos rapidamente con netcat hasta que el usuario presione Ctrl+C."
+        "short_desc": "Launches the file receiver for Linux x86-64 or macOS ARM64.",
+        "detailed_desc": [
+            "Runs the matching executable from /opt/4rji/bin.",
+            "",
+            "Linux x86-64: receiver-amd.",
+            "macOS ARM64: receiver_mac.",
+            "",
+            "Passes all arguments unchanged and reports unsupported systems or missing executables."
+        ]
+    },
+    "receiver-amd": {
+        "name": "receiver-amd",
+        "short_desc": "Linux x86-64 file receiver binary.",
+        "detailed_desc": [
+            "ELF executable for Linux x86-64.",
+            "Selected by the receiver launcher on supported Linux systems."
+        ]
+    },
+    "receiver_mac": {
+        "name": "receiver_mac",
+        "short_desc": "macOS ARM64 file receiver binary.",
+        "detailed_desc": [
+            "Mach-O executable for macOS ARM64.",
+            "Selected by the receiver launcher on supported Mac systems."
+        ]
     },
     "backde": {
         "name": "backde",
