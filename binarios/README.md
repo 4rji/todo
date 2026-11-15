@@ -689,8 +689,7 @@ bomba               Crea procesos recursivos sin fin, - sistema es inutilizable 
 ###------ Splunk
 splunkinst          instala Splunk y crea un alias para uniciar en zsh
 splunkuninstall     Desinstala splunky
-splunkforw          Splunk universal forwarder, instala .deb automaticamente. Win-Linux-Mac-freebsd 
-splunkforw2         Instala splunk forwarder, el primero lo descarga version 9.4
+splunkforw          Splunk universal forwarder: instala o desinstala (purga total), autodetecta distro/paquete/arch (x86_64+arm64). Cualquier Linux
 splunk998           Para servidor, crea el archivo inputs para recibir conexiones
 splunktestport      ejecuta un tcpdump para ver si recibe datos el puerto 998
 

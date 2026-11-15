@@ -2,7 +2,13 @@
 set -euo pipefail
 
 # Simple interactive iptables rule builder/applier.
-# Works with iptables classic (requires root).
+# Works with iptables classic (requires root; uses sudo when not run as root).
+# Modes and wizard rules are IPv4. IPv6 is handled by one switch that blocks
+# all of it with ip6tables (option 10).
+#
+# Every rule this script creates carries a comment tag, so it can later find
+# and remove exactly its own rules (mode switch / disable) without touching
+# rules that belong to Docker, ufw, or anything else.
 
 # Colors
 RED="\033[1;31m"
@@ -12,22 +18,70 @@ BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 RESET="\033[0m"
 
+# Rule tags (no spaces: iptables prints them unquoted, easy to match).
+TAG_BASE="fwipt-base"       # loopback + established/related
+TAG_NET="fwipt-internet"    # internet mode allowlist
+TAG_USER="fwipt-user"       # rules created with the wizard
+TAG_LOG="fwipt-log"         # LOG rule for blocked outbound traffic
+TAG_ANY="fwipt-[a-z]+"      # all of the above
+TAG_V6="fwipt-ipv6"         # IPv6 block (ip6tables only)
+
+# Kernel log prefix for outbound packets that no rule accepted.
+LOG_PREFIX="FWIPT-OUT-DROP "
+
 IPT=(iptables)
+IPT6=(ip6tables)
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo -e "${RED}iptables requires root and sudo is not installed. Run this script as root.${RESET}" >&2
+    exit 1
+  fi
   echo "Note: iptables requires root. I will use sudo to run commands." >&2
+  # Ask for the password once, up front, instead of in the middle of a menu.
+  if ! sudo -v; then
+    echo -e "${RED}Could not get sudo privileges.${RESET}" >&2
+    exit 1
+  fi
   IPT=(sudo iptables)
+  IPT6=(sudo ip6tables)
 fi
 
+ipt() {
+  "${IPT[@]}" "$@"
+}
+
+ipt6() {
+  "${IPT6[@]}" "$@"
+}
+
+as_root() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+# Returns non-zero on EOF (stdin closed) so callers can stop instead of looping.
 prompt() {
   local label="$1" default="${2-}"
   local input
   if [[ -n "$default" ]]; then
-    read -r -p "$label [$default]: " input
+    read -r -p "$label [$default]: " input || return 1
     echo "${input:-$default}"
   else
-    read -r -p "$label: " input
+    read -r -p "$label: " input || return 1
     echo "$input"
   fi
+}
+
+confirm() {
+  local answer
+  answer=$(prompt "$1 (y/N)" "N") || return 1
+  case "$answer" in
+    y|Y|yes|YES|s|S|si|SI) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 print_cmd() {
@@ -40,6 +94,14 @@ print_cmd() {
 run_cmd() {
   print_cmd "$@"
   "$@"
+}
+
+canceled() {
+  echo -e "${RED}Canceled.${RESET}"
+}
+
+failed() {
+  echo -e "${RED}A command failed. The firewall may be in a partial state: review it with option 2.${RESET}" >&2
 }
 
 is_valid_port() {
@@ -59,6 +121,7 @@ is_valid_port() {
 is_valid_ports_spec() {
   local spec="$1"
   local token
+  local -a tokens
   local count=0
 
   [[ -n "$spec" ]] || return 1
@@ -68,10 +131,14 @@ is_valid_ports_spec() {
     token="${token//[[:space:]]/}"
     [[ -n "$token" ]] || return 1
     is_valid_port "$token" || return 1
-    count=$((count + 1))
+    # iptables multiport has 15 slots per rule; a range uses two of them.
+    if [[ "$token" == *:* ]]; then
+      count=$((count + 2))
+    else
+      count=$((count + 1))
+    fi
   done
 
-  # iptables multiport supports up to 15 ports/ranges per rule.
   [[ "$count" -le 15 ]]
 }
 
@@ -85,7 +152,7 @@ choose_action() {
     case "$choice" in
       1) echo "ACCEPT"; return 0 ;;
       2) echo "DROP"; return 0 ;;
-      *) echo "Invalid option." ;;
+      *) echo "Invalid option." >&2 ;;
     esac
   done
 }
@@ -102,7 +169,7 @@ choose_chain() {
       1) echo "INPUT"; return 0 ;;
       2) echo "OUTPUT"; return 0 ;;
       3) echo "FORWARD"; return 0 ;;
-      *) echo "Invalid option." ;;
+      *) echo "Invalid option." >&2 ;;
     esac
   done
 }
@@ -121,13 +188,240 @@ choose_proto() {
       2) echo "udp"; return 0 ;;
       3) echo "icmp"; return 0 ;;
       4) echo "all"; return 0 ;;
-      *) echo "Invalid option." ;;
+      *) echo "Invalid option." >&2 ;;
     esac
   done
 }
 
+choose_position() {
+  echo -e "${CYAN}Position in the chain:${RESET}" >&2
+  echo -e "  ${GREEN}1${RESET}) Top (wins over every existing rule)" >&2
+  echo -e "  ${GREEN}2${RESET}) Bottom (only applies if no earlier rule matches)" >&2
+  local choice
+  while true; do
+    choice=$(prompt "Position (1-2) 1=Top, 2=Bottom" "1")
+    case "$choice" in
+      1) echo "I"; return 0 ;;
+      2) echo "A"; return 0 ;;
+      *) echo "Invalid option." >&2 ;;
+    esac
+  done
+}
+
+# Add a rule unless an identical one already exists.
+# usage: ensure_rule <I|A> <chain> <rule spec...>
+ensure_rule() {
+  local op="$1" chain="$2"
+  shift 2
+  if ipt -C "$chain" "$@" 2>/dev/null; then
+    return 0
+  fi
+  run_cmd "${IPT[@]}" "-$op" "$chain" "$@"
+}
+
+# Delete every rule in <chain> whose comment tag matches <tag regex>.
+# Deletes by rule number from the bottom up so numbers stay valid.
+# usage: delete_tagged <chain> <tag regex> [6]   (6 = use ip6tables)
+delete_tagged() {
+  local chain="$1" tag="$2" family="${3:-4}"
+  local nums n
+  local -a cmd
+  if [[ "$family" == "6" ]]; then
+    cmd=("${IPT6[@]}")
+  else
+    cmd=("${IPT[@]}")
+  fi
+  nums=$("${cmd[@]}" -S "$chain" | awk -v tag="^(${tag})\$" '
+    /^-A / {
+      n++
+      for (i = 1; i < NF; i++) {
+        if ($i == "--comment") {
+          c = $(i + 1)
+          gsub(/"/, "", c)
+          if (c ~ tag) print n
+        }
+      }
+    }' | sort -rn) || return 1
+  for n in $nums; do
+    run_cmd "${cmd[@]}" -D "$chain" "$n" || return 1
+  done
+}
+
+# Prints: blocked | open | unavailable (ip6tables missing or not usable).
+ipv6_state() {
+  local rules
+  if ! rules=$(ipt6 -S 2>/dev/null); then
+    echo "unavailable"
+  elif grep -q -E -- "--comment \"?${TAG_V6}" <<< "$rules"; then
+    echo "blocked"
+  else
+    echo "open"
+  fi
+}
+
+# Insert a rule at the top of an ip6tables chain unless it already exists.
+ensure_rule6() {
+  local chain="$1"
+  shift
+  if ipt6 -C "$chain" "$@" 2>/dev/null; then
+    return 0
+  fi
+  run_cmd "${IPT6[@]}" -I "$chain" "$@"
+}
+
+# DROP rules at the top of every chain: they win over any other IPv6 rule and
+# leave policies alone, so unblocking restores exactly the previous state.
+# Loopback (::1) stays open so local services using "localhost" keep working.
+block_ipv6() {
+  ensure_rule6 INPUT ! -i lo -m comment --comment "$TAG_V6" -j DROP || return 1
+  ensure_rule6 OUTPUT ! -o lo -m comment --comment "$TAG_V6" -j DROP || return 1
+  ensure_rule6 FORWARD -m comment --comment "$TAG_V6" -j DROP || return 1
+}
+
+unblock_ipv6() {
+  local chain
+  for chain in INPUT FORWARD OUTPUT; do
+    delete_tagged "$chain" "$TAG_V6" 6 || return 1
+  done
+}
+
+set_policies() {
+  run_cmd "${IPT[@]}" -P INPUT "$1" || return 1
+  run_cmd "${IPT[@]}" -P FORWARD "$2" || return 1
+  run_cmd "${IPT[@]}" -P OUTPUT "$3" || return 1
+}
+
+# Rules that still drop/reject traffic (whoever created them).
+blocking_rules() {
+  ipt -S 2>/dev/null | grep -E -- '-j (DROP|REJECT)' || true
+}
+
+show_status() {
+  local rules policies own v6
+  rules=$(ipt -S 2>/dev/null) || return 0
+  policies=$(awk '/^-P /{printf "%s=%s ", $2, $3}' <<< "$rules")
+  own=$(grep -c -E -- '--comment "?fwipt-' <<< "$rules" || true)
+  case "$(ipv6_state)" in
+    blocked) v6="${RED}BLOCKED${RESET}" ;;
+    open) v6="${GREEN}open${RESET}" ;;
+    *) v6="n/a" ;;
+  esac
+  echo -e "${CYAN}Policies:${RESET} ${policies}${CYAN}| rules from this script:${RESET} ${own} ${CYAN}| IPv6:${RESET} ${v6}"
+}
+
+# IPv4 nameservers in use, comma-separated (loopback stubs are skipped: they
+# are already allowed, and the real upstream servers are listed by systemd).
+detect_dns() {
+  local f key ip out=""
+  for f in /etc/resolv.conf /run/systemd/resolve/resolv.conf; do
+    if [[ ! -r "$f" ]]; then
+      continue
+    fi
+    while read -r key ip _; do
+      if [[ "$key" == "nameserver" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$ip" != 127.* ]]; then
+        case ",$out," in
+          *",$ip,"*) ;;
+          *) out="${out:+$out,}$ip" ;;
+        esac
+      fi
+    done < "$f"
+  done
+  echo "$out"
+}
+
+# Ask for a comma-separated list of IPv4 addresses/CIDRs, or 'any'.
+prompt_dests() {
+  local label="$1" default="$2"
+  local input token ok
+  while true; do
+    input=$(prompt "$label" "$default")
+    input="${input//[[:space:]]/}"
+    if [[ "$input" == "any" ]]; then
+      echo "any"
+      return 0
+    fi
+    ok=1
+    if [[ -z "$input" ]]; then
+      ok=0
+    fi
+    for token in ${input//,/ }; do
+      if [[ ! "$token" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]; then
+        ok=0
+      fi
+    done
+    if [[ "$ok" -eq 1 ]]; then
+      echo "$input"
+      return 0
+    fi
+    echo "Invalid list. Use IPv4 addresses or CIDRs separated by commas, or 'any'." >&2
+  done
+}
+
+# usage: allow_out <dest|any> <proto> <port>
+allow_out() {
+  local dest="$1" proto="$2" port="$3"
+  if [[ "$dest" == "any" ]]; then
+    ensure_rule A OUTPUT -p "$proto" --dport "$port" -m comment --comment "$TAG_NET" -j ACCEPT
+  else
+    ensure_rule A OUTPUT -p "$proto" -d "$dest" --dport "$port" -m comment --comment "$TAG_NET" -j ACCEPT
+  fi
+}
+
+log_active() {
+  ipt -S OUTPUT 2>/dev/null | grep -q -E -- "--comment \"?${TAG_LOG}"
+}
+
+# (Re)place the LOG rule as the last rule of OUTPUT, so it only sees packets
+# that no rule accepted and the DROP policy is about to discard.
+seat_log_rule() {
+  delete_tagged OUTPUT "$TAG_LOG" || return 1
+  run_cmd "${IPT[@]}" -A OUTPUT -m limit --limit 30/min --limit-burst 30 -m comment --comment "$TAG_LOG" -j LOG --log-prefix "$LOG_PREFIX" --log-uid
+}
+
+show_blocked() {
+  echo ""
+  echo -e "${YELLOW}Blocked outbound attempts${RESET} (kernel log, prefix ${LOG_PREFIX})"
+  if ! log_active; then
+    echo -e "${YELLOW}Logging is not active now: Aggressive (5) and Internet (6) modes turn it on.${RESET}"
+  fi
+
+  local lines="" f
+  if command -v journalctl >/dev/null 2>&1; then
+    lines=$(as_root journalctl -k --no-pager -o short-iso 2>/dev/null | grep -F -- "$LOG_PREFIX" || true)
+  fi
+  if [[ -z "$lines" ]]; then
+    lines=$(as_root dmesg 2>/dev/null | grep -F -- "$LOG_PREFIX" || true)
+  fi
+  if [[ -z "$lines" ]]; then
+    for f in /var/log/kern.log /var/log/messages /var/log/syslog; do
+      if [[ -z "$lines" && -e "$f" ]]; then
+        lines=$(as_root grep -F -- "$LOG_PREFIX" "$f" 2>/dev/null || true)
+      fi
+    done
+  fi
+  if [[ -z "$lines" ]]; then
+    echo "No blocked outbound attempts found in the kernel log."
+    return 0
+  fi
+
+  echo -e "${CYAN}Top blocked destinations (count, protocol, destination:port, local uid):${RESET}"
+  awk '{
+    dst = ""; dpt = "-"; proto = "?"; uid = "-"
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^DST=/) dst = substr($i, 5)
+      else if ($i ~ /^DPT=/) dpt = substr($i, 5)
+      else if ($i ~ /^PROTO=/) proto = substr($i, 7)
+      else if ($i ~ /^UID=/) uid = substr($i, 5)
+    }
+    if (dst != "") count[proto " " dst ":" dpt " uid=" uid]++
+  }
+  END { for (k in count) print count[k], k }' <<< "$lines" | sort -rn | head -n 15 || true
+  echo -e "${CYAN}Last 20 entries:${RESET}"
+  tail -n 20 <<< "$lines"
+}
+
 apply_rule() {
-  local action chain proto port src dst inif outif
+  local action chain proto port src dst inif outif position opposite
 
   action=$(choose_action)
   chain=$(choose_chain)
@@ -145,7 +439,7 @@ apply_rule() {
         port="${port//[[:space:]]/}"
         break
       fi
-      echo "Invalid port(s). Use commas for multiple values, max 15 items."
+      echo "Invalid port(s). Use commas for multiple values, max 15 items (a range counts as 2)."
     done
   fi
 
@@ -161,185 +455,293 @@ apply_rule() {
     outif=$(prompt "Output interface (enter to skip)" "")
   fi
 
-  local -a cmd
-  cmd=("${IPT[@]}" -A "$chain")
+  position=$(choose_position)
+
+  # Rule spec without the target, so the opposite rule can be looked up too.
+  local -a spec
+  spec=(-m comment --comment "$TAG_USER")
 
   if [[ "$proto" != "all" ]]; then
-    cmd+=(-p "$proto")
+    spec+=(-p "$proto")
   fi
   if [[ -n "$port" ]]; then
     if [[ "$port" == *,* ]]; then
-      cmd+=(-m multiport --dports "$port")
+      spec+=(-m multiport --dports "$port")
     else
-      cmd+=(--dport "$port")
+      spec+=(--dport "$port")
     fi
   fi
   if [[ -n "$src" ]]; then
-    cmd+=(-s "$src")
+    spec+=(-s "$src")
   fi
   if [[ -n "$dst" ]]; then
-    cmd+=(-d "$dst")
+    spec+=(-d "$dst")
   fi
   if [[ -n "$inif" ]]; then
-    cmd+=(-i "$inif")
+    spec+=(-i "$inif")
   fi
   if [[ -n "$outif" ]]; then
-    cmd+=(-o "$outif")
+    spec+=(-o "$outif")
   fi
 
-  cmd+=(-j "$action")
+  if ipt -C "$chain" "${spec[@]}" -j "$action" 2>/dev/null; then
+    echo -e "${YELLOW}That exact rule already exists in ${chain}. Nothing to do.${RESET}"
+    return 0
+  fi
+
+  if [[ "$action" == "ACCEPT" ]]; then
+    opposite="DROP"
+  else
+    opposite="ACCEPT"
+  fi
 
   echo ""
-  print_cmd "${cmd[@]}"
+  print_cmd "${IPT[@]}" "-$position" "$chain" "${spec[@]}" -j "$action"
+  if ipt -C "$chain" "${spec[@]}" -j "$opposite" 2>/dev/null; then
+    echo -e "${YELLOW}The same rule exists with ${opposite}: it will be replaced.${RESET}"
+  else
+    opposite=""
+  fi
 
-  local confirm
-  confirm=$(prompt "Apply rule? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      "${cmd[@]}"
-      echo -e "${GREEN}Rule applied.${RESET}"
-      ;;
-    *)
-      echo -e "${RED}Canceled.${RESET}"
-      ;;
-  esac
+  if ! confirm "Apply rule?"; then
+    canceled
+    return 0
+  fi
+
+  if ! ipt "-$position" "$chain" "${spec[@]}" -j "$action"; then
+    echo -e "${RED}iptables rejected the rule. Nothing was changed.${RESET}" >&2
+    return 0
+  fi
+  if [[ -n "$opposite" ]]; then
+    while ipt -C "$chain" "${spec[@]}" -j "$opposite" 2>/dev/null; do
+      run_cmd "${IPT[@]}" -D "$chain" "${spec[@]}" -j "$opposite" || break
+    done
+  fi
+  # A rule appended to OUTPUT lands after the LOG rule: put LOG last again.
+  if [[ "$chain" == "OUTPUT" && "$position" == "A" ]] && log_active; then
+    seat_log_rule || failed
+  fi
+  echo -e "${GREEN}Rule applied.${RESET}"
 }
 
-main_menu() {
-  while true; do
-    echo ""
-    echo -e "${BLUE}Firewall wizard (iptables)${RESET}"
-    echo -e "  ${GREEN}1${RESET}) Create and apply rule"
-    echo -e "  ${GREEN}2${RESET}) List current rules"
-    echo -e "  ${GREEN}3${RESET}) Enable firewall (default DROP)"
-    echo -e "  ${GREEN}4${RESET}) Disable firewall (default ACCEPT)"
-    echo -e "  ${GREEN}5${RESET}) Aggressive mode (OUTPUT DROP + allowlist)"
-    echo -e "  ${GREEN}6${RESET}) Internet mode (DNS + HTTP/HTTPS)"
-    echo -e "  ${GREEN}7${RESET}) Delete rule by number"
-    echo -e "  ${RED}8${RESET}) Exit"
-    local choice
-    choice=$(prompt "Menu (1-8) 1=Create, 2=List, 3=Enable, 4=Disable, 5=Aggressive, 6=Internet, 7=Delete, 8=Exit" "1")
-    case "$choice" in
-      1) apply_rule ;;
-      2) run_cmd "${IPT[@]}" -L -n -v --line-numbers ;;
-      3) enable_firewall ;;
-      4) disable_firewall ;;
-      5) aggressive_mode ;;
-      6) internet_mode ;;
-      7) delete_rule ;;
-      8) exit 0 ;;
-      *) echo "Invalid option." ;;
-    esac
-  done
+# Switch to a mode: firewall | aggressive | internet.
+# usage: apply_mode <mode> [dns dests] [web dests]   (comma-separated or 'any')
+# Order matters: add what the new mode needs, then set policies, then remove
+# what the previous mode left behind. Existing connections never lose their
+# ACCEPT rule while a DROP policy is active.
+apply_mode() {
+  local mode="$1" dns="${2:-any}" web="${3:-any}" out_policy="DROP" dest
+  if [[ "$mode" == "firewall" ]]; then
+    out_policy="ACCEPT"
+  fi
+
+  # Baseline: loopback and established/related traffic.
+  ensure_rule I INPUT -i lo -m comment --comment "$TAG_BASE" -j ACCEPT || return 1
+  ensure_rule I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG_BASE" -j ACCEPT || return 1
+  ensure_rule I FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG_BASE" -j ACCEPT || return 1
+  if [[ "$out_policy" == "DROP" ]]; then
+    ensure_rule I OUTPUT -o lo -m comment --comment "$TAG_BASE" -j ACCEPT || return 1
+    ensure_rule I OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG_BASE" -j ACCEPT || return 1
+  fi
+
+  # Outbound internet allowlist, rebuilt from scratch so a previous run with
+  # other (or no) destination limits leaves nothing behind.
+  if [[ "$mode" == "internet" ]]; then
+    delete_tagged OUTPUT "$TAG_NET" || return 1
+    for dest in ${dns//,/ }; do
+      allow_out "$dest" udp 53 || return 1
+      allow_out "$dest" tcp 53 || return 1
+    done
+    for dest in ${web//,/ }; do
+      allow_out "$dest" tcp 80 || return 1
+      allow_out "$dest" tcp 443 || return 1
+      allow_out "$dest" udp 443 || return 1
+    done
+  fi
+
+  set_policies DROP DROP "$out_policy" || return 1
+
+  # Leftovers from the previous mode.
+  if [[ "$mode" != "internet" ]]; then
+    delete_tagged OUTPUT "$TAG_NET" || return 1
+  fi
+  if [[ "$out_policy" == "ACCEPT" ]]; then
+    delete_tagged OUTPUT "$TAG_BASE" || return 1
+    # With OUTPUT=ACCEPT nothing is blocked, so there is nothing to log.
+    delete_tagged OUTPUT "$TAG_LOG" || return 1
+  elif ! seat_log_rule; then
+    echo -e "${YELLOW}Could not add the LOG rule: blocked outbound traffic will not be logged.${RESET}" >&2
+  fi
 }
 
 enable_firewall() {
   echo ""
   echo -e "${YELLOW}Enable firewall:${RESET} INPUT=DROP, FORWARD=DROP, OUTPUT=ACCEPT"
-  local confirm
-  confirm=$(prompt "Confirm? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      # Safe baseline rules.
-      run_cmd "${IPT[@]}" -C INPUT -i lo -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -i lo -j ACCEPT
-      run_cmd "${IPT[@]}" -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      run_cmd "${IPT[@]}" -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-      run_cmd "${IPT[@]}" -P INPUT DROP
-      run_cmd "${IPT[@]}" -P FORWARD DROP
-      run_cmd "${IPT[@]}" -P OUTPUT ACCEPT
-      echo -e "${GREEN}Firewall enabled.${RESET}"
-      ;;
-    *) echo -e "${RED}Canceled.${RESET}" ;;
-  esac
-}
-
-disable_firewall() {
-  echo ""
-  echo -e "${YELLOW}Disable firewall:${RESET} INPUT=ACCEPT, FORWARD=ACCEPT, OUTPUT=ACCEPT"
-  local confirm
-  confirm=$(prompt "Confirm? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      run_cmd "${IPT[@]}" -P INPUT ACCEPT
-      run_cmd "${IPT[@]}" -P FORWARD ACCEPT
-      run_cmd "${IPT[@]}" -P OUTPUT ACCEPT
-      echo -e "${GREEN}Firewall disabled (policies set to ACCEPT).${RESET}"
-      ;;
-    *) echo -e "${RED}Canceled.${RESET}" ;;
-  esac
+  echo -e "${YELLOW}Rules created with the wizard are kept.${RESET}"
+  if ! confirm "Confirm?"; then
+    canceled
+    return 0
+  fi
+  if apply_mode firewall; then
+    echo -e "${GREEN}Firewall enabled.${RESET}"
+  else
+    failed
+  fi
 }
 
 aggressive_mode() {
   echo ""
   echo -e "${YELLOW}Aggressive mode:${RESET} INPUT=DROP, FORWARD=DROP, OUTPUT=DROP"
   echo -e "${YELLOW}Only outbound traffic explicitly allowed in OUTPUT rules will pass.${RESET}"
-  local confirm
-  confirm=$(prompt "Confirm aggressive mode? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      # Baseline rules to keep loopback and established/related traffic working.
-      run_cmd "${IPT[@]}" -C INPUT -i lo -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -i lo -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -o lo -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I OUTPUT -o lo -j ACCEPT
-      run_cmd "${IPT[@]}" -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      run_cmd "${IPT[@]}" -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-      run_cmd "${IPT[@]}" -P INPUT DROP
-      run_cmd "${IPT[@]}" -P FORWARD DROP
-      run_cmd "${IPT[@]}" -P OUTPUT DROP
-      echo -e "${GREEN}Aggressive mode enabled.${RESET}"
-      ;;
-    *) echo -e "${RED}Canceled.${RESET}" ;;
-  esac
+  echo -e "${YELLOW}The internet mode allowlist is removed; rules created with the wizard are kept.${RESET}"
+  echo -e "${YELLOW}Blocked outbound attempts are logged (see option 11).${RESET}"
+  if ! confirm "Confirm aggressive mode?"; then
+    canceled
+    return 0
+  fi
+  if apply_mode aggressive; then
+    echo -e "${GREEN}Aggressive mode enabled.${RESET}"
+  else
+    failed
+  fi
 }
 
 internet_mode() {
   echo ""
   echo -e "${YELLOW}Internet mode:${RESET} INPUT=DROP, FORWARD=DROP, OUTPUT=DROP + web allowlist"
   echo -e "${YELLOW}Allows DNS (53 tcp/udp), HTTP (80/tcp), HTTPS (443/tcp+udp).${RESET}"
-  local confirm
-  confirm=$(prompt "Confirm internet mode? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      # Safe baseline: loopback and established/related traffic.
-      run_cmd "${IPT[@]}" -C INPUT -i lo -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -i lo -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -o lo -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I OUTPUT -o lo -j ACCEPT
-      run_cmd "${IPT[@]}" -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-      run_cmd "${IPT[@]}" -C FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -I FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  echo -e "${YELLOW}Limit each one to known destinations: a port open to 'any' is a way out for a reverse shell.${RESET}"
+  echo -e "${YELLOW}Blocked outbound attempts are logged (see option 11).${RESET}"
 
-      # Outbound internet allowlist.
-      run_cmd "${IPT[@]}" -C OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -A OUTPUT -p udp --dport 53 -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -A OUTPUT -p tcp --dport 53 -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -A OUTPUT -p tcp --dport 80 -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -A OUTPUT -p tcp --dport 443 -j ACCEPT
-      run_cmd "${IPT[@]}" -C OUTPUT -p udp --dport 443 -j ACCEPT 2>/dev/null || run_cmd "${IPT[@]}" -A OUTPUT -p udp --dport 443 -j ACCEPT
+  local dns web detected
+  detected=$(detect_dns)
+  dns=$(prompt_dests "DNS server IP(s), comma-separated, or 'any'" "${detected:-any}")
+  web=$(prompt_dests "Web destination IP/CIDR(s) for 80/443 (proxy, repos), comma-separated, or 'any'" "any")
+  if [[ "$dns" == "any" || "$web" == "any" ]]; then
+    echo -e "${RED}Warning: with 'any', a reverse shell to that port on an attacker machine will pass.${RESET}"
+  fi
 
-      run_cmd "${IPT[@]}" -P INPUT DROP
-      run_cmd "${IPT[@]}" -P FORWARD DROP
-      run_cmd "${IPT[@]}" -P OUTPUT DROP
-      echo -e "${GREEN}Internet mode enabled.${RESET}"
+  if ! confirm "Confirm internet mode?"; then
+    canceled
+    return 0
+  fi
+  if apply_mode internet "$dns" "$web"; then
+    echo -e "${GREEN}Internet mode enabled.${RESET}"
+  else
+    failed
+  fi
+}
+
+disable_firewall() {
+  echo ""
+  echo -e "${YELLOW}Disable firewall:${RESET} INPUT=ACCEPT, FORWARD=ACCEPT, OUTPUT=ACCEPT"
+  echo -e "${YELLOW}Also removes every rule created by this script (modes and wizard rules).${RESET}"
+  if ! confirm "Confirm?"; then
+    canceled
+    return 0
+  fi
+
+  local chain left
+  if ! set_policies ACCEPT ACCEPT ACCEPT; then
+    failed
+    return 0
+  fi
+  for chain in INPUT FORWARD OUTPUT; do
+    if ! delete_tagged "$chain" "$TAG_ANY"; then
+      failed
+      return 0
+    fi
+  done
+  echo -e "${GREEN}Firewall disabled: policies set to ACCEPT, script rules removed.${RESET}"
+
+  left=$(blocking_rules)
+  if [[ -n "$left" ]]; then
+    echo ""
+    echo -e "${RED}Warning: rules NOT created by this script are still blocking traffic:${RESET}"
+    echo "$left"
+    echo -e "${YELLOW}Remove them with option 7, or wipe everything with option 9 (Full reset).${RESET}"
+  fi
+  if [[ "$(ipv6_state)" == "blocked" ]]; then
+    echo -e "${YELLOW}IPv6 is still blocked (independent switch: option 10 to unblock).${RESET}"
+  fi
+}
+
+ipv6_toggle() {
+  echo ""
+  case "$(ipv6_state)" in
+    unavailable)
+      echo -e "${RED}ip6tables is not available on this system. Nothing was changed.${RESET}" >&2
       ;;
-    *) echo -e "${RED}Canceled.${RESET}" ;;
+    blocked)
+      echo -e "${YELLOW}IPv6 is currently BLOCKED.${RESET} Unblocking removes only the block rules of this script."
+      if ! confirm "Unblock IPv6?"; then
+        canceled
+        return 0
+      fi
+      if unblock_ipv6; then
+        echo -e "${GREEN}IPv6 unblocked.${RESET}"
+      else
+        failed
+      fi
+      ;;
+    *)
+      echo -e "${YELLOW}Block IPv6:${RESET} DROP all IPv6 in INPUT, OUTPUT and FORWARD (loopback ::1 stays open)."
+      echo -e "${YELLOW}Existing IPv6 connections are cut immediately.${RESET}"
+      if [[ "${SSH_CONNECTION:-}" == *:* ]]; then
+        echo -e "${RED}Warning: this SSH session is running over IPv6. You will lose it.${RESET}"
+      fi
+      if ! confirm "Block all IPv6 traffic?"; then
+        canceled
+        return 0
+      fi
+      if block_ipv6; then
+        echo -e "${GREEN}IPv6 blocked.${RESET}"
+      else
+        failed
+      fi
+      ;;
   esac
+}
+
+full_reset() {
+  echo ""
+  echo -e "${RED}Full reset:${RESET} policies to ACCEPT and flush EVERY rule in the filter table."
+  echo -e "${YELLOW}This also removes rules from Docker, ufw, fail2ban, etc.${RESET}"
+  echo -e "${YELLOW}Restart those services afterwards so they recreate their rules.${RESET}"
+  echo -e "${YELLOW}The IPv6 block of this script is removed too, if active.${RESET}"
+  if ! confirm "Confirm full reset?"; then
+    canceled
+    return 0
+  fi
+  if ! { set_policies ACCEPT ACCEPT ACCEPT && run_cmd "${IPT[@]}" -F; }; then
+    failed
+    return 0
+  fi
+  if [[ "$(ipv6_state)" == "blocked" ]] && ! unblock_ipv6; then
+    failed
+    return 0
+  fi
+  echo -e "${GREEN}Filter table flushed. All traffic is allowed.${RESET}"
 }
 
 delete_rule() {
   echo ""
   echo -e "${YELLOW}Delete rule by number${RESET}"
-  local chain rule_num confirm
+  local chain rule_num
 
   chain=$(choose_chain)
 
   echo ""
   echo -e "${CYAN}Current rules in ${chain}:${RESET}"
-  run_cmd "${IPT[@]}" -L "$chain" -n -v --line-numbers
+  if ! run_cmd "${IPT[@]}" -L "$chain" -n -v --line-numbers; then
+    failed
+    return 0
+  fi
 
   while true; do
     rule_num=$(prompt "Rule number to delete in ${chain} (enter to cancel)" "")
     if [[ -z "$rule_num" ]]; then
-      echo -e "${RED}Canceled.${RESET}"
+      canceled
       return 0
     fi
     if [[ "$rule_num" =~ ^[0-9]+$ ]] && [[ "$rule_num" -ge 1 ]]; then
@@ -348,16 +750,50 @@ delete_rule() {
     echo "Invalid number."
   done
 
-  confirm=$(prompt "Confirm deletion of ${chain} line ${rule_num}? (y/N)" "N")
-  case "$confirm" in
-    y|Y|yes|YES|s|S|si|SI)
-      run_cmd "${IPT[@]}" -D "$chain" "$rule_num"
-      echo -e "${GREEN}Rule deleted.${RESET}"
-      ;;
-    *)
-      echo -e "${RED}Canceled.${RESET}"
-      ;;
-  esac
+  if ! confirm "Confirm deletion of ${chain} line ${rule_num}?"; then
+    canceled
+    return 0
+  fi
+  if run_cmd "${IPT[@]}" -D "$chain" "$rule_num"; then
+    echo -e "${GREEN}Rule deleted.${RESET}"
+  else
+    echo -e "${RED}Could not delete ${chain} line ${rule_num}. Nothing was changed.${RESET}" >&2
+  fi
+}
+
+main_menu() {
+  while true; do
+    echo ""
+    echo -e "${BLUE}Firewall wizard (iptables)${RESET}"
+    show_status
+    echo -e "  ${GREEN}1${RESET}) Create and apply rule"
+    echo -e "  ${GREEN}2${RESET}) List current rules"
+    echo -e "  ${GREEN}3${RESET}) Enable firewall (default DROP)"
+    echo -e "  ${GREEN}4${RESET}) Disable firewall (default ACCEPT + remove script rules)"
+    echo -e "  ${GREEN}5${RESET}) Aggressive mode (OUTPUT DROP + allowlist)"
+    echo -e "  ${GREEN}6${RESET}) Internet mode (DNS + HTTP/HTTPS)"
+    echo -e "  ${GREEN}7${RESET}) Delete rule by number"
+    echo -e "  ${RED}8${RESET}) Exit"
+    echo -e "  ${RED}9${RESET}) Full reset (flush ALL rules, allow everything)"
+    echo -e "  ${GREEN}10${RESET}) Block / unblock all IPv6 traffic"
+    echo -e "  ${GREEN}11${RESET}) Show blocked outbound attempts (log)"
+    local choice
+    choice=$(prompt "Menu (1-11) 1=Create, 2=List, 3=Enable, 4=Disable, 5=Aggressive, 6=Internet, 7=Delete, 8=Exit, 9=Reset, 10=IPv6, 11=Log" "1") || exit 0
+    case "$choice" in
+      1) apply_rule ;;
+      2) run_cmd "${IPT[@]}" -L -n -v --line-numbers || failed ;;
+      3) enable_firewall ;;
+      4) disable_firewall ;;
+      5) aggressive_mode ;;
+      6) internet_mode ;;
+      7) delete_rule ;;
+      8) exit 0 ;;
+      9) full_reset ;;
+      10) ipv6_toggle ;;
+      11) show_blocked ;;
+      *) echo "Invalid option." ;;
+    esac
+  done
 }
 
 main_menu

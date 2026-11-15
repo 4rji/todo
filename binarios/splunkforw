@@ -1,104 +1,229 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
+# splunkforw — Splunk Universal Forwarder: install or uninstall on any Linux.
+# Merge of the old splunkforw + splunkforw2.
+# Autodetects distro (deb/rpm/tgz) and architecture (x86_64 / arm64), downloads the
+# right package, installs, starts, configures forward-server and a log monitor.
+# The uninstall option does a full purge (service + package + /opt/splunkforwarder).
+# Run as a normal user: it elevates per-command with sudo. Run as root: no sudo used.
 
-# ---------- banner instructions (always first) ----------
-printf "\n"
-printf "\033[37mStep 1: Install Splunk Universal Forwarder (Linux):\033[0m\n\n"
+VER="10.0.2"
+HASH="e2d18b4767e9"
+BASE="https://download.splunk.com/products/universalforwarder/releases/${VER}/linux"
+SPLUNK_HOME="/opt/splunkforwarder"
+SPLUNK="${SPLUNK_HOME}/bin/splunk"
+SUDO=""
 
-printf "\033[33m• Debian / Ubuntu (.deb)\033[0m\n"
-printf "\033[32m  sudo dpkg -i splunkforwarder-<version>-linux-amd64.deb\033[0m\n\n"
+# ---------- colors ----------
+R='\033[1;31m'; G='\033[32m'; Y='\033[33m'; B='\033[34m'; C='\033[36m'; Z='\033[0m'
 
-printf "\033[33m• RHEL / CentOS / Rocky / Alma (.rpm)\033[0m\n"
-printf "\033[32m  sudo rpm -i splunkforwarder-<version>.x86_64.rpm\033[0m\n\n"
+msg(){ echo -e "\n${C}==============================================${Z}\n${Y}$1${Z}\n${C}==============================================${Z}\n"; }
+err(){ echo -e "${R}$1${Z}" >&2; }
 
-printf "\033[33m• Generic Linux (.tgz)\033[0m\n"
-printf "\033[32m  sudo tar -xvzf splunkforwarder-<version>-linux-amd64.tgz -C /opt\033[0m\n\n"
-
-printf "\033[36m_____________________ cd /opt/splunkforwarder/bin ____________________________\033[0m\n\n"
-
-printf "\033[37mStep 2: Start Splunk with the command:\033[0m\n"
-printf "\033[32msudo ./splunk start --accept-license\033[0m\n\n"
-
-printf "\033[37mStep 3: Add a forward server with:\033[0m\n"
-printf "\033[32msudo ./splunk add forward-server <server_ip>:<port>\033[0m\n\n"
-
-printf "\033[37mStep 4: Enable Splunk to start on boot with:\033[0m\n"
-printf "\033[32msudo systemctl enable --now SplunkForwarder\033[0m\n\n"
-
-printf "\033[37mStep 5: Check the status of SplunkForwarder with:\033[0m\n"
-printf "\033[32msudo systemctl status SplunkForwarder\033[0m\n\n"
-
-printf "\033[37mStep 6: Monitor a log file with:\033[0m\n"
-printf "\033[32msudo ./splunk add monitor /var/log/auth.log -index linux_logs\033[0m\n\n"
-
-printf "\033[37mStep 7: Verify active forwarders with:\033[0m\n"
-printf "\033[32msudo ./splunk list forward-server\033[0m\n\n"
-
-# ---------- helper ----------
-echo_msg() {
-  echo ""
-  echo -e "\033[36m==============================================\033[0m"
-  echo -e "\033[1;33m$1\033[0m"
-  echo -e "\033[36m==============================================\033[0m"
-  echo ""
+# ---------- detection ----------
+detect_arch(){
+  case "$(uname -m)" in
+    x86_64|amd64)  ARCH_DEB=amd64; ARCH_RPM=x86_64;  ARCH_TGZ=amd64 ;;
+    aarch64|arm64) ARCH_DEB=arm64; ARCH_RPM=aarch64; ARCH_TGZ=arm64 ;;
+    *) err "Unsupported architecture: $(uname -m) (only x86_64 / arm64)"; exit 1 ;;
+  esac
 }
 
-echo -e "\033[34m_________________________________________________________\033[0m"
-echo ""
-echo -e "\033[34mSelect the operating system for Splunk Universal Forwarder 10.0.2:\033[0m"
-echo ""
-echo -e "  1. \033[36mWindows (64-bit)\033[0m"
-echo -e "  2. \033[36mLinux (x86_64 only)\033[0m"
-echo ""
-read -n1 -p "  Enter your choice (1/2): " os_choice
-echo ""
+detect_pkg(){
+  if   command -v dpkg >/dev/null 2>&1; then echo deb
+  elif command -v rpm  >/dev/null 2>&1; then echo rpm
+  else echo tgz; fi
+}
 
-case "$os_choice" in
-  1) # Windows
-    echo_msg "Downloading Splunk Universal Forwarder for Windows 64-bit (10.0.2)"
-    wget -O splunkforwarder-10.0.2-windows-x64.msi \
-      "https://download.splunk.com/products/universalforwarder/releases/10.0.2/windows/splunkforwarder-10.0.2-e2d18b4767e9-windows-x64.msi"
-    ;;
+pkg_file(){
+  case "$1" in
+    deb) echo "splunkforwarder-${VER}-${HASH}-linux-${ARCH_DEB}.deb" ;;
+    rpm) echo "splunkforwarder-${VER}-${HASH}.${ARCH_RPM}.rpm" ;;
+    tgz) echo "splunkforwarder-${VER}-${HASH}-linux-${ARCH_TGZ}.tgz" ;;
+  esac
+}
 
-  2) # Linux (NO ARM)
-    echo -e "\033[34m_________________________________________________________\033[0m"
-    echo ""
-    echo -e "\033[34mSelect the package for Linux (10.0.2):\033[0m"
-    echo ""
-    echo -e "  1. \033[36m64-bit rpm (x86_64)\033[0m"
-    echo -e "  2. \033[36m64-bit deb (amd64)\033[0m"
-    echo -e "  3. \033[36m64-bit tgz (amd64)\033[0m"
-    echo ""
-    read -n1 -p "  Enter your choice (1/2/3): " linux_version
-    echo ""
+download(){ # $1 url  $2 dest  (no sudo: writes to a temp dir)
+  if   command -v wget >/dev/null 2>&1; then wget -O "$2" "$1"
+  elif command -v curl >/dev/null 2>&1; then curl -fL -o "$2" "$1"
+  else err "wget or curl required"; exit 1; fi
+}
 
-    case "$linux_version" in
-      1)
-        echo_msg "Downloading Splunk UF for Linux 64-bit rpm (10.0.2)"
-        wget -O splunkforwarder-10.0.2-linux-x86_64.rpm \
-          "https://download.splunk.com/products/universalforwarder/releases/10.0.2/linux/splunkforwarder-10.0.2-e2d18b4767e9.x86_64.rpm"
-        ;;
-      2)
-        echo_msg "Downloading Splunk UF for Linux 64-bit deb (10.0.2)"
-        wget -O splunkforwarder-10.0.2-linux-amd64.deb \
-          "https://download.splunk.com/products/universalforwarder/releases/10.0.2/linux/splunkforwarder-10.0.2-e2d18b4767e9-linux-amd64.deb"
-        ;;
-      3)
-        echo_msg "Downloading Splunk UF for Linux 64-bit tgz (10.0.2)"
-        wget -O splunkforwarder-10.0.2-linux-amd64.tgz \
-          "https://download.splunk.com/products/universalforwarder/releases/10.0.2/linux/splunkforwarder-10.0.2-e2d18b4767e9-linux-amd64.tgz"
-        ;;
-      *)
-        echo -e "\033[31mInvalid selection\033[0m"; exit 1;;
-    esac
-    ;;
-  *)
-    echo -e "\033[31mInvalid selection\033[0m"; exit 1;;
+install_pkg(){ # $1 pkg  $2 file
+  case "$1" in
+    deb) $SUDO dpkg -i "$2" || { $SUDO apt-get update -y || true; $SUDO apt-get -f install -y; } ;;
+    rpm) if   command -v dnf    >/dev/null 2>&1; then $SUDO dnf install -y "$2"
+         elif command -v yum    >/dev/null 2>&1; then $SUDO yum install -y "$2"
+         elif command -v zypper >/dev/null 2>&1; then $SUDO zypper --non-interactive install "$2"
+         else $SUDO rpm -i "$2"; fi ;;
+    tgz) $SUDO tar -xzf "$2" -C /opt ;;
+  esac
+}
+
+ensure_rsyslog(){
+  command -v rsyslogd >/dev/null 2>&1 && return 0
+  if   command -v apt-get >/dev/null 2>&1; then $SUDO apt-get update -y && $SUDO apt-get install -y rsyslog
+  elif command -v dnf     >/dev/null 2>&1; then $SUDO dnf install -y rsyslog
+  elif command -v yum     >/dev/null 2>&1; then $SUDO yum install -y rsyslog
+  elif command -v zypper  >/dev/null 2>&1; then $SUDO zypper --non-interactive install rsyslog
+  elif command -v pacman  >/dev/null 2>&1; then $SUDO pacman -Sy --noconfirm rsyslog
+  else return 1; fi
+}
+
+print_refs(){
+cat <<'EOF'
+
+Handy commands / manual reference:
+  start:           sudo /opt/splunkforwarder/bin/splunk start --accept-license
+  add forward:     sudo /opt/splunkforwarder/bin/splunk add forward-server <ip>:<port>
+  enable boot:     sudo /opt/splunkforwarder/bin/splunk enable boot-start
+  service status:  sudo systemctl status SplunkForwarder
+  add monitor:     sudo /opt/splunkforwarder/bin/splunk add monitor /var/log/auth.log -index <idx>
+  list forwards:   sudo /opt/splunkforwarder/bin/splunk list forward-server
+  inputs.conf:     sudo cat /opt/splunkforwarder/etc/apps/search/local/inputs.conf
+EOF
+}
+
+# ---------- install ----------
+do_install(){
+  detect_arch
+  local def pkg file url tmp ch ip port logp idx
+  def="$(detect_pkg)"
+
+  echo -e "${B}Distro:${Z} $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")   ${B}Arch:${Z} $(uname -m)"
+  echo -e "${B}Suggested package:${Z} ${def}\n"
+  echo -e "Choose package format:"
+  echo -e "  1. ${C}deb${Z} (Debian/Ubuntu/Kali)"
+  echo -e "  2. ${C}rpm${Z} (RHEL/CentOS/Rocky/Alma/Fedora/SUSE)"
+  echo -e "  3. ${C}tgz${Z} (generic, any Linux)"
+  read -rn1 -p "  Choice [enter=${def}]: " ch; echo ""
+  case "${ch:-}" in 1) pkg=deb ;; 2) pkg=rpm ;; 3) pkg=tgz ;; *) pkg="$def" ;; esac
+
+  file="$(pkg_file "$pkg")"; url="${BASE}/${file}"
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+
+  msg "Downloading Splunk UF ${VER} (${pkg}, $(uname -m))"
+  echo -e "${G}${url}${Z}"
+  download "$url" "${tmp}/${file}"
+
+  msg "Installing (${pkg})"
+  install_pkg "$pkg" "${tmp}/${file}"
+
+  if [[ ! -x "$SPLUNK" ]]; then err "Not found after install: $SPLUNK"; rm -rf "$tmp"; exit 1; fi
+
+  msg "Starting Splunk (--accept-license)"
+  $SUDO "$SPLUNK" start --accept-license --answer-yes
+
+  msg "Enabling start on boot"
+  $SUDO "$SPLUNK" enable boot-start -systemd-managed 1 >/dev/null 2>&1 \
+    || $SUDO "$SPLUNK" enable boot-start >/dev/null 2>&1 || true
+  if command -v systemctl >/dev/null 2>&1; then
+    $SUDO systemctl enable --now SplunkForwarder >/dev/null 2>&1 || true
+  fi
+
+  msg "Configure forward-server"
+  read -rp "Splunk server IP (enter=skip): " ip
+  if [[ -n "${ip:-}" ]]; then
+    read -rp "Port (enter=9997): " port; port="${port:-9997}"
+    $SUDO "$SPLUNK" add forward-server "${ip}:${port}" || true
+  fi
+
+  msg "Configure log monitor (optional)"
+  read -rp "Log path to monitor (enter=skip, e.g. /var/log/auth.log): " logp
+  if [[ -n "${logp:-}" ]]; then
+    read -rp "Splunk index (enter=main): " idx; idx="${idx:-main}"
+    ensure_rsyslog || true
+    $SUDO "$SPLUNK" add monitor "$logp" -index "$idx" || true
+  fi
+
+  msg "Configured forward-servers"
+  $SUDO "$SPLUNK" list forward-server || true
+  if $SUDO test -f "${SPLUNK_HOME}/etc/apps/search/local/inputs.conf"; then
+    echo -e "${C}inputs.conf:${Z}"; $SUDO cat "${SPLUNK_HOME}/etc/apps/search/local/inputs.conf"
+  fi
+
+  echo -e "\n${G}Install complete.${Z}"
+  print_refs
+}
+
+# ---------- uninstall (full purge) ----------
+do_uninstall(){
+  local ok
+  echo -e "${R}FULL PURGE of Splunk Universal Forwarder:${Z}"
+  echo -e "  - stop and disable the SplunkForwarder service"
+  echo -e "  - remove the deb/rpm package if registered"
+  echo -e "  - delete ${SPLUNK_HOME} (configs + buffered data)"
+  read -rp "Continue? type 'yes' to confirm: " ok
+  [[ "${ok:-}" == "yes" ]] || { echo "Cancelled."; exit 0; }
+
+  msg "Stopping service and Splunk"
+  if command -v systemctl >/dev/null 2>&1; then
+    $SUDO systemctl stop    SplunkForwarder 2>/dev/null || true
+    $SUDO systemctl disable SplunkForwarder 2>/dev/null || true
+  fi
+  if [[ -x "$SPLUNK" ]]; then
+    $SUDO "$SPLUNK" stop 2>/dev/null || true
+    $SUDO "$SPLUNK" disable boot-start 2>/dev/null || true
+  fi
+
+  msg "Removing package"
+  if command -v dpkg >/dev/null 2>&1 && dpkg -l splunkforwarder >/dev/null 2>&1; then
+    $SUDO apt-get remove --purge -y splunkforwarder 2>/dev/null || $SUDO dpkg -P splunkforwarder || true
+  elif command -v rpm >/dev/null 2>&1 && rpm -q splunkforwarder >/dev/null 2>&1; then
+    if   command -v dnf >/dev/null 2>&1; then $SUDO dnf remove -y splunkforwarder || true
+    elif command -v yum >/dev/null 2>&1; then $SUDO yum remove -y splunkforwarder || true
+    else $SUDO rpm -e splunkforwarder || true; fi
+  else
+    echo "Package not registered (tgz install); only the directory is removed."
+  fi
+
+  msg "Deleting ${SPLUNK_HOME} and systemd/init leftovers"
+  $SUDO rm -rf "$SPLUNK_HOME"
+  $SUDO rm -f /etc/systemd/system/SplunkForwarder.service 2>/dev/null || true
+  $SUDO rm -f /etc/systemd/system/multi-user.target.wants/SplunkForwarder.service 2>/dev/null || true
+  $SUDO rm -f /etc/init.d/splunk 2>/dev/null || true
+  if command -v systemctl >/dev/null 2>&1; then $SUDO systemctl daemon-reload 2>/dev/null || true; fi
+
+  echo -e "\n${G}Splunk UF uninstalled (full purge).${Z}"
+}
+
+usage(){ cat <<EOF
+splunkforw — Splunk Universal Forwarder ${VER} (install/uninstall, any Linux)
+
+Usage:
+  splunkforw [-i|--install] [-u|--uninstall] [-h|--help]
+  No flags: interactive menu.
+
+Autodetects distro (deb/rpm/tgz) and architecture (x86_64 / arm64).
+Run as a normal user (elevates with sudo) or as root.
+EOF
+}
+
+# ---------- main ----------
+# help needs no privileges
+case "${1:-}" in -h|--help) usage; exit 0 ;; esac
+
+# run as root, otherwise elevate per-command with sudo
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then SUDO=""
+elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"
+else err "Run as root or install sudo."; exit 1; fi
+
+case "${1:-}" in
+  -i|--install)   do_install;   exit 0 ;;
+  -u|--uninstall) do_uninstall; exit 0 ;;
+  "")             ;;
+  *)              err "Unknown option: $1"; usage; exit 1 ;;
 esac
 
+echo -e "${B}_________________________________________________________${Z}\n"
+echo -e "${B}Splunk Universal Forwarder ${VER} — any Linux${Z}\n"
+echo -e "  1. ${C}Install${Z}"
+echo -e "  2. ${C}Uninstall (full purge)${Z}"
 echo ""
-echo "for auth.logs monitor:"
-echo "cat /opt/splunkforwarder/etc/apps/search/local/inputs.conf"
-echo ""
-echo -e "\033[32mDownload complete.\033[0m"
+read -rn1 -p "  Choice (1/2): " op; echo ""
+case "${op:-}" in
+  1) do_install ;;
+  2) do_uninstall ;;
+  *) err "Invalid choice"; exit 1 ;;
+esac
