@@ -1,0 +1,586 @@
+#!/usr/bin/env bash
+
+# macOS version of newprocess. macOS has no /proc and no ss, so the details
+# come from ps, lsof and codesign. It runs on the bash 3.2 that macOS ships.
+
+set -u
+
+# Every tool works on plain bytes. A process can put invalid UTF-8 in its
+# name, and in a UTF-8 locale awk and sed stop at it and lose the lines after.
+export LC_ALL=C
+
+# Only ps runs in UTF-8, so that names with accents print as they are. It
+# still writes control characters (terminal escape codes) in a harmless form.
+ps() { LC_ALL=en_US.UTF-8 command ps "$@"; }
+
+INTERVAL="${NEWPROCESS_INTERVAL:-1}"
+SHOW_ENDED="${NEWPROCESS_SHOW_ENDED:-1}"
+TRUNCATE_CMD="${NEWPROCESS_TRUNCATE_CMD:-0}"
+IGNORE_RE="${NEWPROCESS_IGNORE_RE-(^|[[:space:]])diff([[:space:]]|$)}"
+PID_MAX=99999    # fixed in the macOS kernel
+
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;36m'
+DIM=$'\033[2m'
+RESET=$'\033[0m'
+
+usage() {
+    cat <<'EOF'
+Usage: newprocessMac [-o]
+       newprocessMac --details PID    Show the details of one process and exit
+
+  -o  Skip the hidden process scan done at start
+
+Hidden process scan: before monitoring, every possible PID (1 to 99999) is
+probed with signal 0, which sends nothing and only asks the kernel whether
+the PID exists. The answers are compared with the ps listing. A process that
+answers but is not listed is hidden from ps and Activity Monitor, which is
+what kernel rootkits do. It takes about a second. A hit can be a false
+positive: inspect it with ps -p PID and lsof -p PID.
+
+Keys while running:
+  k   Kill a process: pick it, then Enter = KILL (forced, cannot be ignored),
+      t = TERM (asks it to exit and clean up, it may refuse), n = cancel
+  d   Show the details of a process, and kill it from there
+  q   Quit
+  h   Show the keys
+
+With fzf installed, k and d open a picker: move with the arrows or the mouse,
+type to filter, Enter or double click to choose, Esc to go back. The lower
+panel shows the details of the highlighted process; in the d picker, Ctrl-K
+kills it. After reading the details, k kills it too. Without fzf they ask
+for a PID.
+
+Details: the executable and who signed it come from codesign, which asks the
+kernel and cannot be faked by the process as its name can. The working
+directory and the network sockets come from lsof: for the processes of other
+users they need root (sudo newprocessMac).
+
+Log: every start, end and kill is appended to /var/log/newprocess.log when
+run as root (sudo newprocessMac). Otherwise it goes to
+~/Library/Logs/newprocess.log. The log is private (mode 600): command lines
+can contain secrets.
+
+Optional variables:
+  NEWPROCESS_INTERVAL=2       Seconds between snapshots. Default: 1
+                              Fractions (0.2) need bash 4+: brew install bash
+  NEWPROCESS_SHOW_ENDED=0     Do not show terminated processes. Default: 1
+  NEWPROCESS_TRUNCATE_CMD=1   Truncate CMD to terminal width. Default: 0
+  NEWPROCESS_IGNORE_RE=''     Command regex to ignore. Default: diff
+                              Example for a quieter list: 'mdworker|diff'
+  NEWPROCESS_LOG=/path/file   Log file. Default: /var/log/newprocess.log
+
+Note: this script uses ps-based polling. It cannot guarantee detection of
+processes that start and exit between two snapshots.
+EOF
+}
+
+show_keys() {
+    printf "%sKeys:%s %sk%s kill a process  %sd%s process details  %sq%s quit  %sh%s this help\n" \
+        "$YELLOW" "$RESET" \
+        "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
+}
+
+# A dim horizontal rule the width of the terminal (fallback 60).
+separator() {
+    local cols line
+    cols=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2)
+    cols=${cols:-60}
+    printf -v line '%*s' "$cols" ''
+    printf "%s%s%s\n" "$DIM" "${line// /-}" "$RESET"
+}
+
+# One line per process: KEY <tab> PID <tab> PPID <tab> USER <tab> CMD
+# KEY is "pid|start time", so a reused PID counts as a new process.
+snapshot() {
+    ps -ww -eo pid=,ppid=,user=,lstart=,command= 2>/dev/null |
+        awk -v self="$$" -v ignore_re="$IGNORE_RE" '
+        {
+            pid = $1
+            ppid = $2
+            user = $3
+            start = $4 " " $5 " " $6 " " $7 " " $8
+
+            cmd = $9
+            for (i = 10; i <= NF; i++) cmd = cmd " " $i
+
+            if (pid == self || ppid == self) next
+            if (cmd ~ /(^|\/)ps[[:space:]].*-eo[[:space:]]/) next
+            if (ignore_re != "" && cmd ~ ignore_re) next
+
+            printf "%s|%s\t%s\t%s\t%s\t%s\n", pid, start, pid, ppid, user, cmd
+        }'
+}
+
+# Print the lines of snapshot $2 whose KEY is not in snapshot $1.
+only_in_second() {
+    awk -F'\t' 'NR == FNR { seen[$1]; next } !($1 in seen)' "$1" "$2"
+}
+
+# show_changes <color> <mark> <snapshot lines>
+show_changes() {
+    local color="$1" mark="$2" pid ppid user cmd user_color plain room
+
+    while IFS=$'\t' read -r _ pid ppid user cmd; do
+        user_color="$GREEN"
+        [ "$user" = "root" ] && user_color="$RED"
+
+        if [ "$TRUNCATE_CMD" != "0" ]; then
+            plain="  $mark PID=$pid PPID=$ppid USER=$user CMD="
+            room=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2)
+            room=$((${room:-120} - ${#plain}))
+            [ "$room" -lt 20 ] && room=20
+            [ "${#cmd}" -gt "$room" ] && cmd="${cmd:0:room-1}…"
+        fi
+
+        printf '  %s %s %s %s %s\n' \
+            "$color$mark$RESET" \
+            "${DIM}PID=$RESET$CYAN$pid$RESET" \
+            "${DIM}PPID=$RESET$CYAN$ppid$RESET" \
+            "${DIM}USER=$RESET$user_color$user$RESET" \
+            "${DIM}CMD=$RESET$cmd"
+    done <<<"$3"
+}
+
+# Start time of a live PID, to the second. It never changes while the process
+# lives, so it tells a reused PID apart. Prints nothing if the PID is gone or
+# is a zombie.
+proc_start() {
+    local stat start
+    read -r stat start < <(ps -o stat=,lstart= -p "$1" 2>/dev/null)
+    [ -n "$start" ] || return 1
+    [ "${stat:0:1}" = "Z" ] && return 1
+    echo "$start"
+}
+
+# Log file: /var/log when we may write there (root), else the user's Logs dir.
+# Starts, ends and kills are always recorded, whatever is shown on screen.
+LOG_FILE=""
+LOG_WANTED="${NEWPROCESS_LOG:-/var/log/newprocess.log}"
+
+init_log() {
+    local file="$LOG_WANTED"
+
+    umask 077    # command lines can hold secrets: only the owner reads the log
+    if ! { : >>"$file"; } 2>/dev/null; then
+        file="$HOME/Library/Logs/newprocess.log"
+        mkdir -p "${file%/*}" 2>/dev/null
+        { : >>"$file"; } 2>/dev/null || return 1
+    fi
+    LOG_FILE="$file"
+}
+
+# log_event <LABEL> <text>
+log_event() {
+    [ -n "$LOG_FILE" ] || return 0
+    printf '%s %-7s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" "$2" >>"$LOG_FILE"
+}
+
+# log_changes <START|END> <snapshot lines>
+# One date for the whole batch: bash 3.2 has to run date to know the time.
+log_changes() {
+    local now pid ppid user cmd
+    [ -n "$LOG_FILE" ] || return 0
+    now=$(date '+%Y-%m-%d %H:%M:%S')
+    while IFS=$'\t' read -r _ pid ppid user cmd; do
+        printf '%s %-7s %s\n' "$now" "$1" "pid=$pid ppid=$ppid user=$user cmd=$cmd"
+    done <<<"$2" >>"$LOG_FILE"
+}
+
+# Filter: one line of printable ASCII only. A hostile process could put
+# terminal escape codes in its name or command line.
+clean_text() {
+    tr '\0\n' '  ' | tr -cd '[:print:]' | sed 's/ *$//'
+}
+
+# True if the PID exists. Signal 0 sends nothing: it only asks the kernel.
+# "Operation not permitted" means the process is there but is not ours.
+answers() {
+    local error
+    error=$(kill -0 "$1" 2>&1) || [[ "$error" == *"not permitted"* ]]
+}
+
+# Of the PIDs given on stdin, print those that answer but ps does not list.
+still_hidden() {
+    local listed pid
+    listed=$(ps -axo pid= | tr -d ' ')
+    while read -r pid; do
+        [ -n "$pid" ] || continue
+        answers "$pid" || continue
+        case $'\n'"$listed"$'\n' in
+            *$'\n'"$pid"$'\n'*) ;;
+            *) echo "$pid" ;;
+        esac
+    done
+}
+
+# Hidden process scan, the brute force method of unhide and
+# sandfly-processdecloak adapted to macOS. A process that answers when asked
+# for by number but is missing from the listing that ps and Activity Monitor
+# get from the kernel is hiding, as a rootkit makes it.
+scan_hidden() {
+    local answered suspects pid cmd exe found=0
+
+    printf "Scanning PIDs 1-%s for hidden processes (-o skips this)... " "$PID_MAX"
+
+    # kill is a bash builtin, so this loop starts no process. A free PID says
+    # "No such process". Success, or "Operation not permitted" (the process of
+    # another user), both mean the PID is taken.
+    answered=$({ for ((pid = 1; pid <= PID_MAX; pid++)); do
+        kill -0 "$pid" && echo "$pid"
+    done; } 2>&1 |
+        sed -n -e '/^[0-9][0-9]*$/p' -e 's/.*(\([0-9]*\)) - Operation not permitted.*/\1/p')
+
+    suspects=$(awk 'NR == FNR { listed[$1]; next } !($1 in listed)' \
+        <(ps -axo pid=) <(echo "$answered"))
+
+    # A process that ended during the scan answered but is not listed anymore:
+    # ask again. Whatever is left is checked once more after a pause, in case
+    # its PID was taken by a process born at that very moment.
+    suspects=$(still_hidden <<<"$suspects")
+    if [ -n "$suspects" ]; then
+        sleep 1
+        suspects=$(still_hidden <<<"$suspects")
+    fi
+
+    while read -r pid; do
+        [ -n "$pid" ] || continue
+
+        # The listing does not show it, so ask for it by number.
+        cmd=$(ps -ww -o command= -p "$pid" 2>/dev/null | clean_text)
+        exe=$(codesign -dv "$pid" 2>&1 | sed -n 's/^Executable=//p' | clean_text)
+        [ "$found" = 0 ] && echo
+        found=$((found + 1))
+        printf "  %sHIDDEN PROCESS%s %s %s %s\n" "$RED" "$RESET" \
+            "${DIM}PID=$RESET$CYAN$pid$RESET" "${DIM}CMD=$RESET$cmd" "${DIM}EXE=$RESET$exe"
+        log_event HIDDEN "pid=$pid cmd=$cmd exe=$exe"
+    done <<<"$suspects"
+
+    if [ "$found" = 0 ]; then
+        printf "%snone found.%s\n" "$GREEN" "$RESET"
+    else
+        printf "%s%s hidden process(es): ps and Activity Monitor do not show them, as with a rootkit.%s\n" "$RED" "$found" "$RESET"
+        printf "The k and d keys cannot see them either. Inspect: ps -p PID; lsof -p PID   Kill: kill -9 PID\n"
+    fi
+    log_event SCAN "hidden=$found checked=1-$PID_MAX"
+}
+
+# Everything worth knowing about one PID. Also fills the fzf lower panel.
+show_details() {
+    local pid="$1" signature exe cwd signer team parent children
+
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+        echo "PID $pid is not running."
+        return 1
+    fi
+
+    ps -ww -p "$pid" -o pid,ppid,user,tty,stat,%cpu,%mem,etime,lstart
+    echo
+    echo "Command: $(ps -ww -o command= -p "$pid")"
+
+    # codesign gets the path of the executable from the kernel. The name that
+    # ps shows is set by the process itself and can be faked.
+    signature=$(codesign -dv --verbose=2 "$pid" 2>&1)
+    exe=$(sed -n 's/^Executable=//p' <<<"$signature")
+    cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+    echo "Exe:     ${exe:-(not readable)}"
+    echo "Cwd:     ${cwd:-(not readable, try root)}"
+
+    signer=$(grep -m1 '^Authority=' <<<"$signature" | cut -d= -f2-)
+    team=$(sed -n 's/^TeamIdentifier=//p' <<<"$signature")
+    if [ -n "$signer" ]; then
+        [ -n "$team" ] && [ "$team" != "not set" ] && signer="$signer, team $team"
+    elif grep -q '^Signature=adhoc' <<<"$signature"; then
+        signer="ad-hoc (no identity behind it: anyone can sign like this)"
+    elif grep -q 'not signed' <<<"$signature"; then
+        signer="not signed"
+    else
+        signer="(unknown)"
+    fi
+    echo "Signed:  $signer"
+
+    echo
+    echo "Started by (parent, grandparent, ...):"
+    parent=$(ps -o ppid= -p "$pid" | tr -d ' ')
+    [ "${parent:-0}" -gt 0 ] || echo "  (none)"
+    while [ "${parent:-0}" -gt 0 ]; do
+        ps -ww -o pid=,user=,command= -p "$parent" | sed 's/^/  /'
+        parent=$(ps -o ppid= -p "$parent" | tr -d ' ')
+    done
+
+    echo
+    echo "Children:"
+    children=$(pgrep -P "$pid" | paste -sd, -)
+    [ -n "$children" ] &&
+        children=$(ps -ww -o pid=,user=,command= -p "$children" 2>/dev/null | sed 's/^/  /')
+    echo "${children:-  (none)}"
+
+    echo
+    echo "Network sockets:"
+    # lsof columns: 5 = IPv4/IPv6, 8 = TCP/UDP, 9 = addresses, 10 = state
+    lsof -a -p "$pid" -i -nP 2>/dev/null | awk 'NR > 1 { print "  " $5, $8, $9, $10 }' |
+        grep . || echo "  (none visible; sockets of other users need root)"
+}
+
+# Ask a question and print the answer. Typing is visible only while asking;
+# the rest of the time keys are not echoed, so they do not garble the list.
+ask() {
+    local answer
+    stty echo
+    read -rp "$1" answer
+    stty -echo
+    echo "$answer"
+}
+
+# Ask which process to <action>. Sets PICKED_PID (empty if cancelled) and
+# PICKED_KEY ("ctrl-k" if Ctrl-K was pressed in the picker).
+pick_process() {
+    local action="$1" hint="$2" out
+    PICKED_PID=""
+    PICKED_KEY=""
+
+    if command -v fzf >/dev/null 2>&1; then
+        # Newest processes on top: macOS ps lists by terminal, so sort by PID
+        # (the highest is the newest, until the PIDs wrap around at 99999).
+        # {1} is the PID of the highlighted line.
+        out=$(sort -t$'\t' -k2,2n "$old_snapshot" | awk -F'\t' '
+            BEGIN { printf "%-8s %-8s %-9s %s\n", "PID", "PPID", "USER", "CMD" }
+            { printf "%-8s %-8s %-9s %s\n", $2, $3, $4, $5 }' |
+            fzf --tac --reverse --header-lines=1 --expect=ctrl-k \
+                --header "Enter or double click = $action, ${hint}Esc = back, type to filter" \
+                --preview "bash $(printf '%q' "$0") --details {1}" \
+                --preview-window=down:50%:wrap)
+        PICKED_KEY=$(sed -n 1p <<<"$out")
+        PICKED_PID=$(sed -n 2p <<<"$out" | awk '{ print $1 }')
+    else
+        PICKED_PID=$(ask "PID to $action (Enter cancels): ")
+    fi
+}
+
+# Pick a process, read its details, go back to the picker. Esc ends the loop.
+# From the details you can kill the process: Ctrl-K in the picker, or k after
+# reading them.
+details_loop() {
+    local key
+
+    while true; do
+        pick_process "show details" "Ctrl-K = kill it, "
+        [ -n "$PICKED_PID" ] || return
+
+        if [ "$PICKED_KEY" = "ctrl-k" ]; then
+            kill_pid "$PICKED_PID"
+            return
+        fi
+
+        if command -v less >/dev/null 2>&1; then
+            # Short details print as they are; long ones open in a pager (q = leave).
+            show_details "$PICKED_PID" | LESSCHARSET=utf-8 less -RFX
+        else
+            show_details "$PICKED_PID"
+        fi
+
+        printf "%sk%s kill it, any other key = back to the list " "$CYAN" "$RESET"
+        read -rsn1 key
+        echo
+        if [ "$key" = "k" ] || [ "$key" = "K" ]; then
+            kill_pid "$PICKED_PID"
+            return
+        fi
+    done
+}
+
+kill_process() {
+    pick_process "kill" ""
+    if [ -n "$PICKED_PID" ]; then
+        kill_pid "$PICKED_PID"
+    fi
+}
+
+# Confirm, then send the signal. Everything that is sent goes to the log.
+kill_pid() {
+    local pid="$1" start info answer signal result target_user target_cmd target
+
+    if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        echo "'$pid' is not a PID."
+        return
+    fi
+
+    start=$(proc_start "$pid")
+    info=$(ps -ww -o user=,command= -p "$pid" 2>/dev/null)
+    if [ -z "$start" ] || [ -z "$info" ]; then
+        echo "PID $pid is not running."
+        return
+    fi
+
+    printf '  %sPID=%s%s %s\n' "$DIM" "$RESET" "$CYAN$pid$RESET" "$info"
+    answer=$(ask "Kill it? [Enter = KILL, t = TERM (asks it to exit), n = cancel]: ")
+    case "$answer" in
+        "" | 9 | k | K) signal=KILL ;;
+        t | T) signal=TERM ;;
+        *)
+            echo "Cancelled."
+            return
+            ;;
+    esac
+
+    # The PID could have been reused while the prompt was waiting.
+    if [ "$(proc_start "$pid")" != "$start" ]; then
+        echo "PID $pid is not the same process anymore. Nothing sent."
+        return
+    fi
+
+    read -r target_user target_cmd <<<"$info"
+    target="$target_user $target_cmd"
+
+    if ! kill -s "$signal" "$pid" 2>/dev/null; then
+        printf "%sCould not send %s to PID %s%s (not permitted? run with sudo).\n" "$RED" "$signal" "$pid" "$RESET"
+        log_event KILL "by=$ME signal=$signal pid=$pid result=failed target=$target"
+        return
+    fi
+    sleep 0.5
+    if [ "$(proc_start "$pid")" = "$start" ]; then
+        result="still-running"
+        printf "%sSent %s, but PID %s is still running.%s Some programs ignore TERM: press k again and press Enter for KILL.\n" \
+            "$YELLOW" "$signal" "$pid" "$RESET"
+    else
+        result="gone"
+        printf "%sPID %s is gone (%s).%s\n" "$GREEN" "$pid" "$signal" "$RESET"
+    fi
+    log_event KILL "by=$ME signal=$signal pid=$pid result=$result target=$target"
+}
+
+# Wait one interval. With a terminal, a key press ends the wait early.
+wait_for_key() {
+    KEY=""
+    if [ -t 0 ]; then
+        IFS= read -rn1 -t "$INTERVAL" KEY
+    else
+        sleep "$INTERVAL"
+    fi
+}
+
+SCAN_HIDDEN=1
+case "${1:-}" in
+    "") ;;
+    -o) SCAN_HIDDEN=0 ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    --details)
+        show_details "${2:-}"
+        exit
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+
+if [ "$(uname -s)" != "Darwin" ]; then
+    printf "%sError:%s this is the macOS version. On Linux use newprocess.\n" "$RED" "$RESET" >&2
+    exit 1
+fi
+
+# The bash that macOS ships (3.2) only waits whole seconds in read -t.
+INTERVAL_ASKED="$INTERVAL"
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] && ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
+    INTERVAL=$(awk -v n="$INTERVAL" 'BEGIN { i = int(n); if (i < n) i++; print (i < 1) ? 1 : i }')
+fi
+
+old_snapshot=$(mktemp "${TMPDIR:-/tmp}/newprocess.XXXXXX") || exit 1
+new_snapshot=$(mktemp "${TMPDIR:-/tmp}/newprocess.XXXXXX") || exit 1
+
+# Echo is off while monitoring (see ask); put the terminal back on exit.
+restore_terminal() { :; }
+if [ -t 0 ]; then
+    terminal_settings=$(stty -g)
+    restore_terminal() { stty "$terminal_settings"; }
+    stty -echo
+fi
+
+on_exit() {
+    log_event MONITOR "stopped pid=$$"
+    restore_terminal
+    rm -f "$old_snapshot" "$new_snapshot"
+}
+
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+ME=$(id -un)
+if init_log; then
+    log_event MONITOR "started pid=$$ user=$ME interval=${INTERVAL}s"
+fi
+
+if [ "$SCAN_HIDDEN" = 1 ]; then
+    scan_hidden
+    separator
+fi
+
+snapshot >"$old_snapshot"
+if [ ! -s "$old_snapshot" ]; then
+    printf "%sError:%s could not run ps with the expected format.\n" "$RED" "$RESET" >&2
+    exit 1
+fi
+
+printf "%sProcess monitor started.%s Interval: %ss\n" "$GREEN" "$RESET" "$INTERVAL"
+if [ "$INTERVAL" != "$INTERVAL_ASKED" ]; then
+    printf "%sNote:%s interval %s rounded up to %ss: this bash (%s) only waits whole seconds. A newer one fixes it: brew install bash\n" \
+        "$YELLOW" "$RESET" "$INTERVAL_ASKED" "$INTERVAL" "${BASH_VERSION%%(*}"
+fi
+if [ -z "$LOG_FILE" ]; then
+    printf "%sWarning:%s cannot write a log file (tried %s and ~/Library/Logs).\n" "$RED" "$RESET" "$LOG_WANTED"
+elif [ "$LOG_FILE" != "$LOG_WANTED" ]; then
+    printf "%sLog:%s %s %s(cannot write %s; run with sudo to log there)%s\n" "$YELLOW" "$RESET" "$LOG_FILE" "$DIM" "$LOG_WANTED" "$RESET"
+else
+    printf "%sLog:%s %s\n" "$YELLOW" "$RESET" "$LOG_FILE"
+fi
+printf "%sWarning:%s cannot guarantee detection of processes that start and exit between snapshots.\n" "$YELLOW" "$RESET"
+if [ -t 0 ]; then
+    show_keys
+    command -v fzf >/dev/null 2>&1 ||
+        printf "%sTip:%s install fzf to pick processes with the arrows or the mouse: brew install fzf\n" "$YELLOW" "$RESET"
+fi
+
+while true; do
+    wait_for_key
+    case "$KEY" in
+        k | K) kill_process ;;
+        d | D) details_loop ;;
+        q | Q) exit 0 ;;
+        h | H | \?) show_keys ;;
+    esac
+
+    snapshot >"$new_snapshot"
+    if [ ! -s "$new_snapshot" ]; then
+        printf "%sError:%s failed to read processes; retrying...\n" "$RED" "$RESET" >&2
+        continue
+    fi
+
+    started=$(only_in_second "$old_snapshot" "$new_snapshot")
+    ended=$(only_in_second "$new_snapshot" "$old_snapshot")
+    [ -n "$started" ] && log_changes START "$started"
+    [ -n "$ended" ] && log_changes END "$ended"
+    [ "$SHOW_ENDED" = "0" ] && ended=""
+
+    if [ -n "$started$ended" ]; then
+        printf "\n%sProcess changes:%s %s\n" "$RED" "$RESET" "$(date '+%Y-%m-%d %H:%M:%S')"
+
+        if [ -n "$started" ]; then
+            printf "%sStarted:%s\n" "$GREEN" "$RESET"
+            show_changes "$GREEN" "+" "$started"
+        fi
+
+        if [ -n "$ended" ]; then
+            printf "%sEnded:%s\n" "$YELLOW" "$RESET"
+            show_changes "$YELLOW" "-" "$ended"
+        fi
+    fi
+
+    mv "$new_snapshot" "$old_snapshot"
+done

@@ -1631,5 +1631,21 @@
             "Passes all arguments to the selected executable.",
             "Reports an error if the platform is unsupported or the binary is not executable."
         ]
+    },
+    "newprocessMac": {
+        "name": "newprocessMac",
+        "short_desc": "macOS version of newprocess: shows processes as they start and end, logs every event, and lets you inspect or kill them.",
+        "detailed_desc": [
+            "Polls ps every second (NEWPROCESS_INTERVAL) and prints the processes that started and ended since the last snapshot. A reused PID counts as a new process.",
+            "Every start, end and kill is appended to /var/log/newprocess.log when run with sudo, otherwise to ~/Library/Logs/newprocess.log (mode 600).",
+            "",
+            "Keys: k kills a process (Enter = KILL, t = TERM, n = cancel), d shows its details, q quits, h shows the keys.",
+            "With fzf installed, k and d open a picker with a details panel; Ctrl-K kills from the details picker.",
+            "Details: executable path and code signature from codesign, working directory and network sockets from lsof, parents and children from ps.",
+            "",
+            "At start it scans for hidden processes: every PID from 1 to 99999 is probed with signal 0 and compared with the ps listing. -o skips the scan.",
+            "Works with the bash 3.2 that macOS ships; fractional intervals need a newer bash (brew install bash).",
+            "Polling cannot guarantee detection of processes that start and exit between two snapshots."
+        ]
     }
 }
