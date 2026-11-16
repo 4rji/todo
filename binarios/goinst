@@ -138,7 +138,31 @@ echo ""
 echo_msg "$(printf '\033[1;35m%s\033[0m' 'Running')"
 printf "  \033[32mInstalling: %s\033[0m\n\n" "$bin"
 
-eval "$cmd"
+# Compilar como usuario y usar sudo solamente para instalar los ejecutables.
+(
+  set -euo pipefail
+  temporal_bin=$(mktemp -d)
+  trap 'rm -rf -- "$temporal_bin"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  export GOBIN="$temporal_bin"
+
+  eval "$cmd"
+
+  if [ ! -x "$GOBIN/$bin" ]; then
+    printf 'No se generó el binario esperado: %s\n' "$bin" >&2
+    exit 1
+  fi
+
+  if (( EUID == 0 )); then
+    mkdir -p /opt/4rji/bin
+    install -m 755 "$GOBIN/"* /opt/4rji/bin/
+  else
+    sudo mkdir -p /opt/4rji/bin
+    sudo install -m 755 "$GOBIN/"* /opt/4rji/bin/
+  fi
+  printf 'Instalado: /opt/4rji/bin/%s\n' "$bin"
+)
 
 if (( idx == 7 )); then
   echo ""
