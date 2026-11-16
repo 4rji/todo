@@ -15,6 +15,7 @@ cvesinst            Installs Snyk, Grype, Syft, and jq and provides an interacti
 lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloak.py          Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.
+decloaktools        Compares a file through cat and mmap, saves both outputs, and prints investigation guidance.
 copyfail.py         AF_ALG CopyFail proof-of-concept for testing local Linux su corruption behavior.
 galletapython       Serves galleta.js and logs base64 cookie callbacks for lab testing.
 processdecloak      Busca procesos ocultos en linux

@@ -90,6 +90,24 @@
             "Differences require investigation and do not confirm a rootkit. A scan without findings does not prove the system is clean."
         ]
     },
+    "decloaktools": {
+        "name": "decloaktools",
+        "short_desc": "Compares a file through cat and mmap, saves both outputs, and prints investigation guidance.",
+        "detailed_desc": [
+            "Reads one file with cat and Python's read-only mmap, then displays output byte counts and a unified diff.",
+            "Usage: decloaktools <file>. With no arguments, prints usage examples and investigation guidance.",
+            "Requires python3 and standard command-line utilities, including diff with --label support.",
+            "Uses the current user's permissions without requesting sudo.",
+            "",
+            "Saves standard.txt and mmap.txt under $HOME/ESCANEO_YYYYMMDD_HHMMSS/.",
+            "The mmap output decodes lines as UTF-8 and converts non-UTF-8 lines to hexadecimal, which can itself cause differences for binary files.",
+            "Differences are displayed for review and do not produce a nonzero exit status by themselves.",
+            "",
+            "Prints suggested commands for file metadata, expected contents, preload hooks, kernel modules, processes and listening sockets.",
+            "The investigation commands are guidance only; the script does not execute them.",
+            "Dynamic or virtual files such as /proc, /sys and /etc/mtab may produce false positives."
+        ]
+    },
     "cafe": {
         "name": "cafe",
         "short_desc": "Keeps the system awake with caffeinate, optionally until a process, command, or timer finishes.",
