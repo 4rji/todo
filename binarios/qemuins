@@ -1,38 +1,127 @@
 #!/usr/bin/env bash
 
-echo "Selecciona el sistema para instalar QEMU, Virt-Manager y configurar spice-vdagent:"
-echo "1. Debian/Ubuntu"
-echo "2. Arch"
-echo "Presiona Enter para saltar instalación y pasar a otras tareas."
+# Colores
+R='\033[1;31m'   # rojo
+G='\033[1;32m'   # verde
+Y='\033[1;33m'   # amarillo
+B='\033[1;34m'   # azul
+M='\033[1;35m'   # magenta
+C='\033[1;36m'   # cyan
+W='\033[1;37m'   # blanco
+N='\033[0m'      # reset
 
-read -p "Introduce tu elección (1/2), o Enter: " eleccion
+ok()   { echo -e "${G}[✔]${N} $*"; }
+info() { echo -e "${B}[i]${N} $*"; }
+warn() { echo -e "${Y}[!]${N} $*"; }
+err()  { echo -e "${R}[✘]${N} $*"; }
+paso() { echo -e "\n${M}==>${N} ${W}$*${N}"; }
+
+USUARIO="${SUDO_USER:-$(whoami)}"
+
+echo -e "${C}______________________________________________________________${N}"
+echo -e "${C}   QEMU / KVM  +  Virt-Manager  +  spice-vdagent  installer   ${N}"
+echo -e "${C}______________________________________________________________${N}"
+echo ""
+
+# Detectar distro para sugerir opción
+SUGERIDA=""
+if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    case "${ID} ${ID_LIKE:-}" in
+        *debian*|*ubuntu*) SUGERIDA="1" ;;
+        *arch*)            SUGERIDA="2" ;;
+    esac
+    info "Sistema detectado: ${W}${PRETTY_NAME:-$ID}${N}"
+fi
+
+# Verificar soporte de virtualización
+if grep -Eq '(vmx|svm)' /proc/cpuinfo 2>/dev/null; then
+    ok "La CPU soporta virtualización por hardware (VT-x/AMD-V)."
+else
+    warn "No se detectó VT-x/AMD-V. Revisá la BIOS o si estás dentro de una VM."
+fi
+
+echo ""
+echo -e "${W}Selecciona el sistema para instalar QEMU, Virt-Manager y spice-vdagent:${N}"
+DET1=""; DET2=""
+[[ $SUGERIDA == 1 ]] && DET1="${Y}(detectado)${N}"
+[[ $SUGERIDA == 2 ]] && DET2="${Y}(detectado)${N}"
+echo -e "  ${G}1.${N} Debian/Ubuntu ${DET1}"
+echo -e "  ${G}2.${N} Arch          ${DET2}"
+echo -e "  ${Y}Enter${N} para saltar la instalación y pasar a otras tareas."
+echo ""
+
+read -rp "$(echo -e "${C}Introduce tu elección (1/2), o Enter: ${N}")" eleccion
 
 case $eleccion in
     1)
-        echo "Instalando en Debian/Ubuntu..."
+        paso "Instalando en Debian/Ubuntu..."
         sudo apt update
-        sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virt-manager spice-vdagent
-        sudo systemctl enable --now libvirtd
-        sudo systemctl enable --now spice-vdagent
-        sudo usermod -aG libvirt $(whoami)
+        sudo apt install -y qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients \
+            bridge-utils virt-manager ovmf spice-vdagent dnsmasq-base
+
+        paso "Habilitando servicios..."
+        sudo systemctl enable --now libvirtd && ok "libvirtd activo." || err "No se pudo iniciar libvirtd."
+        # El servicio real es spice-vdagentd (spice-vdagent es el agente de sesión)
+        sudo systemctl enable --now spice-vdagentd 2>/dev/null \
+            && ok "spice-vdagentd activo." \
+            || warn "spice-vdagentd no se pudo habilitar (normal si no estás dentro de una VM)."
+        INSTALADO=1
         ;;
     2)
-        echo "Instalando en Arch..."
-        sudo pacman -Syu --noconfirm virt-manager spice-vdagent qemu-full dnsmasq vde2 bridge-utils openbsd-netcat libvirt
-        sudo systemctl enable --now libvirtd
-        # spice-vdagent no se maneja vía systemd en Arch por defecto
-        sudo usermod -aG libvirt $(whoami)
+        paso "Instalando en Arch..."
+        sudo pacman -Syu --noconfirm --needed virt-manager spice-vdagent qemu-full edk2-ovmf \
+            dnsmasq vde2 openbsd-netcat libvirt
+        # bridge-utils ya no está en los repos oficiales de Arch (usá 'ip link' de iproute2)
+
+        paso "Habilitando servicios..."
+        sudo systemctl enable --now libvirtd && ok "libvirtd activo." || err "No se pudo iniciar libvirtd."
+        # spice-vdagentd se activa por socket; el agente de sesión arranca solo con la sesión gráfica
+        sudo systemctl enable --now spice-vdagentd.socket 2>/dev/null \
+            && ok "spice-vdagentd.socket activo." \
+            || warn "spice-vdagentd no se pudo habilitar (normal si no estás dentro de una VM)."
+        INSTALADO=1
         ;;
     *)
-        echo "Opción no válida o ninguna opción seleccionada. Continuando..."
+        warn "Opción no válida o ninguna opción seleccionada. Continuando..."
         ;;
 esac
 
-echo ""
-echo "Si necesitas arreglar permisos en carpetas:"
-echo "  sudo chown -R <usuario> /ruta/a/carpeta"
+if [[ "${INSTALADO:-0}" == 1 ]]; then
+    paso "Agregando ${W}${USUARIO}${N} a los grupos libvirt y kvm..."
+    sudo usermod -aG libvirt "$USUARIO" && ok "Agregado a libvirt."
+    getent group kvm >/dev/null && sudo usermod -aG kvm "$USUARIO" && ok "Agregado a kvm."
+    warn "Cerrá sesión y volvé a entrar para que se apliquen los grupos."
+
+    paso "Configurando la red 'default' de libvirt..."
+    if sudo virsh net-info default &>/dev/null; then
+        sudo virsh net-autostart default &>/dev/null && ok "Red 'default' en autostart."
+        sudo virsh net-start default &>/dev/null || true
+        ok "Red 'default' lista."
+    else
+        warn "No existe la red 'default' de libvirt."
+    fi
+fi
 
 echo ""
-echo "Verificando spice-vdagent..."
-sleep 2
-command -v spice-vdagent && echo "spice-vdagent está instalado." || echo "spice-vdagent no encontrado."
+echo -e "${C}______________________________________________________________${N}"
+echo -e "${W}Si necesitas arreglar permisos en carpetas:${N}"
+echo -e "  ${Y}sudo chown -R <usuario> /ruta/a/carpeta${N}"
+echo -e "${C}______________________________________________________________${N}"
+
+paso "Verificando spice-vdagent..."
+sleep 1
+if command -v spice-vdagent &>/dev/null; then
+    ok "spice-vdagent está instalado: ${W}$(command -v spice-vdagent)${N}"
+else
+    err "spice-vdagent no encontrado."
+fi
+
+if command -v virt-manager &>/dev/null; then
+    ok "virt-manager está instalado."
+else
+    warn "virt-manager no encontrado."
+fi
+
+echo ""
+ok "${G}Listo :)${N}"
