@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+#
+# One-shot installer: clones markdown-converter into /tmp, then deploys it
+# as a systemd service on Debian/Ubuntu. Elevates itself via sudo.
+#
+#   curl -fsSL https://raw.githubusercontent.com/4rji/markdown-converter/main/install.sh | bash
+#   ./install.sh
+#
+set -Eeuo pipefail
+
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log()  { printf '\n%b==>%b %s\n' "$BLUE" "$NC" "$*"; }
+ok()   { printf '%b[OK]%b %s\n' "$GREEN" "$NC" "$*"; }
+warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$*"; }
+fail() { printf '\n%bERROR:%b %s\n' "$RED" "$NC" "$*" >&2; exit 1; }
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || fail "sudo not found and not running as root."
+  if [[ -r "${BASH_SOURCE[0]}" ]]; then
+    log "Elevating with sudo"
+    exec sudo -E bash "${BASH_SOURCE[0]}" "$@"
+  else
+    fail "Run as root: curl ... | sudo bash"
+  fi
+fi
+
+REPO_URL="${REPO_URL:-https://github.com/4rji/markdown-converter.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+CLONE_DIR="${CLONE_DIR:-}"
+
+command -v apt-get >/dev/null 2>&1 || fail "apt-get not found. This installer targets Debian/Ubuntu."
+command -v git >/dev/null 2>&1 || { log "Installing git"; apt-get update -qq && apt-get install -y git; }
+
+log "Cloning $REPO_URL (branch: $REPO_BRANCH) into /tmp"
+if [[ -z "$CLONE_DIR" ]]; then
+  CLONE_DIR="$(mktemp -d /tmp/markdown-converter-install.XXXXXX)"
+  rmdir "$CLONE_DIR"
+fi
+git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$CLONE_DIR"
+ok "Cloned to $CLONE_DIR"
+
+printf '\n%b%s%b\n' "$BOLD" "Select installation type:" "$NC"
+printf '  %b1)%b Full install   - Markdown Converter + Local Whisper (requires NVIDIA GPU)\n' "$GREEN" "$NC"
+printf '  %b2)%b Markdown only  - no Local Whisper (OpenAI cloud transcription optional)\n' "$GREEN" "$NC"
+printf '\n'
+
+choice="${INSTALL_CHOICE:-}"
+if [[ -z "$choice" ]]; then
+  read -r -p "Enter choice [1-2]: " choice </dev/tty
+fi
+
+case "$choice" in
+  1) INSTALL_LOCAL_WHISPER=1 ;;
+  2) INSTALL_LOCAL_WHISPER=0 ;;
+  *) fail "Invalid choice: $choice (expected 1 or 2)" ;;
+esac
+
+if [[ "$INSTALL_LOCAL_WHISPER" == "1" ]]; then
+  ok "Selected: Full install with Local Whisper"
+  command -v nvidia-smi >/dev/null 2>&1 \
+    || fail "nvidia-smi not found. Install the NVIDIA driver first, or choose option 2."
+else
+  ok "Selected: Markdown only (no Local Whisper)"
+fi
+
+log "Running install-systemd-service_new.sh"
+cd "$CLONE_DIR"
+chmod +x install-systemd-service_new.sh
+INSTALL_LOCAL_WHISPER="$INSTALL_LOCAL_WHISPER" ./install-systemd-service_new.sh
+
+log "Cleaning up temporary clone at $CLONE_DIR"
+rm -rf "$CLONE_DIR"
+
+SERVICE_NAME="${SERVICE_NAME:-markdown-converter}"
+if ! systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+  warn "$SERVICE_NAME not enabled yet, enabling"
+  systemctl enable "$SERVICE_NAME"
+fi
+if ! systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+  warn "$SERVICE_NAME not running yet, starting"
+  systemctl start "$SERVICE_NAME"
+fi
+systemctl is-active --quiet "$SERVICE_NAME" \
+  || fail "Service failed to start. Check: sudo journalctl -u $SERVICE_NAME -n 50"
+
+ok "systemd service '$SERVICE_NAME' is enabled and running."
+ok "Installation complete."

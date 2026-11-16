@@ -49,6 +49,7 @@ ttyinicio           Crea mensaje de inicio de tty para ver la ip del servidor de
 
 
 ###------linux
+markdowninst        Installs Markdown Converter as a systemd service on Debian/Ubuntu with optional local Whisper transcription.
 cafe                Keeps the system awake until stopped or a task finishes, installing caffeinate locally on Linux if missing.
 quartz              Script para manejar obsidian y quartz
 searchip            Busca una IP en toda la maquina para ver si se utilizo alguna vez

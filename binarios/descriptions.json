@@ -1,4 +1,22 @@
 {
+    "markdowninst": {
+        "name": "markdowninst",
+        "short_desc": "Installs Markdown Converter as a systemd service on Debian/Ubuntu with optional local Whisper transcription.",
+        "detailed_desc": [
+            "Elevates through sudo when needed, requires apt-get, and installs git if missing.",
+            "Clones 4rji/markdown-converter into a temporary directory under /tmp by default.",
+            "",
+            "Offers a full installation with local Whisper or a Markdown-only installation with optional OpenAI cloud transcription.",
+            "The full installation requires nvidia-smi to be available; install the NVIDIA driver first.",
+            "Set INSTALL_CHOICE=1 for the full installation or INSTALL_CHOICE=2 for Markdown only to skip the selection prompt.",
+            "",
+            "Runs install-systemd-service_new.sh with the selected INSTALL_LOCAL_WHISPER setting, then removes the clone directory.",
+            "Ensures the systemd service is enabled and running, and reports failure if it does not start.",
+            "",
+            "REPO_URL, REPO_BRANCH and CLONE_DIR override the repository, branch and clone destination.",
+            "SERVICE_NAME selects the service checked, enabled and started after installation; the default is markdown-converter."
+        ]
+    },
     "goinst": {
         "name": "goinst",
         "short_desc": "Builds selected Go tools and installs their binaries in /opt/4rji/bin using sudo.",
