@@ -1553,5 +1553,16 @@
             "Ctrl+C prints a termination message and exits.",
             "Requires Bash, timeout, su, and permission to authenticate as the target user."
         ]
+    },
+    "listener": {
+        "name": "listener",
+        "short_desc": "Runs the listener binary matching the operating system and architecture.",
+        "detailed_desc": [
+            "Uses /opt/4rji/bin/listener-amd on Linux AMD64.",
+            "Uses /opt/4rji/bin/listener_mac on macOS ARM64.",
+            "",
+            "Passes all arguments to the selected executable.",
+            "Reports an error if the platform is unsupported or the binary is not executable."
+        ]
     }
 }
