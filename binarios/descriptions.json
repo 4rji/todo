@@ -1,4 +1,20 @@
 {
+    "exiftoolinst": {
+        "name": "exiftoolinst",
+        "short_desc": "Installs exiftool-webtool and its metadata cleaning dependencies as a systemd service on Debian.",
+        "detailed_desc": [
+            "Clones 4rji/exiftool-webtool into /tmp/exiftool-webtool-install and copies the application to /opt/exiftool-webtool.",
+            "Installs git if missing, then installs ExifTool, archive support, qpdf, mat2, file, Flask and Gunicorn through apt-get.",
+            "Requires qpdf 11.10 or newer and uses sudo for privileged steps unless already running as root.",
+            "",
+            "Creates a dedicated system user and a hardened systemd service with cached jobs under /var/cache/exiftool-webtool/jobs.",
+            "Enables and restarts the service, then checks that it is active and prints the listening address.",
+            "",
+            "Creates /etc/default/exiftool-webtool only if absent, preserving existing settings.",
+            "Defaults: bind 0.0.0.0:8777, maximum upload request 200 MB, and cleaned file and metadata report retention 30 minutes.",
+            "Edit the environment file and restart exiftool-webtool to change settings; view logs with journalctl -u exiftool-webtool -f."
+        ]
+    },
     "markdowninst": {
         "name": "markdowninst",
         "short_desc": "Installs Markdown Converter as a systemd service on Debian/Ubuntu with optional local Whisper transcription.",

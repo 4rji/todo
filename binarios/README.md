@@ -49,6 +49,7 @@ ttyinicio           Crea mensaje de inicio de tty para ver la ip del servidor de
 
 
 ###------linux
+exiftoolinst        Installs exiftool-webtool and its metadata cleaning dependencies as a systemd service on Debian.
 markdowninst        Installs Markdown Converter as a systemd service on Debian/Ubuntu with optional local Whisper transcription.
 cafe                Keeps the system awake until stopped or a task finishes, installing caffeinate locally on Linux if missing.
 quartz              Script para manejar obsidian y quartz
