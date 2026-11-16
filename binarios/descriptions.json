@@ -1,4 +1,19 @@
 {
+    "goinst": {
+        "name": "goinst",
+        "short_desc": "Builds selected Go tools and installs their binaries in /opt/4rji/bin using sudo.",
+        "detailed_desc": [
+            "Shows an interactive menu to install locip, trafico, traficoS, sshc, vulnx, ssh_fzf, sitemirror, lanwatchgo, mann, autoteclado or systemd-persist-audit.",
+            "",
+            "Builds tools in a temporary GOBIN directory and installs generated executables in /opt/4rji/bin with permissions 755.",
+            "Creates the destination directory when needed and uses sudo for installation unless already running as root.",
+            "Removes the temporary binaries on exit.",
+            "",
+            "Most tools use go install with @latest; ssh_fzf is built directly from its Git repository and requires git.",
+            "Installing systemd-persist-audit also builds and installs fzf when it is missing from PATH.",
+            "Requires Go and network access. Add /opt/4rji/bin to PATH to run the installed tools by name."
+        ]
+    },
     "snicheck": {
         "name": "snicheck",
         "short_desc": "Compares TLS certificate subjects and issuers from an IP address with and without SNI.",

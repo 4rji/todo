@@ -262,7 +262,7 @@ sshterminal         sshx para compartir una terminal en la pagina web, remota, r
 passcheck           Verifica contrasenas en api.pwnedpasswords.com
 stiginst            Utilidad de verificacion windows por la navy
 lsync               Para syncronizar carpetas, usando archivo lua, rsync. 
-goinst              Compila herramientas Go de un menú e instala los binarios en /opt/4rji/bin usando sudo
+goinst              Builds selected Go tools and installs their binaries in /opt/4rji/bin using sudo.
 ipsdown             Baja una base de datos de abuseIP para ips maliciosas
 remotehealthinst    Instala el remotehealth como systectl servicio
 remotehealth        Script que expone los servicios con node zeek suric elastic filebeat
