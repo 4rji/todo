@@ -472,6 +472,7 @@ miwl                copia wlan0 al portapapeles
 cdns	            Cambia el DNS comentando lineas y tambien quita banderas chattr +i PONE / -i QUITA 
 ppt                 Checa lsof netstat nmap y puertos que estan escuchando en el sistema nmap RND:20
 newprocess          Servicios - encuentra nuevos procesos en pantalla para ver que se ejecuta, k mata, d detalles, q sale, con fzf selector con mouse, al inicio escanea procesos ocultos tipo rootkit, -o omite el escaneo (linux)
+newprocess-hidedemo Demo educativa: planta un proceso señuelo oculto a ps/top (tecnica rootkit LD_PRELOAD) para probar el escaneo de newprocess. start/stop/status, -g esconde en todo el sistema (linux)
 pingsw              Barrido de ping en /24, uso: pingsw 10.10.10, muestra hosts vivos
 
 

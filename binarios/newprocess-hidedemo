@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+#
+# newprocess-hidedemo — Demostración educativa del escaneo de procesos ocultos
+# de `newprocess`.
+#
+# Planta un proceso señuelo inofensivo y lo esconde de `ps`, `top` y `ls /proc`
+# con la misma tecnica que usan los rootkits de espacio de usuario (Jynx,
+# Azazel, ...): una libreria LD_PRELOAD que engancha readdir() y borra del
+# listado de /proc la entrada del PID elegido. El proceso sigue respondiendo
+# cuando se le pregunta por numero, que es justo lo que `newprocess` aprovecha
+# para delatarlo.
+#
+# Es una demo: el señuelo solo duerme, no abre red ni toca nada. Todo queda en
+# /dev/shm y se borra con `stop`. Usalo solo en maquinas tuyas o de laboratorio.
+
+set -euo pipefail
+export LC_ALL=C
+
+RED=$'\033[1;31m'; GREEN=$'\033[1;32m'; YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;36m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+
+# Puntero estable (solo texto) que guarda el WORKDIR real elegido en 'start',
+# para que 'stop' y 'status' lo encuentren aunque el directorio varie.
+POINTER="${TMPDIR:-/tmp}/.newprocess-hidedemo.path"
+PRELOAD_FILE="/etc/ld.so.preload"
+
+# Se rellenan al elegir/leer el WORKDIR.
+WORKDIR=""; STATE=""; LIB=""; DECOY_BIN=""
+
+set_paths() {
+    WORKDIR="$1"
+    STATE="$WORKDIR/state"
+    LIB="$WORKDIR/hide.so"
+    DECOY_BIN="$WORKDIR/.hidden-rootkit-demo"
+}
+
+# Elige el primer directorio donde SI se puede ejecutar: la libreria y el
+# señuelo tienen que correr, asi que /dev/shm o /tmp montados noexec no sirven.
+pick_workdir() {
+    local base d
+    if [ -n "${NP_HIDEDEMO_DIR:-}" ]; then
+        mkdir -p "$NP_HIDEDEMO_DIR" || return 1
+        set_paths "$NP_HIDEDEMO_DIR"; return 0
+    fi
+    for base in /tmp /var/tmp "${HOME:-/root}/.cache" /dev/shm /run; do
+        [ -d "$base" ] && [ -w "$base" ] || continue
+        d="$base/newprocess-hidedemo"
+        mkdir -p "$d" 2>/dev/null || continue
+        # sleep es un binario real (true/false son builtins y no se pueden copiar).
+        if cp "$(command -v sleep)" "$d/.x" 2>/dev/null && "$d/.x" 0 2>/dev/null; then
+            rm -f "$d/.x"; set_paths "$d"; return 0
+        fi
+        rm -rf "$d"
+    done
+    return 1
+}
+
+usage() {
+    cat <<EOF
+Demostracion del escaneo de procesos ocultos de newprocess.
+
+Uso: newprocess-hidedemo [start|stop|status]
+
+  start    (por defecto) Compila el escondedor, lanza un señuelo inofensivo
+           y abre una shell donde ps NO lo ve pero newprocess SI.
+  start -g Esconde el señuelo en TODO el sistema via $PRELOAD_FILE
+           (pide confirmacion, necesita root, se revierte con stop).
+  stop     Mata el señuelo, revierte los cambios y borra los temporales.
+  status   Dice si el señuelo esta vivo y si ps lo ve ahora mismo.
+
+Solo Linux. Necesita un compilador C (cc o gcc). Es una demo educativa:
+el señuelo solo ejecuta sleep. Corrilo en maquinas tuyas o de laboratorio.
+EOF
+}
+
+die() { printf "%sError:%s %s\n" "$RED" "$RESET" "$1" >&2; exit 1; }
+
+need_linux() {
+    [ "$(uname -s)" = "Linux" ] || die "esta demo es solo para Linux (usa /proc y LD_PRELOAD)."
+}
+
+compiler() {
+    command -v cc 2>/dev/null || command -v gcc 2>/dev/null
+}
+
+# ---- escribir la libreria escondedora -------------------------------------
+write_hider_source() {
+    cat >"$WORKDIR/hide.c" <<'EOF'
+/* Demo: esconde de readdir() la entrada cuyo nombre es el PID baked en
+   HIDE_PID. Asi ps, top y ls /proc dejan de ver ese proceso, aunque
+   /proc/PID sigue accesible por numero. Igual que un rootkit de userland. */
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <dlfcn.h>
+#include <string.h>
+
+#ifndef HIDE_PID
+#define HIDE_PID ""
+#endif
+
+static int hidden(const char *name) {
+    const char *h = HIDE_PID;
+    return h[0] != '\0' && strcmp(name, h) == 0;
+}
+
+struct dirent *readdir(DIR *d) {
+    static struct dirent *(*real)(DIR *) = 0;
+    if (!real) real = dlsym(RTLD_NEXT, "readdir");
+    struct dirent *e;
+    while ((e = real(d)) && hidden(e->d_name)) { }
+    return e;
+}
+
+struct dirent64 *readdir64(DIR *d) {
+    static struct dirent64 *(*real)(DIR *) = 0;
+    if (!real) real = dlsym(RTLD_NEXT, "readdir64");
+    struct dirent64 *e;
+    while ((e = real(d)) && hidden(e->d_name)) { }
+    return e;
+}
+EOF
+}
+
+# ---- status / stop --------------------------------------------------------
+read_state() {
+    PID=""; MODE=""; HAD_PRELOAD=""
+    [ -f "$POINTER" ] || return 1
+    set_paths "$(cat "$POINTER")"
+    [ -f "$STATE" ] || return 1
+    # shellcheck disable=SC1090
+    . "$STATE"
+    [ -n "$PID" ]
+}
+
+pid_alive()  { [ -e "/proc/$1/status" ]; }
+ps_sees()    { ps -p "$1" >/dev/null 2>&1; }
+
+do_status() {
+    if ! read_state; then
+        echo "No hay ninguna demo activa."
+        return 0
+    fi
+    printf "Demo activa (%s).\n" "$MODE"
+    printf "  Señuelo PID %s%s%s: " "$CYAN" "$PID" "$RESET"
+    if pid_alive "$PID"; then printf "%svivo%s\n" "$GREEN" "$RESET"
+    else printf "%symuerto (ya no esta)%s\n" "$YELLOW" "$RESET"; fi
+    printf "  ps / top lo ven:    "
+    if ps_sees "$PID"; then printf "%sSI (no esta escondido en esta vista)%s\n" "$YELLOW" "$RESET"
+    else printf "%sNO (escondido)%s\n" "$GREEN" "$RESET"; fi
+    printf "  /proc/%s accesible:  " "$PID"
+    if pid_alive "$PID"; then printf "%sSI (por eso newprocess lo delata)%s\n" "$GREEN" "$RESET"
+    else printf "no\n"; fi
+}
+
+do_stop() {
+    if ! read_state; then
+        echo "No habia ninguna demo activa."
+    else
+        if [ -n "$PID" ] && pid_alive "$PID"; then
+            kill -9 "$PID" 2>/dev/null || true
+            printf "Señuelo PID %s terminado.\n" "$PID"
+        fi
+        if [ "$MODE" = "global" ]; then
+            if [ "$HAD_PRELOAD" = "1" ] && [ -f "$WORKDIR/ld.so.preload.bak" ]; then
+                cp "$WORKDIR/ld.so.preload.bak" "$PRELOAD_FILE"
+                printf "%s restaurado.\n" "$PRELOAD_FILE"
+            else
+                rm -f "$PRELOAD_FILE"
+                printf "%s eliminado.\n" "$PRELOAD_FILE"
+            fi
+        fi
+    fi
+    [ -n "$WORKDIR" ] && rm -rf "$WORKDIR"
+    rm -f "$POINTER"
+    printf "%sLimpieza hecha.%s\n" "$GREEN" "$RESET"
+}
+
+# ---- start ----------------------------------------------------------------
+do_start() {
+    local global=0 cc existed=0 absdir
+    [ "${1:-}" = "-g" ] || [ "${1:-}" = "--global" ] && global=1
+
+    if [ -f "$POINTER" ]; then
+        die "ya hay una demo activa. Corré 'newprocess-hidedemo stop' primero."
+    fi
+    cc=$(compiler) || die "no encontré un compilador C (instalá gcc o clang)."
+    if [ "$global" = 1 ] && [ "$(id -u)" -ne 0 ]; then
+        die "el modo -g escribe $PRELOAD_FILE: corré con sudo."
+    fi
+
+    pick_workdir || die "no encontré un directorio con permiso de ejecucion (/tmp, /var/tmp... montados noexec?). Probá NP_HIDEDEMO_DIR=/ruta/exec."
+    # Global: ld.so carga la .so en TODOS los procesos de TODOS los usuarios,
+    # asi que la ruta tiene que ser transitable y la libreria legible por todos.
+    # Local: privado al usuario que lanza la demo.
+    if [ "$global" = 1 ]; then chmod 755 "$WORKDIR"; else chmod 700 "$WORKDIR"; fi
+    printf '%s\n' "$WORKDIR" >"$POINTER"
+
+    # Señuelo: una copia de sleep con un nombre claramente de demo.
+    cp "$(command -v sleep)" "$DECOY_BIN"
+    "$DECOY_BIN" 86400 &
+    PID=$!
+    disown "$PID" 2>/dev/null || true
+
+    # Compilar la libreria con el PID del señuelo horneado dentro.
+    write_hider_source
+    "$cc" -shared -fPIC -O2 -o "$LIB" "$WORKDIR/hide.c" -ldl \
+        -DHIDE_PID="\"$PID\"" 2>/dev/null ||
+        "$cc" -shared -fPIC -O2 -o "$LIB" "$WORKDIR/hide.c" -DHIDE_PID="\"$PID\""
+
+    MODE="local"; HAD_PRELOAD=0
+    if [ "$global" = 1 ]; then
+        MODE="global"
+        printf "%sAtencion:%s el modo -g va a esconder el PID %s en TODO el sistema\n" "$YELLOW" "$RESET" "$PID"
+        printf "escribiendo %s. Se revierte con 'newprocess-hidedemo stop'.\n" "$PRELOAD_FILE"
+        read -rp "¿Seguir? [s/N]: " ans
+        case "$ans" in
+            s | S | y | Y) ;;
+            *)
+                kill -9 "$PID" 2>/dev/null || true
+                rm -rf "$WORKDIR"; rm -f "$POINTER"
+                die "cancelado."
+                ;;
+        esac
+        if [ -f "$PRELOAD_FILE" ]; then
+            existed=1
+            cp "$PRELOAD_FILE" "$WORKDIR/ld.so.preload.bak"
+        fi
+        HAD_PRELOAD=$existed
+        chmod 755 "$LIB"    # ld.so la lee como cualquier usuario
+        # La ruta debe ser absoluta y real dentro de ld.so.preload.
+        absdir=$(cd "$WORKDIR" && pwd)
+        printf '%s/hide.so\n' "$absdir" >>"$PRELOAD_FILE"
+    fi
+
+    cat >"$STATE" <<EOF
+PID=$PID
+MODE=$MODE
+HAD_PRELOAD=$HAD_PRELOAD
+EOF
+
+    print_start_banner "$global"
+}
+
+print_start_banner() {
+    local global="$1"
+    echo
+    printf "%s=== newprocess-hidedemo ===%s\n" "$CYAN" "$RESET"
+    printf "Señuelo plantado: %sPID %s%s  (%s, un simple sleep)\n" "$CYAN" "$PID" "$RESET" "$DECOY_BIN"
+    echo
+
+    if [ "$global" = 1 ]; then
+        printf "%sEscondido en todo el sistema.%s Probalo en esta misma terminal:\n\n" "$GREEN" "$RESET"
+        printf "  %sps -p %s%s          ->  no aparece\n" "$DIM" "$PID" "$RESET"
+        printf "  %stop, htop, ls /proc%s ->  tampoco\n" "$DIM" "$RESET"
+        printf "  %snewprocess%s          ->  lo delata como HIDDEN PROCESS\n\n" "$DIM" "$RESET"
+        printf "Al terminar: %snewprocess-hidedemo stop%s  (revierte %s)\n" "$YELLOW" "$RESET" "$PRELOAD_FILE"
+        return
+    fi
+
+    printf "%sEscondido dentro de una shell de demo.%s\n" "$GREEN" "$RESET"
+    printf "Abro una shell donde ps esta ciego a este PID. Adentro, probá:\n\n"
+    printf "  %sps aux | grep hidden-rootkit%s  ->  no aparece\n" "$DIM" "$RESET"
+    printf "  %snewprocess%s                    ->  lo delata como HIDDEN PROCESS\n\n" "$DIM" "$RESET"
+    printf "Salí con %sexit%s. El señuelo sigue vivo; pará todo con %snewprocess-hidedemo stop%s\n" "$YELLOW" "$RESET" "$YELLOW" "$RESET"
+
+    if [ -t 0 ] && [ -t 1 ]; then
+        echo
+        LD_PRELOAD="$LIB" \
+            PS1="$(printf '%s[demo oculta]%s \\w\\$ ' "$RED" "$RESET")" \
+            exec bash --norc --noprofile
+    else
+        echo
+        printf "%sSin terminal interactiva.%s Para ver la demo corré manualmente:\n" "$YELLOW" "$RESET"
+        printf "  LD_PRELOAD=%s ps -p %s     # no lo ve\n" "$LIB" "$PID"
+        printf "  LD_PRELOAD=%s newprocess   # lo delata\n" "$LIB"
+    fi
+}
+
+# ---- main -----------------------------------------------------------------
+need_linux
+case "${1:-start}" in
+    start)      shift || true; do_start "${1:-}" ;;
+    -g | --global) do_start -g ;;
+    stop)       do_stop ;;
+    status)     do_status ;;
+    -h | --help) usage ;;
+    *)          usage >&2; exit 2 ;;
+esac

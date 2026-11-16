@@ -66,6 +66,15 @@ show_keys() {
         "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
 }
 
+# A dim horizontal rule the width of the terminal (fallback 60).
+separator() {
+    local cols line
+    cols=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2)
+    cols=${cols:-60}
+    printf -v line '%*s' "$cols" ''
+    printf "%s%s%s\n" "$DIM" "${line// /-}" "$RESET"
+}
+
 # One line per process: KEY <tab> PID <tab> PPID <tab> USER <tab> CMD
 # KEY is "pid|start time", so a reused PID counts as a new process.
 snapshot() {
@@ -176,25 +185,42 @@ is_listed() {
     return 1
 }
 
-# Hidden process scan, the method of sandfly-processdecloak. A rootkit takes
-# its PID out of the /proc listing, so ps and top never show it, but the PID
-# still answers when it is asked for by number. So ask every possible PID and
-# report the processes that answer without being listed.
+# True if the PID answers when opened by its exact path. This is open(), a
+# different kernel path than readdir() or stat(), so a rootkit that hooks only
+# one of those still lets this through.
+answers() { { true <"/proc/$1/status"; } 2>/dev/null; }
+
+# Hidden process scan, the method of sandfly-processdecloak. A process that
+# answers when asked for by number but is concealed from the normal ways of
+# enumerating processes is hiding, as a rootkit makes it. Two independent
+# concealments are checked, because rootkits hook different calls:
+#   unlisted - open() works but the PID is missing from the /proc listing
+#              (readdir/getdents hook, what ps and top walk)
+#   no-stat  - open() works but stat()/lstat() on /proc/PID fails
+#              (stat hook: the entry cannot be stat'd though it is really there)
 scan_hidden() {
-    local max suspects pid name cmd exe found=0
+    local max suspects pid flag reason name cmd exe found=0
 
     read -r max 2>/dev/null </proc/sys/kernel/pid_max || return
     printf "Scanning PIDs 1-%s for hidden processes (-o skips this)... " "$max"
 
-    suspects=$(printf '%s\n' /proc/[0-9]* | awk -F/ -v max="$max" '
+    # awk brute-forces every PID with open() and, for each real process (not a
+    # thread), prints "pid listed-flag". The lstat check is added in bash below.
+    suspects=""
+    while read -r pid flag; do
+        reason=""
+        [ "$flag" = 0 ] && reason="unlisted"
+        [ -e "/proc/$pid" ] || reason="${reason:+$reason,}no-stat"
+        [ -n "$reason" ] && suspects="$suspects$pid $reason"$'\n'
+    done < <(printf '%s\n' /proc/[0-9]* | awk -F/ -v max="$max" '
         { listed[$3] = 1 }
         END {
             for (pid = 1; pid <= max; pid++) {
                 file = "/proc/" pid "/status"
                 if ((getline line < file) <= 0) continue    # nothing has this PID
 
-                # Threads answer too and are never listed. A thread has a
-                # Tgid (the process it belongs to) different from its Pid.
+                # Threads answer too. A thread has a Tgid (the process it
+                # belongs to) different from its own Pid. Only report processes.
                 tgid = ""
                 is_process = 0
                 while ((getline line < file) > 0) {
@@ -204,26 +230,36 @@ scan_hidden() {
                 }
                 close(file)
 
-                if (is_process && !(pid in listed)) print pid
+                if (is_process) print pid, ((pid in listed) ? 1 : 0)
             }
         }')
 
-    # A process born during the scan was not in the listing yet: look again.
+    # A process born during the scan was not in the listing yet: verify after a
+    # pause and drop any that is no longer both answering and still concealed.
     [ -n "$suspects" ] && sleep 1
-    for pid in $suspects; do
-        if [ -e "/proc/$pid/status" ] && ! is_listed "$pid"; then
-            # ps cannot see it, so read straight from /proc.
-            name=$(clean_text 2>/dev/null <"/proc/$pid/comm")
-            cmd=$(clean_text 2>/dev/null <"/proc/$pid/cmdline")
-            exe=$(readlink "/proc/$pid/exe" 2>/dev/null | clean_text)
-            [ "$found" = 0 ] && echo
-            found=$((found + 1))
-            printf "  %sHIDDEN PROCESS%s %s %s %s %s\n" "$RED" "$RESET" \
-                "${DIM}PID=$RESET$CYAN$pid$RESET" "${DIM}NAME=$RESET$name" \
-                "${DIM}CMD=$RESET$cmd" "${DIM}EXE=$RESET$exe"
-            log_event HIDDEN "pid=$pid name=$name cmd=$cmd exe=$exe"
-        fi
-    done
+    while read -r pid reason; do
+        [ -n "$pid" ] || continue
+        answers "$pid" || continue
+        case "$reason" in
+            *unlisted*) is_listed "$pid" && reason="${reason/unlisted/}" ;;
+        esac
+        case "$reason" in
+            *no-stat*) [ -e "/proc/$pid" ] && reason="${reason/no-stat/}" ;;
+        esac
+        reason="${reason//,,/,}"; reason="${reason#,}"; reason="${reason%,}"
+        [ -n "$reason" ] || continue
+
+        # ps cannot see it, so read straight from /proc.
+        name=$(clean_text 2>/dev/null <"/proc/$pid/comm")
+        cmd=$(clean_text 2>/dev/null <"/proc/$pid/cmdline")
+        exe=$(readlink "/proc/$pid/exe" 2>/dev/null | clean_text)
+        [ "$found" = 0 ] && echo
+        found=$((found + 1))
+        printf "  %sHIDDEN PROCESS%s %s %s %s %s %s\n" "$RED" "$RESET" \
+            "${DIM}PID=$RESET$CYAN$pid$RESET" "${DIM}NAME=$RESET$name" \
+            "${DIM}CMD=$RESET$cmd" "${DIM}EXE=$RESET$exe" "${DIM}HOW=$RESET$reason"
+        log_event HIDDEN "pid=$pid how=$reason name=$name cmd=$cmd exe=$exe"
+    done <<<"$suspects"
 
     if [ "$found" = 0 ]; then
         printf "%snone found.%s\n" "$GREEN" "$RESET"
@@ -446,6 +482,7 @@ fi
 
 if [ "$SCAN_HIDDEN" = 1 ]; then
     scan_hidden
+    separator
 fi
 
 snapshot >"$old_snapshot"
