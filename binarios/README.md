@@ -471,7 +471,7 @@ mired               copia eth0 al portapapeles y muestra todas las ips del equip
 miwl                copia wlan0 al portapapeles  
 cdns	            Cambia el DNS comentando lineas y tambien quita banderas chattr +i PONE / -i QUITA 
 ppt                 Checa lsof netstat nmap y puertos que estan escuchando en el sistema nmap RND:20
-newprocess          Servicios - encuentra nuevos procesos en pantalla para ver que se ejecuta 
+newprocess          Servicios - encuentra nuevos procesos en pantalla para ver que se ejecuta, k mata, d detalles, q sale, con fzf selector con mouse, al inicio escanea procesos ocultos tipo rootkit, -o omite el escaneo (linux)
 pingsw              Barrido de ping en /24, uso: pingsw 10.10.10, muestra hosts vivos
 
 
@@ -735,7 +735,7 @@ icmpb               Para bloquear icmp con iptables
 
 fishells             busca procesos, muestra puerto, para shells, usa ps y ss
 kshells             Mata shells en el sistema
-newprocess          Nuevos procesos en linux
+newprocess          Nuevos procesos en linux, k mata, d detalles (exe, padres, hijos, sockets) y matar desde ahi, registro en /var/log/newprocess.log con sudo
 snoop               Hace un awk a los logs de snoopy
 snoopinst           Instala snoopy
 ppt

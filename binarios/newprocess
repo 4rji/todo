@@ -9,214 +9,500 @@ SHOW_ENDED="${NEWPROCESS_SHOW_ENDED:-1}"
 TRUNCATE_CMD="${NEWPROCESS_TRUNCATE_CMD:-0}"
 IGNORE_RE="${NEWPROCESS_IGNORE_RE-(^|[[:space:]])diff([[:space:]]|$)|kworker}"
 
-RED='\033[1;31m'
-GREEN='\033[1;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[1;36m'
-DIM='\033[2m'
-RESET='\033[0m'
-
-detect_cols() {
-    COLS=$(tput cols 2>/dev/null || echo 120)
-}
-detect_cols
+RED=$'\033[1;31m'
+GREEN=$'\033[1;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;36m'
+DIM=$'\033[2m'
+RESET=$'\033[0m'
 
 usage() {
     cat <<'EOF'
-Usage: newprocess
+Usage: newprocess [-o]
+       newprocess --details PID    Show the details of one process and exit
+
+  -o  Skip the hidden process scan done at start
+
+Hidden process scan: before monitoring, every possible PID (1 to
+/proc/sys/kernel/pid_max) is asked for by number and compared with the /proc
+listing. A process that answers but is not listed is hidden from ps and top,
+which is what kernel rootkits do (the method of sandfly-processdecloak). It
+takes a few seconds. A hit can be a false positive: inspect /proc/PID. If
+/proc is mounted with hidepid, run as root or only your own processes count.
+
+Keys while running:
+  k   Kill a process: pick it, then Enter = KILL (forced, cannot be ignored),
+      t = TERM (asks it to exit and clean up, it may refuse), n = cancel
+  d   Show the details of a process, and kill it from there
+  q   Quit
+  h   Show the keys
+
+With fzf installed, k and d open a picker: move with the arrows or the mouse,
+type to filter, Enter or double click to choose, Esc to go back. The lower
+panel shows the details of the highlighted process; in the d picker, Ctrl-K
+kills it. After reading the details, k kills it too. Without fzf they ask
+for a PID.
+
+Log: every start, end and kill is appended to /var/log/newprocess.log when
+run as root (sudo newprocess). Otherwise it goes to
+~/.local/state/newprocess.log. The log is private (mode 600): command lines
+can contain secrets.
 
 Optional variables:
   NEWPROCESS_INTERVAL=0.2     Seconds between snapshots. Default: 1
   NEWPROCESS_SHOW_ENDED=0     Do not show terminated processes. Default: 1
   NEWPROCESS_TRUNCATE_CMD=1   Truncate CMD to terminal width. Default: 0
   NEWPROCESS_IGNORE_RE=''     Command regex to ignore. Default: diff|kworker
+  NEWPROCESS_LOG=/path/file   Log file. Default: /var/log/newprocess.log
 
 Note: this script uses ps-based polling. It cannot guarantee detection of
 processes that start and exit between two snapshots.
 EOF
 }
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    usage
-    exit 0
-fi
-
-make_tmp() {
-    mktemp "${TMPDIR:-/tmp}/newprocess.XXXXXX"
+show_keys() {
+    printf "%sKeys:%s %sk%s kill a process  %sd%s process details  %sq%s quit  %sh%s this help\n" \
+        "$YELLOW" "$RESET" \
+        "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
 }
 
+# One line per process: KEY <tab> PID <tab> PPID <tab> USER <tab> CMD
+# KEY is "pid|start time", so a reused PID counts as a new process.
 snapshot() {
-    local raw has_lstart status
-
-    raw=$(make_tmp) || return 1
-    if ps -ww -eo pid=,ppid=,user=,lstart=,command= >"$raw" 2>/dev/null; then
-        has_lstart=1
-    elif ps -ww -eo pid=,ppid=,user=,command= >"$raw" 2>/dev/null; then
-        has_lstart=0
-    else
-        rm -f "$raw"
-        return 1
-    fi
-
-    awk -v self="$$" -v ignore_re="$IGNORE_RE" -v has_lstart="$has_lstart" '
+    ps -ww -eo pid=,ppid=,user=,lstart=,command= 2>/dev/null |
+        awk -v self="$$" -v ignore_re="$IGNORE_RE" '
         {
             pid = $1
             ppid = $2
             user = $3
+            start = $4 " " $5 " " $6 " " $7 " " $8
 
-            if (has_lstart == 1) {
-                start = $4 " " $5 " " $6 " " $7 " " $8
-                cmd_start = 9
-                key = pid "|" start
-            } else {
-                start = ""
-                cmd_start = 4
-                key = pid
-            }
+            cmd = $9
+            for (i = 10; i <= NF; i++) cmd = cmd " " $i
 
-            cmd = ""
-            for (i = cmd_start; i <= NF; i++) {
-                cmd = (cmd == "" ? $i : cmd " " $i)
-            }
-
-            if (pid == self) next
-            if (ppid == self) next
+            if (pid == self || ppid == self) next
             if (cmd ~ /(^|\/)ps[[:space:]].*-eo[[:space:]]/) next
             if (ignore_re != "" && cmd ~ ignore_re) next
 
-            display = "PID=" pid "\tPPID=" ppid "\tUSER=" user "\tCMD=" cmd
-
-            printf "%s\t%s\n", key, display
-        }
-    ' "$raw" | sort
-    status=$?
-    rm -f "$raw"
-    return "$status"
+            printf "%s|%s\t%s\t%s\t%s\t%s\n", pid, start, pid, ppid, user, cmd
+        }'
 }
 
-snapshot_keys() {
-    cut -f1 "$1" | sort
+# Print the lines of snapshot $2 whose KEY is not in snapshot $1.
+only_in_second() {
+    awk -F'\t' 'NR == FNR { seen[$1]; next } !($1 in seen)' "$1" "$2"
 }
 
-print_matches() {
-    awk '
-        NR == FNR {
-            wanted[$1] = 1
-            next
-        }
-        ($1 in wanted) {
-            line = $0
-            sub(/^[^\t]+\t/, "", line)
-            print line
-        }
-    ' "$1" "$2"
+# show_changes <color> <mark> <snapshot lines>
+show_changes() {
+    local color="$1" mark="$2" pid ppid user cmd user_color plain room
+
+    while IFS=$'\t' read -r _ pid ppid user cmd; do
+        user_color="$GREEN"
+        [ "$user" = "root" ] && user_color="$RED"
+
+        if [ "$TRUNCATE_CMD" != "0" ]; then
+            plain="  $mark PID=$pid PPID=$ppid USER=$user CMD="
+            room=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2)
+            room=$((${room:-120} - ${#plain}))
+            [ "$room" -lt 20 ] && room=20
+            [ "${#cmd}" -gt "$room" ] && cmd="${cmd:0:room-1}…"
+        fi
+
+        printf '  %s %s %s %s %s\n' \
+            "$color$mark$RESET" \
+            "${DIM}PID=$RESET$CYAN$pid$RESET" \
+            "${DIM}PPID=$RESET$CYAN$ppid$RESET" \
+            "${DIM}USER=$RESET$user_color$user$RESET" \
+            "${DIM}CMD=$RESET$cmd"
+    done <<<"$3"
 }
 
-colorize() {
-    local prefix="$1" prefix_color="$2"
-    awk -v prefix="$prefix" \
-        -v pcol="$prefix_color" \
-        -v reset="$RESET" \
-        -v cyan="$CYAN" \
-        -v red="$RED" \
-        -v green="$GREEN" \
-        -v dim="$DIM" \
-        -v cols="$COLS" \
-        -v truncate_cmd="$TRUNCATE_CMD" '
-    {
-        n = split($0, parts, "\t")
-        out = "  " pcol prefix reset
-        used = 4
-        cmd_field = ""
-        for (i = 1; i <= n; i++) {
-            kv = parts[i]
-            eq = index(kv, "=")
-            if (eq == 0) continue
-            k = substr(kv, 1, eq - 1)
-            v = substr(kv, eq + 1)
+# Start time of a live PID in clock ticks since boot (field 22 of
+# /proc/PID/stat). It never changes while the process lives, so it tells a
+# reused PID apart. Prints nothing if the PID is gone or is a zombie.
+proc_start() {
+    local stat fields
+    { read -r stat <"/proc/$1/stat"; } 2>/dev/null || return 1
+    # Drop "pid (name) " first; the name may contain spaces.
+    read -r -a fields <<<"${stat##*) }"
+    [ "${fields[0]}" = "Z" ] && return 1
+    echo "${fields[19]}"
+}
 
-            if (k == "CMD") { cmd_field = v; continue }
+# Log file: /var/log when we may write there (root), else the user's state dir.
+# Starts, ends and kills are always recorded, whatever is shown on screen.
+LOG_FILE=""
+LOG_WANTED="${NEWPROCESS_LOG:-/var/log/newprocess.log}"
 
-            if (k == "USER") {
-                col = (v == "root") ? red : green
-                seg = dim k "=" reset col v reset
-            } else if (k == "PID" || k == "PPID") {
-                seg = dim k "=" reset cyan v reset
-            } else {
-                seg = dim k "=" reset v
+init_log() {
+    local file="$LOG_WANTED"
+
+    umask 077    # command lines can hold secrets: only the owner reads the log
+    if ! { : >>"$file"; } 2>/dev/null; then
+        file="${XDG_STATE_HOME:-$HOME/.local/state}/newprocess.log"
+        mkdir -p "${file%/*}" 2>/dev/null
+        { : >>"$file"; } 2>/dev/null || return 1
+    fi
+    LOG_FILE="$file"
+}
+
+# log_event <LABEL> <text>
+log_event() {
+    [ -n "$LOG_FILE" ] || return 0
+    printf '%(%Y-%m-%d %H:%M:%S)T %-7s %s\n' -1 "$1" "$2" >>"$LOG_FILE"
+}
+
+# log_changes <START|END> <snapshot lines>
+log_changes() {
+    local pid ppid user cmd
+    while IFS=$'\t' read -r _ pid ppid user cmd; do
+        log_event "$1" "pid=$pid ppid=$ppid user=$user cmd=$cmd"
+    done <<<"$2"
+}
+
+# Filter: one line of printable characters only. A hostile process could put
+# terminal escape codes in its name or command line.
+clean_text() {
+    tr '\0\n' '  ' | tr -cd '[:print:]' | sed 's/ *$//'
+}
+
+# True if the PID shows up when /proc is listed, which is what ps and top do.
+is_listed() {
+    local dir
+    for dir in /proc/[0-9]*; do
+        [ "$dir" = "/proc/$1" ] && return 0
+    done
+    return 1
+}
+
+# Hidden process scan, the method of sandfly-processdecloak. A rootkit takes
+# its PID out of the /proc listing, so ps and top never show it, but the PID
+# still answers when it is asked for by number. So ask every possible PID and
+# report the processes that answer without being listed.
+scan_hidden() {
+    local max suspects pid name cmd exe found=0
+
+    read -r max 2>/dev/null </proc/sys/kernel/pid_max || return
+    printf "Scanning PIDs 1-%s for hidden processes (-o skips this)... " "$max"
+
+    suspects=$(printf '%s\n' /proc/[0-9]* | awk -F/ -v max="$max" '
+        { listed[$3] = 1 }
+        END {
+            for (pid = 1; pid <= max; pid++) {
+                file = "/proc/" pid "/status"
+                if ((getline line < file) <= 0) continue    # nothing has this PID
+
+                # Threads answer too and are never listed. A thread has a
+                # Tgid (the process it belongs to) different from its Pid.
+                tgid = ""
+                is_process = 0
+                while ((getline line < file) > 0) {
+                    split(line, field, /[ \t]+/)
+                    if (field[1] == "Tgid:") tgid = field[2]
+                    if (field[1] == "Pid:") { is_process = (field[2] == tgid); break }
+                }
+                close(file)
+
+                if (is_process && !(pid in listed)) print pid
             }
-            out = out seg " "
-            used += length(k) + 1 + length(v) + 1
-        }
+        }')
 
-        if (cmd_field != "") {
-            avail = cols - used - 5
-            if (avail < 20) avail = 20
-            if (truncate_cmd != "0" && length(cmd_field) > avail) {
-                cmd_field = substr(cmd_field, 1, avail - 1) "\xe2\x80\xa6"
-            }
-            out = out dim "CMD=" reset cmd_field
-        }
-        print out
-    }'
+    # A process born during the scan was not in the listing yet: look again.
+    [ -n "$suspects" ] && sleep 1
+    for pid in $suspects; do
+        if [ -e "/proc/$pid/status" ] && ! is_listed "$pid"; then
+            # ps cannot see it, so read straight from /proc.
+            name=$(clean_text 2>/dev/null <"/proc/$pid/comm")
+            cmd=$(clean_text 2>/dev/null <"/proc/$pid/cmdline")
+            exe=$(readlink "/proc/$pid/exe" 2>/dev/null | clean_text)
+            [ "$found" = 0 ] && echo
+            found=$((found + 1))
+            printf "  %sHIDDEN PROCESS%s %s %s %s %s\n" "$RED" "$RESET" \
+                "${DIM}PID=$RESET$CYAN$pid$RESET" "${DIM}NAME=$RESET$name" \
+                "${DIM}CMD=$RESET$cmd" "${DIM}EXE=$RESET$exe"
+            log_event HIDDEN "pid=$pid name=$name cmd=$cmd exe=$exe"
+        fi
+    done
+
+    if [ "$found" = 0 ]; then
+        printf "%snone found.%s\n" "$GREEN" "$RESET"
+    else
+        printf "%s%s hidden process(es): ps and top do not show them, as with a rootkit.%s\n" "$RED" "$found" "$RESET"
+        printf "The k and d keys cannot see them either. Inspect: ls -la /proc/PID   Kill: kill -9 PID\n"
+    fi
+    log_event SCAN "hidden=$found checked=1-$max"
 }
 
-old_process=$(make_tmp) || exit 1
-new_process=$(make_tmp) || exit 1
-old_keys=$(make_tmp) || exit 1
-new_keys=$(make_tmp) || exit 1
-started_process=$(make_tmp) || exit 1
-ended_process=$(make_tmp) || exit 1
+# Everything worth knowing about one PID. Also fills the fzf lower panel.
+show_details() {
+    local pid="$1" parent children
 
-cleanup() {
-    rm -f "$old_process" "$new_process" "$old_keys" "$new_keys" "$started_process" "$ended_process"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+        echo "PID $pid is not running."
+        return 1
+    fi
+
+    ps -ww -p "$pid" -o pid,ppid,user,tty,stat,%cpu,%mem,etime,lstart
+    echo
+    echo "Command: $(ps -ww -o command= -p "$pid")"
+    echo "Exe:     $(readlink "/proc/$pid/exe" 2>/dev/null || echo "(not readable, try root)")"
+    echo "Cwd:     $(readlink "/proc/$pid/cwd" 2>/dev/null || echo "(not readable, try root)")"
+
+    echo
+    echo "Started by (parent, grandparent, ...):"
+    parent=$(ps -o ppid= -p "$pid" | tr -d ' ')
+    [ "${parent:-0}" -gt 0 ] || echo "  (none)"
+    while [ "${parent:-0}" -gt 0 ]; do
+        ps -ww -o pid=,user=,command= -p "$parent" | sed 's/^/  /'
+        parent=$(ps -o ppid= -p "$parent" | tr -d ' ')
+    done
+
+    echo
+    echo "Children:"
+    children=$(ps -ww --ppid "$pid" -o pid=,user=,command= | sed 's/^/  /')
+    echo "${children:-  (none)}"
+
+    echo
+    echo "Network sockets:"
+    ss -Htuanp 2>/dev/null | grep "pid=$pid," | sed 's/^/  /' |
+        grep . || echo "  (none visible; sockets of other users need root)"
 }
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-trap 'cleanup; exit 129' HUP
-trap detect_cols WINCH
 
-if ! snapshot >"$old_process"; then
-    printf "%bError:%b could not run ps with the expected format.\n" "$RED" "$RESET" >&2
+# Ask a question and print the answer. Typing is visible only while asking;
+# the rest of the time keys are not echoed, so they do not garble the list.
+ask() {
+    local answer
+    stty echo
+    read -rp "$1" answer
+    stty -echo
+    echo "$answer"
+}
+
+# Ask which process to <action>. Sets PICKED_PID (empty if cancelled) and
+# PICKED_KEY ("ctrl-k" if Ctrl-K was pressed in the picker).
+pick_process() {
+    local action="$1" hint="$2" out
+    PICKED_PID=""
+    PICKED_KEY=""
+
+    if command -v fzf >/dev/null 2>&1; then
+        # Newest processes on top. {1} is the PID of the highlighted line.
+        out=$(awk -F'\t' '
+            BEGIN { printf "%-8s %-8s %-9s %s\n", "PID", "PPID", "USER", "CMD" }
+            { printf "%-8s %-8s %-9s %s\n", $2, $3, $4, $5 }' "$old_snapshot" |
+            fzf --tac --reverse --header-lines=1 --expect=ctrl-k \
+                --header "Enter or double click = $action, ${hint}Esc = back, type to filter" \
+                --preview "bash $(printf '%q' "$0") --details {1}" \
+                --preview-window=down:50%:wrap)
+        PICKED_KEY=$(sed -n 1p <<<"$out")
+        PICKED_PID=$(sed -n 2p <<<"$out" | awk '{ print $1 }')
+    else
+        PICKED_PID=$(ask "PID to $action (Enter cancels): ")
+    fi
+}
+
+# Pick a process, read its details, go back to the picker. Esc ends the loop.
+# From the details you can kill the process: Ctrl-K in the picker, or k after
+# reading them.
+details_loop() {
+    local key
+
+    while true; do
+        pick_process "show details" "Ctrl-K = kill it, "
+        [ -n "$PICKED_PID" ] || return
+
+        if [ "$PICKED_KEY" = "ctrl-k" ]; then
+            kill_pid "$PICKED_PID"
+            return
+        fi
+
+        if command -v less >/dev/null 2>&1; then
+            # Short details print as they are; long ones open in a pager (q = leave).
+            show_details "$PICKED_PID" | less -RFX
+        else
+            show_details "$PICKED_PID"
+        fi
+
+        printf "%sk%s kill it, any other key = back to the list " "$CYAN" "$RESET"
+        read -rsn1 key
+        echo
+        if [ "$key" = "k" ] || [ "$key" = "K" ]; then
+            kill_pid "$PICKED_PID"
+            return
+        fi
+    done
+}
+
+kill_process() {
+    pick_process "kill" ""
+    if [ -n "$PICKED_PID" ]; then
+        kill_pid "$PICKED_PID"
+    fi
+}
+
+# Confirm, then send the signal. Everything that is sent goes to the log.
+kill_pid() {
+    local pid="$1" start info answer signal result target_user target_cmd target
+
+    start=$(proc_start "$pid")
+    info=$(ps -ww -o user=,command= -p "$pid" 2>/dev/null)
+    if [ -z "$start" ] || [ -z "$info" ]; then
+        echo "PID $pid is not running."
+        return
+    fi
+
+    printf '  %sPID=%s%s %s\n' "$DIM" "$RESET" "$CYAN$pid$RESET" "$info"
+    answer=$(ask "Kill it? [Enter = KILL, t = TERM (asks it to exit), n = cancel]: ")
+    case "$answer" in
+        "" | 9 | k | K) signal=KILL ;;
+        t | T) signal=TERM ;;
+        *)
+            echo "Cancelled."
+            return
+            ;;
+    esac
+
+    # The PID could have been reused while the prompt was waiting.
+    if [ "$(proc_start "$pid")" != "$start" ]; then
+        echo "PID $pid is not the same process anymore. Nothing sent."
+        return
+    fi
+
+    read -r target_user target_cmd <<<"$info"
+    target="$target_user $target_cmd"
+
+    if ! kill -s "$signal" "$pid" 2>/dev/null; then
+        printf "%sCould not send %s to PID %s%s (not permitted? run with sudo).\n" "$RED" "$signal" "$pid" "$RESET"
+        log_event KILL "by=$ME signal=$signal pid=$pid result=failed target=$target"
+        return
+    fi
+    sleep 0.5
+    if [ "$(proc_start "$pid")" = "$start" ]; then
+        result="still-running"
+        printf "%sSent %s, but PID %s is still running.%s Some programs ignore TERM: press k again and press Enter for KILL.\n" \
+            "$YELLOW" "$signal" "$pid" "$RESET"
+    else
+        result="gone"
+        printf "%sPID %s is gone (%s).%s\n" "$GREEN" "$pid" "$signal" "$RESET"
+    fi
+    log_event KILL "by=$ME signal=$signal pid=$pid result=$result target=$target"
+}
+
+# Wait one interval. With a terminal, a key press ends the wait early.
+wait_for_key() {
+    KEY=""
+    if [ -t 0 ]; then
+        IFS= read -rn1 -t "$INTERVAL" KEY
+    else
+        sleep "$INTERVAL"
+    fi
+}
+
+SCAN_HIDDEN=1
+case "${1:-}" in
+    "") ;;
+    -o) SCAN_HIDDEN=0 ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    --details)
+        show_details "${2:-}"
+        exit
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+
+old_snapshot=$(mktemp "${TMPDIR:-/tmp}/newprocess.XXXXXX") || exit 1
+new_snapshot=$(mktemp "${TMPDIR:-/tmp}/newprocess.XXXXXX") || exit 1
+
+# Echo is off while monitoring (see ask); put the terminal back on exit.
+restore_terminal() { :; }
+if [ -t 0 ]; then
+    terminal_settings=$(stty -g)
+    restore_terminal() { stty "$terminal_settings"; }
+    stty -echo
+fi
+
+on_exit() {
+    log_event MONITOR "stopped pid=$$"
+    restore_terminal
+    rm -f "$old_snapshot" "$new_snapshot"
+}
+
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+ME=$(id -un)
+if init_log; then
+    log_event MONITOR "started pid=$$ user=$ME interval=${INTERVAL}s"
+fi
+
+if [ "$SCAN_HIDDEN" = 1 ]; then
+    scan_hidden
+fi
+
+snapshot >"$old_snapshot"
+if [ ! -s "$old_snapshot" ]; then
+    printf "%sError:%s could not run ps with the expected format.\n" "$RED" "$RESET" >&2
     exit 1
 fi
 
-printf "%bProcess monitor started.%b Interval: %ss\n" "$GREEN" "$RESET" "$INTERVAL"
-printf "%bWarning:%b cannot guarantee detection of processes that start and exit between snapshots.\n" "$YELLOW" "$RESET"
+printf "%sProcess monitor started.%s Interval: %ss\n" "$GREEN" "$RESET" "$INTERVAL"
+if [ -z "$LOG_FILE" ]; then
+    printf "%sWarning:%s cannot write a log file (tried %s and ~/.local/state).\n" "$RED" "$RESET" "$LOG_WANTED"
+elif [ "$LOG_FILE" != "$LOG_WANTED" ]; then
+    printf "%sLog:%s %s %s(cannot write %s; run with sudo to log there)%s\n" "$YELLOW" "$RESET" "$LOG_FILE" "$DIM" "$LOG_WANTED" "$RESET"
+else
+    printf "%sLog:%s %s\n" "$YELLOW" "$RESET" "$LOG_FILE"
+fi
+printf "%sWarning:%s cannot guarantee detection of processes that start and exit between snapshots.\n" "$YELLOW" "$RESET"
+if [ -t 0 ]; then
+    show_keys
+    command -v fzf >/dev/null 2>&1 ||
+        printf "%sTip:%s install fzf to pick processes with the arrows or the mouse.\n" "$YELLOW" "$RESET"
+fi
 
 while true; do
-    sleep "$INTERVAL"
+    wait_for_key
+    case "$KEY" in
+        k | K) kill_process ;;
+        d | D) details_loop ;;
+        q | Q) exit 0 ;;
+        h | H | \?) show_keys ;;
+    esac
 
-    if ! snapshot >"$new_process"; then
-        printf "%bError:%b failed to read processes; retrying...\n" "$RED" "$RESET" >&2
+    snapshot >"$new_snapshot"
+    if [ ! -s "$new_snapshot" ]; then
+        printf "%sError:%s failed to read processes; retrying...\n" "$RED" "$RESET" >&2
         continue
     fi
 
-    snapshot_keys "$old_process" >"$old_keys"
-    snapshot_keys "$new_process" >"$new_keys"
+    started=$(only_in_second "$old_snapshot" "$new_snapshot")
+    ended=$(only_in_second "$new_snapshot" "$old_snapshot")
+    [ -n "$started" ] && log_changes START "$started"
+    [ -n "$ended" ] && log_changes END "$ended"
+    [ "$SHOW_ENDED" = "0" ] && ended=""
 
-    comm -13 "$old_keys" "$new_keys" >"$started_process"
-    comm -23 "$old_keys" "$new_keys" >"$ended_process"
+    if [ -n "$started$ended" ]; then
+        printf "\n%sProcess changes:%s %s\n" "$RED" "$RESET" "$(date '+%Y-%m-%d %H:%M:%S')"
 
-    if [ -s "$started_process" ] || { [ "$SHOW_ENDED" != "0" ] && [ -s "$ended_process" ]; }; then
-        printf "\n%bProcess changes:%b %s\n" "$RED" "$RESET" "$(date '+%Y-%m-%d %H:%M:%S')"
-
-        if [ -s "$started_process" ]; then
-            printf "%bStarted:%b\n" "$GREEN" "$RESET"
-            print_matches "$started_process" "$new_process" | colorize "+ " "$GREEN"
+        if [ -n "$started" ]; then
+            printf "%sStarted:%s\n" "$GREEN" "$RESET"
+            show_changes "$GREEN" "+" "$started"
         fi
 
-        if [ "$SHOW_ENDED" != "0" ] && [ -s "$ended_process" ]; then
-            printf "%bEnded:%b\n" "$YELLOW" "$RESET"
-            print_matches "$ended_process" "$old_process" | colorize "- " "$YELLOW"
+        if [ -n "$ended" ]; then
+            printf "%sEnded:%s\n" "$YELLOW" "$RESET"
+            show_changes "$YELLOW" "-" "$ended"
         fi
     fi
 
-    : >"$started_process"
-    : >"$ended_process"
-
-    tmp_process="$old_process"
-    old_process="$new_process"
-    new_process="$tmp_process"
+    mv "$new_snapshot" "$old_snapshot"
 done
