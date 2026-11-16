@@ -7,6 +7,32 @@ echo_msg() {
     echo "=============================================="
 }
 
+# ssh_fzf aún no publica un módulo Go; compilar el archivo directamente.
+install_ssh_fzf() (
+    set -euo pipefail
+    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
+    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
+
+    temporal=$(mktemp -d)
+    trap 'rm -rf -- "$temporal"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    git clone --depth 1 https://github.com/4rji/binarios-go.git "$temporal/repo"
+    destino=$(go env GOBIN)
+    if [ -z "$destino" ]; then
+        gopath=$(go env GOPATH)
+        destino="${gopath%%:*}/bin"
+    fi
+    go build -o "$temporal/ssh_fzf" "$temporal/repo/ssh_fzf/ssh_fzf.go"
+    mkdir -p "$destino"
+    install -m 755 "$temporal/ssh_fzf" "$destino/ssh_fzf"
+    printf 'Instalado: %s/ssh_fzf\n' "$destino"
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "Para usar ssh_fzf necesitas instalar fzf."
+    fi
+)
+
 OPTIONS=(
   "locip — Locate IPs from the CLI"
   "trafico — Configurable traffic simulator for a specific target"
@@ -28,7 +54,7 @@ commands=(
   "go install github.com/4rji/binarios-go/trafico/cmd/traficoS@latest"
   "GO111MODULE=on go install github.com/4rji/binarios-go/sshc@latest"
   "go install github.com/projectdiscovery/cvemap/cmd/vulnx@latest"
-  "go install github.com/4rji/binarios-go/ssh_fzf@latest"
+  "install_ssh_fzf"
   "go install github.com/4rji/binarios-go/sitemirror@latest"
   "go install github.com/4rji/binarios-go/lanwatchgo@latest"
   "go install github.com/4rji/mann@latest"
