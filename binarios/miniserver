@@ -116,6 +116,12 @@ elif ! "$BIN" --version >/dev/null 2>&1; then
     install_miniserve
 fi
 
+# Arguments given -> pass them straight to miniserve, skip the menu
+if [[ $# -gt 0 ]]; then
+    miniserver1 "$@"
+    exit $?
+fi
+
 echo ""
 echo "Examples of usage:"
 echo ""
