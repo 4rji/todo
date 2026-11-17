@@ -292,7 +292,7 @@ gocom               Compila binarios Go; inicia go.mod en el root del repo y opc
 gocomm              Muestra comandos para un binario en go, muestra como hacerlo tambien
 nets                Comprueba el acceso a subnets en la variable allowips como wireguard.
 qemuagent           Habilita en proxmox los qemu agentes a todas las VMs
-miniserver          Abre un mini server http para subir o descargar, con authenticacion
+miniserver          Abre un mini server http para subir o descargar, con authenticacion. Detecta OS/arch y descarga el binario a /opt/4rji/bin si falta (pide sudo solo para instalar)
 webmonitor          Website que monitorea hping3 y inundaciones, apache, test, ddos
 kasm                Abre una pagina en kasm  kasm google.com ejemplo
 crontadd            Agrega tareas al cront para ejecutarse en tiempo

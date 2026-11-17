@@ -1,4 +1,15 @@
 {
+    "miniserver": {
+        "name": "miniserver",
+        "short_desc": "Runs miniserve (HTTP file server with upload/auth), auto-installing the right binary for the machine if missing.",
+        "detailed_desc": [
+            "Wrapper around svenstaro/miniserve, installed as /opt/4rji/bin/miniserver1.",
+            "If the binary is missing, or exists but does not run on this machine (wrong OS/arch), it detects OS and architecture with uname (macOS arm64/x86_64, Linux x86_64/aarch64/armv7/armv6), downloads the latest release from GitHub (falls back to v0.29.0) and installs it into /opt/4rji/bin.",
+            "sudo is requested only for that install step; if the binary is already there and works, it runs without sudo.",
+            "",
+            "Prompts: Enter serves ./ , 'u' serves with --upload-files, a number serves on that port."
+        ]
+    },
     "exiftoolinst": {
         "name": "exiftoolinst",
         "short_desc": "Installs exiftool-webtool and its metadata cleaning dependencies as a systemd service on Debian.",
