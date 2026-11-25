@@ -1,15 +1,15 @@
 {
-    "puertosmac": {
-        "name": "puertosmac",
+    "topp": {
+        "name": "topp",
         "short_desc": "Shows local macOS ports, processes, and traffic rates in a native window or the menu bar.",
         "detailed_desc": [
-            "Run puertosmac from Terminal. It requests sudo to read system-wide socket statistics with nettop.",
+            "Run topp from Terminal. It requests sudo to read system-wide socket statistics with nettop.",
             "The window groups local ports by protocol and PID and shows socket state and incoming and outgoing bytes per second.",
             "Process icons also appear in the menu bar summary. Click the info button beside a process in the window for its application, user, parent PID, start time, and executable path when available.",
-            "Click Puerto, Proceso, or Estado to sort. Rows keep their order during updates, new rows appear at the bottom, and changed values are highlighted.",
-            "Filter by port, process, or PID. Hide selected ports across processes and restore them from the Ocultos menu.",
+            "Click Port, Process, or State to sort. Rows keep their order during updates, new rows appear at the bottom, and changed values are highlighted.",
+            "Filter by port, process, or PID. Hide selected ports across processes and restore them from the Hidden menu.",
             "",
-            "Run puertosmac -d for a background menu bar icon. Click to open the window or right-click for the busiest visible ports and the quit action.",
+            "Run topp -d to see the busiest visible local port and its combined receive and send rate beside the clock. Traffic is summed across processes for each protocol and port number. Click to open the window or right-click for per-process traffic and the quit action.",
             "Without -d, closing the window quits the monitor."
         ]
     },

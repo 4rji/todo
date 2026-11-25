@@ -1,7 +1,9 @@
-// Build for the current Mac: swiftc -O static/puertosmac.swift -o puertosmac
+// Build for the current Mac: swiftc -O static/topp.swift -o topp
 import AppKit
 import SwiftUI
 import Darwin
+
+private let displayLocale = Locale(identifier: "en")
 
 struct Port: Hashable, Comparable {
     let transport: String
@@ -16,6 +18,13 @@ struct Port: Hashable, Comparable {
 struct Owner: Hashable {
     let port: Port
     let pid: Int
+}
+
+struct PortTraffic {
+    let port: Port
+    var rx = 0.0
+    var tx = 0.0
+    var total: Double { rx + tx }
 }
 
 struct Counter {
@@ -70,8 +79,7 @@ struct PortRow: Identifiable {
     var txText: String { hasRate ? rate(tx) : "—" }
 
     var state: String {
-        let labels = ["Listen": "En escucha", "Established": "Conectado", "Bound": "En uso"]
-        return states.map { labels[$0] ?? $0 }.sorted().joined(separator: " · ")
+        return states.map { $0 == "Listen" ? "Listening" : $0 }.sorted().joined(separator: " · ")
     }
 
     mutating func markChanges(since old: PortRow) {
@@ -181,7 +189,7 @@ func rate(_ value: Double) -> String {
     return String(format: index > 0 && amount < 10 ? "%.1f %@" : "%.0f %@", amount, units[index])
 }
 
-private let endOfSample = "--puertosmac-sample--"
+private let endOfSample = "--topp-sample--"
 
 // sudo authenticates on the caller's terminal before it backgrounds the sampler.
 // Only fixed system commands run as root. A closed output pipe ends the loop,
@@ -203,7 +211,7 @@ func startCollector() throws -> FileHandle {
     var waited: pid_t
     repeat { waited = waitpid(pid, &status, 0) } while waited == -1 && errno == EINTR
     guard waited == pid, status == 0 else {
-        throw LaunchError("sudo no pudo iniciar la lectura. Ejecutá puertosmac desde una terminal con una cuenta administradora.")
+        throw LaunchError("sudo could not start the monitor. Run topp from Terminal using an administrator account.")
     }
     return pipe.fileHandleForReading
 }
@@ -217,13 +225,27 @@ final class Monitor: ObservableObject {
     }
     @Published var selection = Set<Owner>()
     @Published var query = ""
-    @Published var status = "Leyendo los puertos…"
+    @Published var status = "Reading ports…"
     @Published var hidden: Set<String>
     var onChange: (() -> Void)?
+    // Keep hidden ports saved before the command was renamed to topp.
     private let defaults = UserDefaults(suiteName: "org.4rji.puertosmac")!
     init() { hidden = Set(defaults.stringArray(forKey: "hiddenPorts") ?? []) }
 
     var visible: [PortRow] { rows.filter { !hidden.contains($0.id.port.label) } }
+
+    var busiestPort: PortTraffic? {
+        var totals = [Port: PortTraffic]()
+        for row in visible where row.hasRate && row.activity > 0 {
+            let port = row.id.port
+            totals[port, default: PortTraffic(port: port)].rx += row.rx
+            totals[port, default: PortTraffic(port: port)].tx += row.tx
+        }
+        return totals.values.max {
+            if $0.total != $1.total { return $0.total < $1.total }
+            return $0.port > $1.port
+        }
+    }
 
     var busiest: [PortRow] {
         visible.sorted {
@@ -266,7 +288,7 @@ final class Monitor: ObservableObject {
                     sample.read(line)
                     continue
                 }
-                guard sample.hasHeader else { diagnostic = "Formato de nettop desconocido."; break }
+                guard sample.hasHeader else { diagnostic = "Unrecognized nettop output format."; break }
                 let now = ProcessInfo.processInfo.systemUptime
                 var interval = now - lastTime
                 if let start = previous?.captureTime, let end = sample.captureTime {
@@ -274,7 +296,7 @@ final class Monitor: ObservableObject {
                     if interval < -86_300 { interval += 86_400 } // Midnight
                 }
                 let rows = sample.rates(since: previous, seconds: interval)
-                let note = previous == nil ? "Midiendo la velocidad…" : "Actualizado a las " + Self.clock.string(from: Date())
+                let note = previous == nil ? "Measuring traffic…" : "Updated at " + Self.clock.string(from: Date())
                 DispatchQueue.main.async {
                     self.applySample(rows)
                     self.status = note
@@ -284,7 +306,7 @@ final class Monitor: ObservableObject {
                 sample = Snapshot()
                 lastTime = now
             }
-            let message = diagnostic.isEmpty ? "La lectura se detuvo. Volvé a ejecutar puertosmac desde la terminal." : diagnostic
+            let message = diagnostic.isEmpty ? "Monitoring stopped. Run topp again from Terminal." : diagnostic
             DispatchQueue.main.async {
                 self.applySample([:])
                 self.status = message
@@ -295,6 +317,7 @@ final class Monitor: ObservableObject {
 
     private static let clock: DateFormatter = {
         let f = DateFormatter()
+        f.locale = displayLocale
         f.timeStyle = .medium
         return f
     }()
@@ -371,20 +394,20 @@ private struct ProcessDetails: View {
                 let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
                     ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
                     ?? bundle.bundleURL.deletingPathExtension().lastPathComponent
-                field("Aplicación", name)
-                if let id = bundle.bundleIdentifier { field("Identificador", id) }
+                field("Application", name)
+                if let id = bundle.bundleIdentifier { field("Bundle ID", id) }
             }
             if let uid = row.metadata.user {
                 let name = getpwuid(uid).map { String(cString: $0.pointee.pw_name) }
-                field("Usuario", name.map { "\($0) (UID \(uid))" } ?? "UID \(uid)")
+                field("User", name.map { "\($0) (UID \(uid))" } ?? "UID \(uid)")
             }
             if let parent = row.metadata.parent {
-                field("Proceso padre", "PID \(parent)")
+                field("Parent process", "PID \(parent)")
             }
             if let start = row.metadata.started {
-                field("Inicio", start.formatted(date: .abbreviated, time: .standard))
+                field("Started", start.formatted(Date.FormatStyle(date: .abbreviated, time: .standard, locale: displayLocale)))
             }
-            field("Ejecutable", artwork.executable ?? "Ruta no disponible")
+            field("Executable", artwork.executable ?? "Path unavailable")
         }
         .font(.callout).padding(14).frame(width: 380, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -410,7 +433,7 @@ private struct ProcessInfoButton: NSViewRepresentable {
             coordinator.popover?.close()
         }
         coordinator.row = row
-        let label = "Información de \(row.process) (PID \(row.id.pid))"
+        let label = "Process information for \(row.process) (PID \(row.id.pid))"
         button.toolTip = label
         button.setAccessibilityLabel(label)
     }
@@ -457,32 +480,32 @@ struct PortWindow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Filtrar por puerto, proceso o PID", text: $monitor.query)
+                TextField("Filter by port, process, or PID", text: $monitor.query)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 340)
                 Spacer()
-                Button("Ocultar selección") {
+                Button("Hide Selected Ports") {
                     let selected = matches.filter { monitor.selection.contains($0.id) }.map { $0.id.port.label }
                     monitor.saveHidden(monitor.hidden.union(selected))
                     monitor.selection.removeAll()
                 }
                 .disabled(!matches.contains { monitor.selection.contains($0.id) })
-                .help("Oculta estos puertos y protocolos para todos los procesos.")
-                Menu("Ocultos (\(monitor.hidden.count))") {
+                .help("Hide the selected ports and protocols for all processes.")
+                Menu("Hidden (\(monitor.hidden.count))") {
                     ForEach(monitor.hidden.sorted(), id: \.self) { port in
-                        Button("Mostrar \(port)") { monitor.saveHidden(monitor.hidden.subtracting([port])) }
+                        Button("Show \(port)") { monitor.saveHidden(monitor.hidden.subtracting([port])) }
                     }
                     Divider()
-                    Button("Mostrar todos") { monitor.saveHidden([]) }
+                    Button("Show All") { monitor.saveHidden([]) }
                 }
                 .fixedSize()
                 .disabled(monitor.hidden.isEmpty)
             }.padding(12)
             Divider()
             Table(matches, selection: $monitor.selection, sortOrder: $monitor.sortOrder) {
-                TableColumn("Puerto", value: \.id.port.number) { Text(String($0.id.port.number)).monospacedDigit() }.width(65)
-                TableColumn("Protocolo") { Text($0.id.port.transport) }.width(65)
-                TableColumn("Proceso", value: \.process) { row in
+                TableColumn("Port", value: \.id.port.number) { Text(String($0.id.port.number)).monospacedDigit() }.width(65)
+                TableColumn("Protocol") { Text($0.id.port.transport) }.width(65)
+                TableColumn("Process", value: \.process) { row in
                     HStack(spacing: 4) {
                         Image(nsImage: ProcessArtwork.forRow(row).icon)
                             .resizable().scaledToFit().frame(width: 18, height: 18).accessibilityHidden(true)
@@ -492,13 +515,15 @@ struct PortWindow: View {
                     }
                 }.width(min: 145, ideal: 200)
                 TableColumn("PID") { Text(String($0.id.pid)).monospacedDigit() }.width(65)
-                TableColumn("Estado", value: \.state) { cell($0.state, changed: $0.changed.contains(.state)) }.width(min: 95, ideal: 140)
-                TableColumn("↓ Entrada") { cell($0.rxText, changed: $0.changed.contains(.rx)).monospacedDigit() }.width(89)
-                TableColumn("↑ Salida") { cell($0.txText, changed: $0.changed.contains(.tx)).monospacedDigit() }.width(89)
+                TableColumn("State", value: \.state) { cell($0.state, changed: $0.changed.contains(.state)) }.width(min: 95, ideal: 140)
+                TableColumn("↓ Inbound") { cell($0.rxText, changed: $0.changed.contains(.rx)).monospacedDigit() }.width(89)
+                TableColumn("↑ Outbound") { cell($0.txText, changed: $0.changed.contains(.tx)).monospacedDigit() }.width(89)
             }
             Divider()
             HStack {
-                Text("\(Set(matches.map { $0.id.port }).count) puertos · \(Set(matches.map { $0.id.pid }).count) procesos")
+                let portCount = Set(matches.map { $0.id.port }).count
+                let processCount = Set(matches.map { $0.id.pid }).count
+                Text("\(portCount) \(portCount == 1 ? "port" : "ports") · \(processCount) \(processCount == 1 ? "process" : "processes")")
                 Spacer()
                 Text(monitor.status).lineLimit(2)
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 7)
@@ -521,15 +546,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let main = NSMenu()
         let appMenu = NSMenu()
-        add("Salir de Puertos", to: appMenu, action: #selector(quit), key: "q")
-        main.addItem(withTitle: "Puertos", action: nil, keyEquivalent: "").submenu = appMenu
-        let edit = NSMenu(title: "Edición")
-        for (label, key, action) in [("Cortar", "x", "cut:"), ("Copiar", "c", "copy:"), ("Pegar", "v", "paste:"), ("Seleccionar todo", "a", "selectAll:")] {
+        add("Quit topp", to: appMenu, action: #selector(quit), key: "q")
+        main.addItem(withTitle: "topp", action: nil, keyEquivalent: "").submenu = appMenu
+        let edit = NSMenu(title: "Edit")
+        for (label, key, action) in [("Cut", "x", "cut:"), ("Copy", "c", "copy:"), ("Paste", "v", "paste:"), ("Select All", "a", "selectAll:")] {
             edit.addItem(withTitle: label, action: NSSelectorFromString(action), keyEquivalent: key)
         }
         main.addItem(withTitle: edit.title, action: nil, keyEquivalent: "").submenu = edit
-        let windows = NSMenu(title: "Ventana")
-        windows.addItem(withTitle: "Cerrar ventana", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let windows = NSMenu(title: "Window")
+        windows.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         main.addItem(withTitle: windows.title, action: nil, keyEquivalent: "").submenu = windows
         NSApp.mainMenu = main
 
@@ -537,12 +562,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             item = status
             if let button = status.button {
-                button.image = NSImage(systemSymbolName: "network", accessibilityDescription: "Puertos de red")
+                button.image = NSImage(systemSymbolName: "network", accessibilityDescription: "topp")
+                button.imagePosition = .imageLeading
+                button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
                 button.target = self
                 button.action = #selector(clickStatus)
                 button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             }
-            add("Abrir ventana", to: summary, action: #selector(openWindow))
+            add("Open Window", to: summary, action: #selector(openWindow))
             summary.addItem(.separator())
             for _ in 0..<10 {
                 let line = NSMenuItem()
@@ -552,7 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 trafficItems.append(line)
             }
             summary.addItem(.separator())
-            add("Salir de Puertos", to: summary, action: #selector(quit))
+            add("Quit topp", to: summary, action: #selector(quit))
             summary.delegate = self
             monitor.onChange = { [weak self] in self?.updateStatusItem() }
             updateStatusItem()
@@ -571,7 +598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let w = NSWindow(contentRect: NSMakeRect(0, 0, 920, 520),
                              styleMask: [.titled, .resizable, .closable, .miniaturizable],
                              backing: .buffered, defer: false)
-            w.title = "Puertos de red"
+            w.title = "topp · Network Ports"
             w.contentView = NSHostingView(rootView: PortWindow(monitor: monitor))
             w.setContentSize(NSSize(width: 920, height: 520))
             w.contentMinSize = NSSize(width: 800, height: 320)
@@ -621,7 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if rows.isEmpty, let item = trafficItems.first {
             item.image = nil
             item.attributedTitle = nil
-            item.title = monitor.rows.isEmpty ? monitor.status : "Todos los puertos están ocultos"
+            item.title = monitor.rows.isEmpty ? monitor.status : "All ports are hidden"
             item.isHidden = false
         }
     }
@@ -641,11 +668,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateStatusItem() {
-        let top = monitor.busiest.first
-        let active = top.flatMap { $0.activity > 0 ? $0 : nil }
-        item?.button?.title = active.map { " \($0.id.port.number)" } ?? ""
-        item?.button?.imagePosition = .imageLeading
-        item?.button?.toolTip = [top.map { detail($0).string } ?? monitor.status, "Clic para abrir · Clic derecho para ver tráfico"].joined(separator: "\n")
+        guard let button = item?.button else { return }
+        let hint: String
+        if let top = monitor.busiestPort {
+            button.title = " \(top.port.label) · \(rate(top.total))"
+            hint = "\(top.port.label)   ↓ \(rate(top.rx))   ↑ \(rate(top.tx))"
+        } else {
+            button.title = " —"
+            hint = monitor.rows.contains(where: \.hasRate) ? "No traffic on visible ports" : monitor.status
+        }
+        button.toolTip = hint + "\nClick to open · Right-click for traffic"
+        button.setAccessibilityLabel("topp · " + hint)
         if trackingMenu { updateSummary() }
     }
 
@@ -702,28 +735,28 @@ func runWindow(menuMode: Bool) {
 }
 
 let usage = """
-Uso: puertosmac [-d]
-  Sin opciones   Abre la ventana. Cerrarla termina el monitor.
-  -d             Devuelve la terminal y deja un icono en la barra de menús.
-                 Clic para abrir la ventana. Clic derecho para ver tráfico o salir.
-  -h, --help     Muestra esta ayuda.
+Usage: topp [-d]
+  No options     Open the window. Closing it quits topp.
+  -d             Show the busiest port and its total traffic rate in the menu bar.
+                 Click to open the window. Right-click to view traffic or quit.
+  -h, --help     Show this help.
 """
 let args = Array(CommandLine.arguments.dropFirst())
 do {
     if args == ["--help"] || args == ["-h"] { print(usage); exit(0) }
     if args == ["--menu-stream"], isatty(STDIN_FILENO) == 0 { runWindow(menuMode: true); exit(0) }
     guard args.isEmpty || args == ["-d"] else { throw LaunchError(usage) }
-    guard geteuid() != 0 else { throw LaunchError("Ejecutá puertosmac con tu usuario. La herramienta solicita sudo internamente.") }
+    guard geteuid() != 0 else { throw LaunchError("Run topp as your regular user. It requests sudo when needed.") }
     let input = try startCollector()
     if args == ["-d"] {
-        guard let path = Bundle.main.executableURL?.path else { throw LaunchError("No se encontró el ejecutable.") }
+        guard let path = Bundle.main.executableURL?.path else { throw LaunchError("Could not find the topp executable.") }
         _ = try spawn([path, "--menu-stream"], input: input.fileDescriptor, detached: true)
-        print("Puertos está en la barra de menús. Clic para abrir, clic derecho para ver el tráfico o salir.")
+        print("topp is running in the menu bar. Click to open the window, or right-click to view traffic or quit.")
     } else {
-        guard dup2(input.fileDescriptor, STDIN_FILENO) >= 0 else { throw LaunchError("No se pudo abrir la lectura de nettop.") }
+        guard dup2(input.fileDescriptor, STDIN_FILENO) >= 0 else { throw LaunchError("Could not open the nettop data stream.") }
         runWindow(menuMode: false)
     }
 } catch {
-    FileHandle.standardError.write(Data(("puertosmac: " + error.localizedDescription + "\n").utf8))
+    FileHandle.standardError.write(Data(("topp: " + error.localizedDescription + "\n").utf8))
     exit(1)
 }

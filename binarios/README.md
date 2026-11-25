@@ -350,7 +350,7 @@ wgcomm              Algunos comandos de wireguard
 pingtime            Ping para verificar si host esta online o no cada 5 segundos o -t #
 sshbaner            de neofinst2 - crea un mensaje de bienvenida de ssh Despues logearse
 portmonitor         Monitorea cuando un puerto se abre, puerto abierto o cerrado. 
-puertosmac          Shows local macOS ports, processes, and live traffic in a window or the menu bar (-d).
+topp                Shows local macOS ports and processes, with the busiest port and its live traffic rate in the menu bar (-d).
 picoduckytool       Para formatear raspberri pico, se necesito el github en el mio
 dor                 Disables automatic lock, screensaver, and sleep, then restores the previous state on demand
 
