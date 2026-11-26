@@ -1,4 +1,15 @@
 {
+    "latexinst": {
+        "name": "latexinst",
+        "short_desc": "Installs LaTeX on macOS or Linux after you press Enter.",
+        "detailed_desc": [
+            "Press Enter to start the installation or Ctrl+C to cancel.",
+            "",
+            "On macOS, installs MacTeX without GUI applications using Homebrew.",
+            "On Linux, installs TeX Live using apt-get, dnf, or pacman.",
+            "Prints the pdfLaTeX version to verify the installation."
+        ]
+    },
     "topp": {
         "name": "topp",
         "short_desc": "Shows local macOS ports, processes, and traffic rates in a native window or the menu bar.",

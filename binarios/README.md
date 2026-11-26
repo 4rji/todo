@@ -143,6 +143,7 @@ lolcatinst          Instala gem, ruby y lolcat
 
 
 ###------instaladores
+latexinst           Installs LaTeX on macOS or Linux after you press Enter.
 alfainst            Installs or updates the rtl8812au DKMS driver for Alfa Wi-Fi adapters.
 networktools        herramientas de network como ping, fping, instala y muestra
 vagraninst          Para instalar vagrant en linux agregando apt list

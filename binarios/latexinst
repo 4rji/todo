@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -e
+
+cyan='' green='' reset=''
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+    cyan=$'\033[1;36m'
+    green=$'\033[1;32m'
+    reset=$'\033[0m'
+fi
+
+printf '%sLaTeX will be installed.%s Press Enter to continue or Ctrl+C to cancel.\n' "$cyan" "$reset"
+IFS= read -r
+
+case "$(uname -s)" in
+    Darwin)
+        brew install --cask mactex-no-gui
+        export PATH="/Library/TeX/texbin:$PATH"
+        ;;
+
+    Linux)
+        if command -v apt-get >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y texlive-full
+        elif command -v dnf >/dev/null; then
+            sudo dnf install -y texlive-scheme-full
+        elif command -v pacman >/dev/null; then
+            sudo pacman -S --needed --noconfirm texlive
+        else
+            echo "Unsupported Linux distribution"
+            exit 1
+        fi
+        ;;
+
+    *)
+        echo "Unsupported operating system"
+        exit 1
+        ;;
+esac
+
+pdflatex --version
+printf '%sLaTeX installed successfully.%s\n' "$green" "$reset"
