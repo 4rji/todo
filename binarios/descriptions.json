@@ -72,15 +72,15 @@
     },
     "goinst": {
         "name": "goinst",
-        "short_desc": "Builds selected Go tools and installs their binaries in /opt/4rji/bin using sudo.",
+        "short_desc": "Installs selected Go tools in /opt/4rji/bin. The Spanish menu switches to English with Shift+E.",
         "detailed_desc": [
-            "Shows an interactive menu to install locip, trafico, traficoS, sshc, vulnx, ssh_fzf, sitemirror, lanwatchgo, mann, autoteclado or systemd-persist-audit.",
+            "Select a tool by number and press Enter. Press Shift+E to toggle all menu descriptions between Spanish and English.",
             "",
             "Builds tools in a temporary GOBIN directory and installs generated executables in /opt/4rji/bin with permissions 755.",
             "Creates the destination directory when needed and uses sudo for installation unless already running as root.",
             "Removes the temporary binaries on exit.",
             "",
-            "Most tools use go install with @latest; ssh_fzf is built directly from its Git repository and requires git.",
+            "Downloads the selected source from GitHub. The Nmap frontend is installed as nmapx. The VirusTotal entry pins the last revision containing the requested main3.go curl client.",
             "Installing systemd-persist-audit also builds and installs fzf when it is missing from PATH.",
             "Requires Go and network access. Add /opt/4rji/bin to PATH to run the installed tools by name."
         ]

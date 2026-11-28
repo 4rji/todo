@@ -1,243 +1,207 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo_msg() {
-    echo "=============================================="
-    echo "$1"
-    echo "=============================================="
+language=es
+bins=()
+descriptions_es=()
+descriptions_en=()
+add_tool() {
+    bins+=("$1")
+    descriptions_es+=("$2")
+    descriptions_en+=("$3")
 }
 
-# ssh_fzf aún no publica un módulo Go; compilar el archivo directamente.
-install_ssh_fzf() (
-    set -euo pipefail
-    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
-    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
+# Preserve selection numbers for the existing tools.
+add_tool locip 'Geolocaliza direcciones IP desde la terminal.' 'Look up IP geolocation from the command line.'
+add_tool trafico 'Simula tráfico HTTP/HTTPS hacia un destino configurable.' 'Simulate HTTP/HTTPS traffic to a configurable target.'
+add_tool traficoS 'Simula tráfico HTTPS hacia dominios predefinidos.' 'Simulate HTTPS traffic to predefined domains.'
+add_tool sshc 'Ejecuta el mismo comando en varios hosts SSH.' 'Run the same command across multiple SSH hosts.'
+add_tool vulnx 'Consulta los productos y versiones afectados por una CVE.' 'Look up products and versions affected by a CVE.'
+add_tool ssh_fzf 'Selecciona hosts SSH con fzf y consulta su estado y diagnósticos de red.' 'Select SSH hosts with fzf and preview their status and network diagnostics.'
+add_tool sitemirror 'Descarga un sitio web y crea una copia local con Colly.' 'Crawl a website with Colly and save a local copy.'
+add_tool lanwatchgo 'Monitoriza la LAN con ping y ARP, historial JSON y panel web.' 'Monitor the LAN using ping and ARP, JSON history, and a web dashboard.'
+add_tool mann 'Busca comandos de administración y red en un catálogo interactivo.' 'Search an interactive catalog of system administration and networking commands.'
+add_tool autoteclado 'Simula tecleo y movimientos del ratón con pausas aleatorias.' 'Simulate typing and mouse movements with randomized delays.'
+add_tool systemd-persist-audit 'Audita persistencia en systemd con puntuación de riesgo, JSON y modo interactivo.' 'Audit systemd persistence with risk scores, JSON output, and interactive browsing.'
+add_tool backd 'Muestra procesos con conexiones de red activas.' 'Show processes with active network connections.'
+add_tool chismes 'Monitoriza la red con tcpdump y tshark.' 'Monitor network traffic with tcpdump and tshark.'
+add_tool dominf 'Inspecciona DNS, PTR, TLS, posibles IP de origen, AXFR y subdominios.' 'Inspect DNS, PTR, TLS, potential origin IPs, zone transfers, and subdomains.'
+add_tool encriptar 'Cifra y descifra archivos .enc con contraseña o archivo de clave.' 'Encrypt and decrypt .enc files using a password or key file.'
+add_tool grubprotect 'Guarda una copia base de GRUB, detecta cambios y la restaura en Linux.' 'Snapshot GRUB files, detect changes, and restore the baseline on Linux.'
+add_tool honeypot 'Simula servicios de alta interacción con Beelzebub y sus módulos de IA.' 'Simulate high-interaction services with Beelzebub and its AI plugins.'
+add_tool liveserver-html-hotreload 'Abre un HTML en Chromium y lo recarga cada vez que se guarda.' 'Open an HTML file in Chromium and reload it whenever it is saved.'
+add_tool nmapx 'Gestiona escaneos de Nmap sobre un CIDR desde una TUI y genera un informe HTML.' 'Run Nmap scans across a CIDR from a terminal UI and generate an HTML report.'
+add_tool receiver 'Guarda cada conexión TCP en un archivo numerado. Puerto por defecto 1235.' 'Save each TCP connection to a numbered file. Default port 1235.'
+add_tool sandfly-processdecloak 'Detecta procesos ocultos por rootkits del kernel de Linux.' 'Detect processes hidden by Linux kernel rootkits.'
+add_tool snifferip 'Captura ICMP con un socket raw y muestra protocolo, IP de origen y destino.' 'Capture ICMP with a raw socket and display the protocol and source and destination IPs.'
+add_tool sshendless 'Retiene bots SSH enviando un banner sin fin.' 'Keep SSH bots connected by sending an endless banner.'
+add_tool tun2socks 'Conecta una interfaz TUN a un proxy SOCKS o HTTP.' 'Route a TUN interface through a SOCKS or HTTP proxy.'
+add_tool virus_total 'Consulta la reputación de IP en VirusTotal con curl y VT_API_KEY.' 'Check IP reputation on VirusTotal using curl and VT_API_KEY.'
+add_tool voice-tool 'Convierte texto a MP3 con voces de OpenAI y perfiles integrados.' 'Convert text to MP3 using OpenAI voices and embedded profiles.'
+add_tool zeektest 'Consulta eventos DNS de Zeek en Elasticsearch y muestra sus campos clave.' 'Query Zeek DNS events in Elasticsearch and display key fields.'
 
-    temporal=$(mktemp -d)
-    trap 'rm -rf -- "$temporal"' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
+msg() {
+    if [[ $language == es ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi
+}
 
-    git clone --depth 1 https://github.com/4rji/binarios-go.git "$temporal/repo"
-    destino=$(go env GOBIN)
-    if [ -z "$destino" ]; then
-        gopath=$(go env GOPATH)
-        destino="${gopath%%:*}/bin"
+show_menu() {
+    local i
+    local -a descriptions
+    if [[ $language == es ]]; then
+        descriptions=("${descriptions_es[@]}")
+    else
+        descriptions=("${descriptions_en[@]}")
     fi
-    go build -o "$temporal/ssh_fzf" "$temporal/repo/ssh_fzf/ssh_fzf.go"
-    mkdir -p "$destino"
-    install -m 755 "$temporal/ssh_fzf" "$destino/ssh_fzf"
-    printf 'Instalado: %s/ssh_fzf\n' "$destino"
-    if ! command -v fzf >/dev/null 2>&1; then
-        echo "Para usar ssh_fzf necesitas instalar fzf."
+    printf '\n\033[1;35m%s\033[0m\n\n' "$(msg 'Instaladores disponibles' 'Available installers')"
+    for i in "${!bins[@]}"; do
+        printf ' %2d) \033[36m%s\033[0m — %s\n' "$((i + 1))" "${bins[i]}" "${descriptions[i]}"
+    done
+    printf ' %2d) %s\n\n' "$((${#bins[@]} + 1))" "$(msg 'Salir' 'Quit')"
+    msg 'Elige un número y pulsa Enter (Shift+E para inglés): ' 'Choose a number and press Enter (Shift+E for Spanish): '
+}
+
+choose_tool() {
+    local choice='' key quit=$((${#bins[@]} + 1))
+    while :; do
+        show_menu
+        if [[ -t 0 ]]; then
+            printf '%s' "$choice"
+            while :; do
+                IFS= read -rsn1 key || exit 1
+                case $key in
+                    ''|E) break ;;
+                    $'\177'|$'\b')
+                        if [[ -n $choice ]]; then
+                            choice=${choice%?}
+                            printf '\b \b'
+                        fi ;;
+                    *) choice+=$key; printf '%s' "$key" ;;
+                esac
+            done
+        else
+            key=''
+            IFS= read -r choice || [[ -n $choice ]] || exit 1
+            if [[ $choice == E ]]; then key=E; choice=''; fi
+        fi
+        printf '\n'
+        if [[ $key != E ]]; then break; fi
+        if [[ $language == es ]]; then language=en; else language=es; fi
+        if [[ -t 1 ]]; then printf '\033[2J\033[H'; fi
+    done
+    if [[ ! $choice =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$(msg 'Selección inválida.' 'Invalid selection.')" >&2
+        exit 1
     fi
-)
-
-# backd vive en github.com/4rji/backd y no trae go.mod en la raíz;
-# clonar, inicializar el módulo si falta y compilar.
-install_backd() (
-    set -euo pipefail
-    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
-    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
-
-    temporal=$(mktemp -d)
-    trap 'rm -rf -- "$temporal"' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-
-    git clone --depth 1 https://github.com/4rji/backd.git "$temporal/repo"
-    destino=$(go env GOBIN)
-    if [ -z "$destino" ]; then
-        gopath=$(go env GOPATH)
-        destino="${gopath%%:*}/bin"
+    # Strip leading zeros before checking length and converting to a number.
+    choice=${choice#"${choice%%[!0]*}"}
+    if [[ -z $choice ]] || (( ${#choice} > ${#quit} || choice > quit )); then
+        printf '%s\n' "$(msg 'Selección fuera de rango.' 'Selection out of range.')" >&2
+        exit 1
     fi
-    cd "$temporal/repo"
-    if [ ! -f go.mod ]; then
+    if (( choice == quit )); then exit 0; fi
+    idx=$((choice - 1))
+}
+
+# Fetch just the selected project, including forks with upstream module names.
+checkout_source() {
+    local repo=$1 directory=$2 ref=$3
+    git init -q "$work/source"
+    cd "$work/source"
+    git remote add origin "https://github.com/4rji/$repo.git"
+    git fetch -q --depth=1 --filter=blob:none origin "$ref"
+    if [[ $directory != . ]]; then
+        git sparse-checkout set --no-cone "/$directory/"
+    fi
+    git checkout -q --detach FETCH_HEAD
+    cd "$directory"
+}
+
+build_tool() {
+    local repo=binarios-go directory=$bin ref=main target=.
+    case $bin in
+        locip|mann) go install "github.com/4rji/$bin@latest"; return ;;
+        vulnx) go install github.com/projectdiscovery/cvemap/cmd/vulnx@latest; return ;;
+        backd|chismes) repo=$bin; directory=.; ref=HEAD ;;
+        trafico|traficoS) directory=trafico; target="./cmd/$bin" ;;
+        nmapx) directory=nmap ;;
+        ssh_fzf|grubprotect|zeektest) target="$bin.go" ;;
+        snifferip) target=icmp.go ;;
+        virus_total)
+            # Last revision before the requested curl client was removed from main.
+            ref=321f50d3be1576790a03d9c8c424bb63125fbcd2
+            target=main3.go ;;
+    esac
+    checkout_source "$repo" "$directory" "$ref"
+    if [[ $bin == backd && ! -f go.mod ]]; then
         go mod init github.com/4rji/backd
         go mod tidy
     fi
-    go build -o "$temporal/backd" .
-    mkdir -p "$destino"
-    install -m 755 "$temporal/backd" "$destino/backd"
-    printf 'Instalado: %s/backd\n' "$destino"
-)
-
-# chismes: compilar desde el repo clonado (no depende del path del módulo).
-install_chismes() (
-    set -euo pipefail
-    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
-    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
-
-    temporal=$(mktemp -d)
-    trap 'rm -rf -- "$temporal"' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-
-    git clone --depth 1 https://github.com/4rji/chismes.git "$temporal/repo"
-    destino=$(go env GOBIN)
-    if [ -z "$destino" ]; then
-        gopath=$(go env GOPATH)
-        destino="${gopath%%:*}/bin"
+    if [[ $bin == tun2socks ]]; then
+        # This fork's gVisor dependency needs Go 1.25 build constraints.
+        CGO_ENABLED=0 GOTOOLCHAIN=go1.25.12 go build -o "$GOBIN/$bin" "$target"
+    else
+        go build -o "$GOBIN/$bin" "$target"
     fi
-    cd "$temporal/repo"
-    go build -o "$temporal/chismes" .
-    mkdir -p "$destino"
-    install -m 755 "$temporal/chismes" "$destino/chismes"
-    printf 'Instalado: %s/chismes\n' "$destino"
-    for herramienta in tcpdump tshark; do
-        if ! command -v "$herramienta" >/dev/null 2>&1; then
-            echo "Para usar chismes necesitas instalar $herramienta."
-        fi
-    done
-)
+    if [[ $bin == systemd-persist-audit ]] && ! command -v fzf >/dev/null; then
+        go install github.com/junegunn/fzf@latest
+    fi
+}
 
-OPTIONS=(
-  "locip — Locate IPs from the CLI"
-  "trafico — Configurable traffic simulator for a specific target"
-  "traficoS — HTTPS simulator with predefined domains"
-  "sshc — Run same command across every host (module mode enabled)"
-  "vulnx — Map CVEs to affected products and versions"
-  "ssh_fzf — SSH selector using fzf"
-  "sitemirror — Download websites and create a local copy"
-  "lanwatchgo — Detect network changes and devices"
-  "mann — Install github.com/4rji/mann"
-  "autoteclado — Install github.com/4rji/binarios-go/autoteclado"
-  "systemd-persist-audit — Audit systemd persistence with risk-sorted views"
-  "backd — Show processes with active network connections (github.com/4rji/backd)"
-  "chismes — Watch the network with tcpdump/tshark (github.com/4rji/chismes)"
-  "Quit"
-)
-
-commands=(
-  "go install github.com/4rji/locip@latest"
-  "go install github.com/4rji/binarios-go/trafico/cmd/trafico@latest"
-  "go install github.com/4rji/binarios-go/trafico/cmd/traficoS@latest"
-  "GO111MODULE=on go install github.com/4rji/binarios-go/sshc@latest"
-  "go install github.com/projectdiscovery/cvemap/cmd/vulnx@latest"
-  "install_ssh_fzf"
-  "go install github.com/4rji/binarios-go/sitemirror@latest"
-  "go install github.com/4rji/binarios-go/lanwatchgo@latest"
-  "go install github.com/4rji/mann@latest"
-  "go install github.com/4rji/binarios-go/autoteclado@latest"
-  "go install github.com/4rji/binarios-go/systemd-persist-audit@latest && if ! command -v fzf >/dev/null 2>&1; then go install github.com/junegunn/fzf@latest; fi"
-  "install_backd"
-  "install_chismes"
-)
-
-bins=(
-  "locip"
-  "trafico"
-  "traficoS"
-  "sshc"
-  "vulnx"
-  "ssh_fzf"
-  "sitemirror"
-  "lanwatchgo"
-  "mann"
-  "autoteclado"
-  "systemd-persist-audit"
-  "backd"
-  "chismes"
-)
-
-echo ""
-echo "_________________________________________________________"
-echo ""
-
-echo_msg "$(printf '\033[1;35m%s\033[0m' 'Available installers')"
-
-echo ""
-for i in "${!OPTIONS[@]}"; do
-  num=$((i+1))
-  printf "\033[1;37m  %2d)\033[0m  \033[36m%s\033[0m\n\n" "$num" "${OPTIONS[i]}"
-done
-
-echo ""
-echo "_________________________________________________________"
-echo ""
-
-read -r -p "$(printf '\033[33mChoose installer number (1-%d) and press Enter:\033[0m ' "${#OPTIONS[@]}")" choice
-echo ""
-echo "_________________________________________________________"
-echo ""
-
-if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-  printf "\033[31mInvalid selection.\033[0m\n\n"; exit 1
-fi
-
-if (( choice < 1 || choice > ${#OPTIONS[@]} )); then
-  printf "\033[31mSelection out of range.\033[0m\n\n"; exit 1
-fi
-
-if (( choice == ${#OPTIONS[@]} )); then
-  echo_msg "$(printf '\033[1;34m%s\033[0m' 'Quit selected')"
-  echo ""
-  exit 0
-fi
-
-idx=$((choice-1))
-cmd="${commands[idx]}"
-bin="${bins[idx]}"
-
-echo_msg "$(printf '\033[1;35m%s\033[0m' 'Description')"
-
-case $idx in
-  0) echo -e "  \033[36mLocate IPs from the CLI.\033[0m" ;;
-  1) echo -e "  \033[36mConfigurable traffic simulator for a specific target.\033[0m" ;;
-  2) echo -e "  \033[36mHTTPS simulator with predefined domains.\033[0m" ;;
-  3) echo -e "  \033[36mRun the same command across multiple hosts.\033[0m" ;;
-  4) echo -e "  \033[36mMap CVEs to affected products and versions.\033[0m" ;;
-  5) echo -e "  \033[36mInteractive SSH host selector using fzf.\033[0m" ;;
-  6) echo -e "  \033[36mDownload websites and create a local copy.\033[0m" ;;
-  7) echo -e "  \033[36mDetect network changes and devices; run with lanwatchgo serve.\033[0m" ;;
-  8) echo -e "  \033[36mInstall mann from github.com/4rji/mann.\033[0m" ;;
-  9) echo -e "  \033[36mInstall autoteclado from github.com/4rji/binarios-go/autoteclado.\033[0m" ;;
-  10) echo -e "  \033[36mRead-only systemd persistence audit with color, fzf, and a built-in menu.\033[0m" ;;
-  11) echo -e "  \033[36mLive list of processes with network connections; drill in, watch I/O, kill.\033[0m" ;;
-  12) echo -e "  \033[36mNetwork watcher using tcpdump and tshark; needs both installed.\033[0m" ;;
+choose_tool
+bin=${bins[idx]}
+case $bin in
+    grubprotect|sandfly-processdecloak)
+        if [[ $(uname -s) != Linux ]]; then
+            printf '%s\n' "$(msg 'Esta herramienta requiere Linux.' 'This tool requires Linux.')" >&2
+            exit 1
+        fi ;;
 esac
+printf '\n%s %s\n' "$(msg 'Instalando' 'Installing')" "$bin"
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+export GOBIN="$work/bin"
+export GOWORK=off
+export GO111MODULE=on
+mkdir -p "$GOBIN"
+build_tool
 
-echo ""
-echo "_________________________________________________________"
-echo ""
-
-echo_msg "$(printf '\033[1;35m%s\033[0m' 'Running')"
-printf "  \033[32mInstalling: %s\033[0m\n\n" "$bin"
-
-# Compilar como usuario y usar sudo solamente para instalar los ejecutables.
-(
-  set -euo pipefail
-  temporal_bin=$(mktemp -d)
-  trap 'rm -rf -- "$temporal_bin"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  export GOBIN="$temporal_bin"
-
-  eval "$cmd"
-
-  if [ ! -x "$GOBIN/$bin" ]; then
-    printf 'No se generó el binario esperado: %s\n' "$bin" >&2
+if [[ ! -x $GOBIN/$bin ]]; then
+    printf '%s %s\n' "$(msg 'Falta el ejecutable' 'Missing executable')" "$bin" >&2
     exit 1
-  fi
-
-  if (( EUID == 0 )); then
-    mkdir -p /opt/4rji/bin
-    install -m 755 "$GOBIN/"* /opt/4rji/bin/
-  else
-    sudo mkdir -p /opt/4rji/bin
-    sudo install -m 755 "$GOBIN/"* /opt/4rji/bin/
-  fi
-  printf 'Instalado: /opt/4rji/bin/%s\n' "$bin"
-)
-
-if (( idx == 7 )); then
-  echo ""
-  echo -e "  \033[36mPara ejecutarlo, usa: lanwatchgo serve 0.0.0.0\033[0m"
 fi
 
-echo ""
-echo "_________________________________________________________"
-echo ""
+# Build unprivileged. Elevate only the final copy, as in the original installer.
+as_root() {
+    if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
+}
 
-echo_msg "$(printf '\033[1;35m%s\033[0m' 'Done')"
-echo ""
+dest=/opt/4rji/bin
+as_root mkdir -p "$dest"
+if [[ $bin == honeypot ]]; then
+    examples=/opt/4rji/share/honeypot/examples
+    as_root mkdir -p "$examples/services"
+    as_root install -m 644 configurations/beelzebub.yaml "$examples/"
+    as_root install -m 644 configurations/services/*.yaml "$examples/services/"
+fi
+as_root install -m 755 "$GOBIN/"* "$dest/"
+printf '%s %s/%s\n' "$(msg 'Instalado en' 'Installed to')" "$dest" "$bin"
+
+case $bin in
+    honeypot)
+        printf '%s\n  %s\n' "$(msg 'Para usar la configuración de ejemplo:' 'To use the sample configuration:')" \
+            "honeypot -confCore $examples/beelzebub.yaml -confServices $examples/services" ;;
+    lanwatchgo) printf '%s\n' "$(msg 'Panel web local: lanwatchgo serve' 'Local web dashboard: lanwatchgo serve')" ;;
+    ssh_fzf|chismes|nmapx)
+        case $bin in
+            ssh_fzf) deps=(fzf) ;;
+            chismes) deps=(tcpdump tshark) ;;
+            nmapx) deps=(nmap) ;;
+        esac
+        for dep in "${deps[@]}"; do
+            if ! command -v "$dep" >/dev/null; then
+                printf '%s %s\n' "$(msg 'Dependencia de ejecución pendiente:' 'Missing runtime dependency:')" "$dep"
+            fi
+        done ;;
+esac
