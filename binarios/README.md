@@ -12,7 +12,7 @@ script for snmp netw07t
 ###-----Detecciones
 scan_folders        Analiza carpetas y repositorios Git en busca de secretos y datos sensibles; genera informes y permite ampliar el analisis con ClamAV, SBOM y CVEs.
 cvesinst            Installs Snyk, Grype, Syft, and jq and provides an interactive vulnerability scanning menu. `cvesinst SBOM.json TERM` searches SBOM components.
-lanwatchgo          Detecta cambios en la red, asi como dispositivos, ejecutar como server
+lanwatchgo          [en binarios-go] [goinst #8] Tracks LAN devices with ping and ARP, JSON history and a web dashboard.
 tmpnoexec           Cambia a noexec /tmp modificando el fstab
 decloak.py          Compares standard I/O and mmap contents with SHA-256, requests sudo automatically, and saves a private report.
 decloaktools        Compares a file through cat and mmap, saves both outputs, and prints investigation guidance.
@@ -29,7 +29,7 @@ ptysnoop.bt         Hace snoop in tty, sudo bpftrace -Bnone ptysnoop.bt 99999
 ###------CCDC
 clamv               Installs, configures, updates, and runs ClamAV scans with logs and optional quarantine.
 hardening_agent.sh  Collects Linux hardening state and sends or prints JSON reports for CCDC triage. github proyect
-systemd-persist-audit Audits systemd persistence with risk scoring, color, fzf previews, a fallback menu, and JSON output.
+systemd-persist-audit [en binarios-go] [goinst #11] Audits systemd persistence with risk scores, interactive browsing and JSON output.
 ipv6b               Bloquea ipv6 en linux. 
 ccdcinst            Instala los scripts en la bash de todob.
 dcusercreate        Crea usuario en el ccdcteam dominio, tener hosts 172.20.240.102 domain.local
@@ -93,7 +93,7 @@ apache9000          Modifica la configuracion de apache para correr en el puerto
 pwdc                Copia el directorio actual con pwd y xclip
 grubp               Crea una copia de grub, boot, efi y la guarda en /var/lib/os-system, restaura tambien
 mk                  Crea markitdown de los archivos ./mk file
-mann                Wrapper que usa mannm en macOS y mann_amd en Linux desde /opt/4rji/bin
+mann                [en GitHub] [goinst #9] Searches an interactive reference of system administration and networking commands.
 voces               Generates voices using OpenAI.
 
 ###------descargar_cosas
@@ -266,13 +266,13 @@ sshterminal         sshx para compartir una terminal en la pagina web, remota, r
 passcheck           Verifica contrasenas en api.pwnedpasswords.com
 stiginst            Utilidad de verificacion windows por la navy
 lsync               Para syncronizar carpetas, usando archivo lua, rsync. 
-goinst              Installs selected Go tools in /opt/4rji/bin. The Spanish menu switches to English with Shift+E.
+goinst              Installs a selected Go tool in /opt/4rji/bin. The menu offers 27 tools and Shift+E switches to English.
 ipsdown             Baja una base de datos de abuseIP para ips maliciosas
 remotehealthinst    Instala el remotehealth como systectl servicio
 remotehealth        Script que expone los servicios con node zeek suric elastic filebeat
 mcptest             Prueba el mcp con la API base 64 de elasticsearch
 testapisearch       Para probar si la API es lectura escritura en elasticsearch
-zeektest            Prueba filebeat zeek
+zeektest            [en binarios-go] [goinst #27] Queries Zeek DNS events in Elasticsearch and displays key fields.
 zeekmodules         Instala los modules de zeek para filebeat
 suricatatest        Test que prueba conectividad de filebeat con suricata y elasticsearch
 zeeklogs            Muestra los logs de spool (live) y los muestra tambien
@@ -351,7 +351,7 @@ wgcomm              Algunos comandos de wireguard
 pingtime            Ping para verificar si host esta online o no cada 5 segundos o -t #
 sshbaner            de neofinst2 - crea un mensaje de bienvenida de ssh Despues logearse
 portmonitor         Monitorea cuando un puerto se abre, puerto abierto o cerrado. 
-topp                Shows local macOS ports and processes, with the busiest port and its live traffic rate in the menu bar (-d).
+topp                [en GitHub] Shows macOS ports and processes, with the busiest port's traffic rate in the menu bar (-d).
 picoduckytool       Para formatear raspberri pico, se necesito el github en el mio
 dor                 Disables automatic lock, screensaver, and sleep, then restores the previous state on demand
 
@@ -442,8 +442,8 @@ findbin             Para buscar binarios como zeek
 pingz               pingzm en macOS y pingz_amd en Linux. Chequea SSH hosts del config.
 ssh-getkey          se descarga la llave para el script ssh-getpublic
 ssh-getpublic       Descarga la llave publica a la maquina.
-ssh_fzf             Wrapper que ejecuta ssh_fzf_amd en Linux amd64 y ssh_fzfm en macOS arm64.
-sshc                copia directorio o archivo por ssh, lo comprime y descomprime
+ssh_fzf             [en binarios-go] [goinst #6] Selects SSH hosts with fzf and previews their status and network diagnostics.
+sshc                [en binarios-go] [goinst #4] Runs one command across SSH hosts. The bundled shell script copies files over SSH.
 copyrs              Copies files or folders to an SSH config host selected with fzf; -z sends a tar.gz archive.
 sshp                ssh proxy D 1080 en background, completo, bashfun bash function
 sss                 Shows SSH service status, local IP, current user, and SSH port.
@@ -457,7 +457,6 @@ fixssh              Seguido de la ip, para borrar la ip del localhost cuando se 
 cssh                copia tu clave a una maquina remota (Linux/macOS, puerto 22 por defecto)
 confssh             Adds SSH hosts to ~/.ssh/config interactively or from user@host arguments.
 sshmont             Monta una carpeta usando sshh           Edita el banner de inicio de session de ssh, cuando se loguea
-sshc                Runs one SSH command in parallel across configured hosts.
 sshcm               Mac version: envia comando a todos los hosts por medio de ssh, tipo ansible
 sshmoni             Este busca conexiones activas ssh, muestra procesos PID y luego ejecuta killsshmanual
 
@@ -467,7 +466,7 @@ sshmoni             Este busca conexiones activas ssh, muestra procesos PID y lu
 wificonect          Usa el comando nmcli para conectar una red wifi en kali
 mine                Muestra IPs y nombre de interfaz (detecta Linux/Mac). -i agrega CIDR, gateway y DNS
 conexiones          Muestra nmcli conexiones nmcli -p device show y show --active red ethernet speed
-locip               Ejecuta desde /opt/4rji/bin el binario Go correcto: locip-amd en Linux o locipm en Mac ARM.
+locip               [en GitHub] [goinst #1] Looks up IP geolocation via ipinfo.io or a local GeoLite2 database. Prebuilt copies in binarios-go.
 minet               Alias de ifconfig | grep "inet " | grep -v 127.0.0.1
 mired               copia eth0 al portapapeles y muestra todas las ips del equipo                      
 miwl                copia wlan0 al portapapeles  
@@ -485,7 +484,7 @@ pingsw              Barrido de ping en /24, uso: pingsw 10.10.10, muestra hosts 
 littlearp           Version de python de arp, no detecta tan bien como arp-scan
 hashin              Muestra md5  y sha256sum hashes
 virust              Usa la API de virustotal para ver ips.txt o IP su uso. 
-snifferip           Sniffer paquetes red que captura las cabeceras IP en dirección IP especifica (windows).
+snifferip           [en binarios-go] [goinst #22] Captures ICMP packets and displays their protocol and endpoint IPs.
 curls               Envia pruebas HTTP/HTTPS con curl a rutas web comunes de una IPv4 autorizada.
 ataquehttp          HTTP DoS Test Tool de goldeneye, descomprime en tmp y de ahi dice como ejecutarlo.
 inundacion          hping3 un ataque de inundacion flood para pruebas de carga, pregunta por dos ataques
@@ -547,7 +546,7 @@ pnmap               El script escanea los puertos especificados de un host objet
 sweepport           Escane un puerto con python estilo nmap.
 pip2inst            Para instalar pip2 y paramiko
 pythonreq           Instala los requirements para python
-trafico             Genera trafico falso de varios sitios o un sitio tipo ddos webmonitor
+trafico             [en binarios-go] [goinst #2] Generates HTTP or HTTPS traffic for a configurable destination.
 siegee              Genera trafico como hping3 para ddos, webmonitor, como inundacion 
 monitcp             Muestra captura.cap en colores con python, integrado en chismes
 monitcpl            Muestra una lista de todos los archivos pcap cap 
@@ -572,13 +571,13 @@ sshforward          similar to the openssh -R option.
 arper               arp poisonig scapy, crea un archivo y ejecuta arpers, no funciona con unifi Firewall
 bruto               brute forcing directorios, lista all.txt se descarga web hacking no https
 contrawp            Fuerza bruta a wordpress joomla, descarga cain.txt diccionario
-sitemirror          Descarga una pagina web, como sitescrapy, pero en go, mas facil
+sitemirror          [en binarios-go] [goinst #7] Crawls a website with Colly and saves a local copy.
 
 
 ###----- Redteam 
 payloads            Dos payloads win and linux usando msfvenom metasploit
 tun2                Script que crea la interface tun0 y las reglas para enviar trafico por ahi 1080
-tun2socks           Para enviar todo el trafico por el tunnel usando tun0, necesita tun2 1080
+tun2socks           [en binarios-go] [goinst #24] Routes traffic from a TUN interface through a SOCKS or HTTP proxy.
 memory              algunos comandos para ejecutar en memoria comandos
 bloqueatodo         Para acceptar todo trafico o bloquear todo el trafico. 
 servidor            Inicia y detiene un servidor apache en 8080                                           
@@ -596,7 +595,7 @@ msmb                monta un smb o samba
 smbcomm             Explota samba, sarregla s tty, consola interactiva, control c    
 enviarnc            Envia archivos con bash puro, NO NC, hace sha256sum
 recibenc            recibe archivos con nc, usando enviarnc hace sha256sum  
-receiver            Runs receiver-amd on Linux x86-64 or receiver_mac on macOS ARM64 from /opt/4rji/bin.
+receiver            [en binarios-go] [goinst #20] Saves each incoming TCP connection to a numbered file. Default port 1235.
 receiver-amd        Linux x86-64 file receiver binary.
 receiver_mac        macOS ARM64 file receiver binary.
 nalaservicio        Crea un systemctl servicio para la app nala electron.
@@ -610,7 +609,6 @@ shadowsa            Version para arch, de shadows con sslocal, no ss-local
 iodine-connect      Script que conecta iodine a mi c2. automatizado
 scanbl              Scanea dispositivos bluetooth
 ataquebl            Envia ping de ataque para bluetooth, solo funciona en equipos viejos
-airsend             Enviar archivos, mensajes por c2, puerto 443
 ncarchivos          Muestra comandos para nc para enviar archivos o enviar comandos
 socat1              Bajado de https://github.com/aledbf/socat-static-binary/releases/download/v0.0.1/socat-linux-amd64
 linpi               Baja comprimidos, que contiene linpi, enum, chisel, pspy64, etc.
@@ -622,7 +620,7 @@ consola             Obtener una consola interactiva tty.
 shutt               como vpn sshuttle para subnets, muestra subnets disponibles en sshhost, no manda trafico
 shutall             Manda todo el trafico por ssh, como vpn sshuttle 
 proxyverifica       Verifica si funcionan los proxies de una lista CV
-chismes             Ejecuta tcpdump y tshark para ver la red, captura wireshark -add NetworkMonitoring
+chismes             [en GitHub] [goinst #13] Monitors network traffic with tcpdump and tshark.
 proxyloco           Menu para descargar, agente - proxy y tiene -2 para segundo - ligolo
 proxyloco-only      Instala el proxy, interface e inicia - ligolo
 
@@ -637,14 +635,14 @@ sheldonf            nc usa sheldon para enviar un archivo, ejecutar sheldonf hel
 sheldono            while loop con ip integrada a servidor nube
 sheldonol           Simple bash script para escuchar el sheldono, necesita arreglo pty.
 listenerb           Simple bash script para escuchar el sheldono, necesita arreglo pty.
-listener            Escucha sheldono, en go, ya tiene la tty tratada.
+listener            [en binarios-go] Go terminal listener for interactive TTY sessions.
 sheldonos           Sin el loop, el mismo que arriba
 sheldonsafe         Otra version de sheldono, de el curso python
 nala_old            Esconde cualquier proceso, como sheldon
 simbo               Es el CTL Trabaja con sheldono, y nala para esconderme sheldongo- usar python3 en ask
 simboc              En lugar de correr script corre la revershell bash, mas escondida
 nala                El mismo que nala, funciona mejor, usar simbo para esconder
-ezuri               en binarios_go, para cambiar el nombre del proceso. git clone solamente
+ezuri               [en binarios-go] Fork of the Ezuri runtime crypter for Linux ELF files.
 mapa                Busca un proceso despues del script y lo mata ps aux
 ippsec              Script de ippsec de ssh, aun no lo pruebo
 pythonroot          Usa getcap para tener una consola interactiva en python
@@ -709,7 +707,7 @@ banner              Banner SSH/TTY/MOTD con flags: -s Oracle/RHEL, -d Debian/Ubu
 bannerlogin         Modify the banner after login with ssh and also when start computer
 
 verpw               Verifica los permisos de los archivos /etc/passwd u linux claves
-backd               Wrapper: usa backd_amd en Linux amd64 y backdm en macOS M
+backd               [en GitHub] [goinst #12] Shows processes with active network connections. Legacy copies in binarios-go.
 blockip             Bloquea/desbloquea IPs con ipset e iptables; usa -u <IP> para desbloquear
 services            Encuentra servicios que no son del kernel linux corriendo.
 netevils            aun no se    
@@ -803,7 +801,7 @@ redhavi/INSTALLATION.md Documents builds, deployment, monitoring, and exercise o
 ###------ otros
 testfile            Creates random test files with an interactive colored menu; asks for the file count and each file's size in MiB.
 cht                 Marca binarios de /opt/4rji/bin como inmutables. Con -i quita. Detecta Linux/Mac (chattr/chflags)
-dominf              Para investigar un dominio dns, real IP, banner, scan, port open, PTR, subdomain
+dominf              [en binarios-go] [goinst #14] Inspects domain DNS records, reverse DNS, TLS certificates and subdomains.
 wifi-radar          En comprimidos, muestra la calidad de la senal wifi en un webserver, necesitas wifi
 wifi-radar-finder   en comprimidos, muestra las redes wifi con su intensidad para buscarlas
 deploy              * -Despliega una máquina vulnerable en Dockerlabs desde una imagen .tar.
@@ -818,6 +816,88 @@ netstat-cargo       netstat en formato normal cargo
 fall                Bajar todos los updates de gitea
 gcomall             Hacer commit a gitea 
 
+
+###------ Projects - CCDC & blue team
+Scoring-system          [en GitHub] Checks CCDC services and reports their availability over HTTP.
+Windows-ccdc-app        [en GitHub] Shows Windows tray alerts for account creation, RDP logons and Kerberos tickets.
+firewall_with_iptables  [en GitHub] Manages Linux iptables rules and firewall profiles from an interactive menu.
+artilleria-pesada       [en GitHub] Artillery honeypot, host monitoring and alerting tools.
+
+###------ Projects - Incident response & forensics
+forensic-diff-viewer  [en GitHub] Compares two forensic disk images and writes an HTML report of filesystem changes.
+exiftool-webtool      [en GitHub] Inspects and removes metadata from images, PDFs, Office documents and media files.
+
+###------ Projects - Security & pentest tools
+4rji/NmapX          [en GitHub] Interactive Nmap scan menu with a target selector and custom commands.
+TTY-Shell-go        [en GitHub] Go examples of interactive TTY bind and reverse shells.
+routeIM             [en GitHub] Linux router setup for inspecting IoT network traffic.
+pico-ducky-tool     [en GitHub] Sets up Raspberry Pi Pico boards for CircuitPython and DuckyScript.
+CTVault             [en GitHub] Archives Certificate Transparency logs and verifies their cryptographic proofs.
+Web-monitor-siege   [en GitHub] Monitors web request volume and generates HTTP traffic for load testing.
+GhostFox            [en GitHub] Runs an ephemeral Firefox browser with SearXNG in Docker.
+what-is-my-agent    [en GitHub] Shows the visiting browser's IP, User-Agent, operating system and WebSocket support.
+
+###------ Projects - Forks
+ecapture                           [en GitHub] Fork of eCapture for tracing TLS plaintext with eBPF.
+gf                                 [en GitHub] Fork of the gf command for searching with named grep patterns.
+hacks                              [en GitHub] Fork containing one-off scripts and utilities.
+httprobe                           [en GitHub] Fork of httprobe for checking HTTP and HTTPS availability across domain names.
+PANIX                              [en GitHub] Fork of PANIX for Linux persistence research and detection engineering.
+saas-enum                          [en GitHub] Fork for identifying SaaS providers from DNS TXT records.
+scrape-ct-log                      [en GitHub] Fork for downloading Certificate Transparency log entries in bulk.
+ttpoe                              [en GitHub] Fork of Tesla's Transport Protocol over Ethernet implementation.
+
+###------ Projects - Networking, VPN & Wi-Fi
+WireGuard-Switcher  [en GitHub] Rotates WireGuard VPN configurations and displays the current public IP.
+wifi-signal-finder  [en GitHub] Displays nearby Wi-Fi networks and their signal strength in a radar view.
+Detector            [en GitHub] Electron and Vue desktop project for investigating Linux connections and possible backdoors.
+
+###------ Projects - Digi, IoT & MQTT
+MQTT-power-location-Dashboard  [en GitHub] Tracks Digi TX40 voltage and GPS location telemetry.
+mosquitto-dash-mqtt            [en GitHub] Shows MQTT broker and device telemetry in a live web dashboard.
+mqtt-dashboards-python         [en GitHub] Displays MQTT broker and device metrics in Python terminal dashboards.
+
+###------ Projects - macOS apps
+macsync             [en GitHub] Syncs files and folders between a Mac and SSH hosts using rsync.
+Mac-cache-cleaner   [en GitHub] Inspects macOS Library storage and helps remove selected cache files.
+finanzas-app        [en GitHub] Tracks personal accounts, assets, debts and installment plans.
+
+###------ Projects - AI & notes
+notes-ai            [en GitHub] Searches local notes and answers questions using OpenAI or Anthropic models.
+
+###------ Projects - Personal scripts, dotfiles & setup
+nvidia-smi          [en GitHub] Displays NVIDIA GPU utilization, memory use and power consumption.
+
+###------ Projects - Private repositories
+blurzel                           [en GitHub] Dims background windows on macOS and supports pinning selected windows.
+deception-telemetry-lab           [en GitHub] Replays honeypot connection logs on an offline map and telemetry dashboard.
+kasm-analyst                      [en GitHub] Records browser activity in a Kasm sandbox for URL analysis.
+qemu-emulator                     [en GitHub] Emulates Opengear and Digi devices with QEMU and a web console.
+VVP_Platform_CVE                  [en GitHub] Matches CVE advisories to CycloneDX software inventories for vulnerability prioritization.
+nuke-vault                        [en GitHub] [en binarios-go] NukeVault encrypted vault for digital forensics labs.
+nmap-app                          [en GitHub] Private Nmap application project.
+NaviTransit                       [en GitHub] NaviTransit infrastructure capstone for a simulated transportation organization.
+Web4rji                           [en GitHub] Private 4rji web project.
+navitransitapp                    [en GitHub] Private NaviTransit app project.
+Tutoring                          [en GitHub] Private tutoring project.
+labwesite                         [en GitHub] Private lab website project.
+hackinglabswebsite                [en GitHub] Private security labs website project.
+client-test                       [en GitHub] Private client test project.
+surfeandoano                      [en GitHub] Private repository.
+
+###------ binarios-go and goinst
+traficoS                   [en binarios-go] [goinst #3] Simulates HTTPS browsing across predefined domains.
+vulnx                      [goinst #5] Looks up products and versions affected by a CVE.
+autoteclado                [en binarios-go] [goinst #10] Simulates typing and mouse movement with randomized delays.
+encriptar                  [en binarios-go] [goinst #15] Encrypts and decrypts files with a password or key file.
+grubprotect                [en binarios-go] [goinst #16] Snapshots GRUB files, detects changes and can restore the baseline on Linux.
+honeypot                   [en binarios-go] [goinst #17] Simulates network services with the Beelzebub honeypot and its AI plugins.
+liveserver-html-hotreload  [en binarios-go] [goinst #18] Opens an HTML file in Chromium and reloads it when saved.
+nmapx                      [en binarios-go] [goinst #19] Runs Nmap scans from a terminal UI and generates an HTML report for a CIDR or host.
+sandfly-processdecloak     [en binarios-go] [goinst #21] Detects Linux process IDs hidden by kernel rootkits.
+sshendless                 [en binarios-go] [goinst #23] Runs an SSH tarpit that keeps bots connected with a slow, endless banner.
+virus_total                [en binarios-go] [goinst #25] Checks IP reputation in VirusTotal using curl and VT_API_KEY.
+voice-tool                 [en binarios-go] [goinst #26] Converts text to MP3 using OpenAI voices and embedded voice profiles.
 
 ###-Descontinuados
 gobuilder           Crea la estructura en main.go de un script, para go

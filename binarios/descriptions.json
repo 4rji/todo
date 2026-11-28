@@ -12,8 +12,10 @@
     },
     "topp": {
         "name": "topp",
-        "short_desc": "Shows local macOS ports, processes, and traffic rates in a native window or the menu bar.",
+        "short_desc": "[en GitHub] Shows macOS ports and processes, with the busiest port's traffic rate in the menu bar (-d).",
         "detailed_desc": [
+            "GitHub repository 4rji/topp.",
+            "",
             "Run topp from Terminal. It requests sudo to read system-wide socket statistics with nettop.",
             "The window groups local ports by protocol and PID and shows socket state and incoming and outgoing bytes per second.",
             "Process icons also appear in the menu bar summary. Click the info button beside a process in the window for its application, user, parent PID, start time, and executable path when available.",
@@ -72,7 +74,7 @@
     },
     "goinst": {
         "name": "goinst",
-        "short_desc": "Installs selected Go tools in /opt/4rji/bin. The Spanish menu switches to English with Shift+E.",
+        "short_desc": "Installs a selected Go tool in /opt/4rji/bin. The menu offers 27 tools and Shift+E switches to English.",
         "detailed_desc": [
             "Select a tool by number and press Enter. Press Shift+E to toggle all menu descriptions between Spanish and English.",
             "",
@@ -525,8 +527,21 @@
     },
     "backd": {
         "name": "backd",
-        "short_desc": "Monitorea conexiones de red establecidas y muestra datos del proceso en tiempo real.",
-        "detailed_desc": "Este binario ejecuta un bucle infinito que, cada 5 s, lista las conexiones TCP/UDP en estado ESTABLISHED excepto las locales y las asociadas a procesos excluidos (firefox, chrome, google-chrome). Para cada conexión imprime PID, nombre de proceso, usuario, línea de comando, direcciones local/remota y hostname inverso.\n\nEl programa se auto-eleva: si no se ejecuta como root, relanza a sí mismo con sudo preservando variables de entorno. También admite capabilities (cap_net_raw, cap_net_admin) para funcionar sin sudo.\n\nUso: backd\n\nSin argumentos, comienza a monitorizar hasta que el usuario lo interrumpe con Ctrl-C."
+        "short_desc": "[en GitHub] [goinst #12] Shows processes with active network connections. Legacy copies in binarios-go.",
+        "detailed_desc": [
+            "GitHub repository 4rji/backd.",
+            "",
+            "The binarios-go repository retains earlier versions and prebuilt binaries.",
+            "The bundled wrapper selects backd_amd on Linux AMD64 or backdm on Apple Silicon.",
+            "",
+            "Este binario ejecuta un bucle infinito que, cada 5 s, lista las conexiones TCP/UDP en estado ESTABLISHED excepto las locales y las asociadas a procesos excluidos (firefox, chrome, google-chrome). Para cada conexión imprime PID, nombre de proceso, usuario, línea de comando, direcciones local/remota y hostname inverso.",
+            "",
+            "El programa se auto-eleva: si no se ejecuta como root, relanza a sí mismo con sudo preservando variables de entorno. También admite capabilities (cap_net_raw, cap_net_admin) para funcionar sin sudo.",
+            "",
+            "Uso: backd",
+            "",
+            "Sin argumentos, comienza a monitorizar hasta que el usuario lo interrumpe con Ctrl-C."
+        ]
     },
     "comentadas": {
         "name": "comentadas",
@@ -880,13 +895,23 @@
     },
     "dominf": {
         "name": "dominf",
-        "short_desc": "Interactive reconnaissance and enumeration tool for domains.",
-        "detailed_desc": "DomInf is an interactive and fast Go-based tool for gathering information about domains. It allows users to perform tasks like bypassing Cloudflare protection, scanning common TCP ports, grabbing service banners, doing reverse PTR lookups, checking real IP via DNS and HTTP headers, testing for DNS zone transfers, brute-forcing subdomains, and resolving DNS records (A and AAAA). The tool provides a menu-driven interface and saves output to a log file for later analysis. Usage: 'go run dominf.go <domain>'."
+        "short_desc": "[en binarios-go] [goinst #14] Inspects domain DNS records, reverse DNS, TLS certificates and subdomains.",
+        "detailed_desc": [
+            "Source folder dominf in binarios-go.",
+            "",
+            "DomInf is an interactive and fast Go-based tool for gathering information about domains. It allows users to perform tasks like bypassing Cloudflare protection, scanning common TCP ports, grabbing service banners, doing reverse PTR lookups, checking real IP via DNS and HTTP headers, testing for DNS zone transfers, brute-forcing subdomains, and resolving DNS records (A and AAAA). The tool provides a menu-driven interface and saves output to a log file for later analysis. Usage: 'go run dominf.go <domain>'."
+        ]
     },
     "locip": {
         "name": "locip",
-        "short_desc": "Geo-localiza IPs usando GeoLite2 mostrando ciudad, región y país.",
-        "detailed_desc": "Este script en Go utiliza la base de datos GeoLite2-City para geolocalizar direcciones IP. Permite recibir una IP individual como argumento o un archivo de texto (como 'ips.txt') que contenga múltiples IPs, línea por línea. Si no se especifica argumento, intenta leer automáticamente 'ips.txt'. Muestra la ciudad, región (si está disponible) y país asociados a cada IP. Usa la librería 'geoip2-golang' para acceder a la base de datos MaxMind."
+        "short_desc": "[en GitHub] [goinst #1] Looks up IP geolocation via ipinfo.io or a local GeoLite2 database. Prebuilt copies in binarios-go.",
+        "detailed_desc": [
+            "GitHub repository 4rji/LocIp.",
+            "",
+            "The binarios-go repository retains a move notice and prebuilt binaries.",
+            "The bundled wrapper selects locip-amd on Linux AMD64 or locipm on Apple Silicon. The current Go CLI also accepts a file of IP addresses for local lookups.",
+            "The online lookup is the default. The offline database returns the city, region and country when available."
+        ]
     },
     "nmapfiref": {
         "name": "nmapfiref",
@@ -910,8 +935,27 @@
     },
     "trafico": {
         "name": "trafico",
-        "short_desc": "Simulador de navegación web concurrente a sitios populares.",
-        "detailed_desc": "Este script simula tráfico web realista enviando múltiples solicitudes HTTP a una lista de sitios populares como Facebook, YouTube, Instagram, etc. Utiliza goroutines en Go para generar múltiples conexiones en paralelo, lo que permite ajustar el volumen de tráfico enviado. También permite especificar un único objetivo (IP o dominio) como parámetro, reemplazando la lista de sitios por defecto.\n\nParámetros solicitados al ejecutar:\n- Duración de la sesión en minutos (0 = infinito)\n- Delay entre solicitudes en segundos (0 = tráfico rápido)\n- Número de trabajadores (conexiones simultáneas)\n\nTambién puede usarse así:\n  go run trafico.go <sitio_o_ip>\n\nEjemplo:\n  go run trafico.go http://192.168.1.10:8080\n\nEn este modo, todas las solicitudes se dirigirán únicamente a la URL o IP indicada, útil para pruebas dirigidas. El tráfico es completamente válido (HTTP GET), simulando navegación de usuario sin generar errores en servidores con controles básicos. Al finalizar, muestra las URLs que fueron accedidas."
+        "short_desc": "[en binarios-go] [goinst #2] Generates HTTP or HTTPS traffic for a configurable destination.",
+        "detailed_desc": [
+            "Source folder trafico in binarios-go.",
+            "",
+            "Prompts for session duration, delay between requests and number of workers.",
+            "",
+            "Este script simula tráfico web realista enviando múltiples solicitudes HTTP a una lista de sitios populares como Facebook, YouTube, Instagram, etc. Utiliza goroutines en Go para generar múltiples conexiones en paralelo, lo que permite ajustar el volumen de tráfico enviado. También permite especificar un único objetivo (IP o dominio) como parámetro, reemplazando la lista de sitios por defecto.",
+            "",
+            "Parámetros solicitados al ejecutar:",
+            "- Duración de la sesión en minutos (0 = infinito)",
+            "- Delay entre solicitudes en segundos (0 = tráfico rápido)",
+            "- Número de trabajadores (conexiones simultáneas)",
+            "",
+            "También puede usarse así:",
+            "  go run trafico.go <sitio_o_ip>",
+            "",
+            "Ejemplo:",
+            "  go run trafico.go http://192.168.1.10:8080",
+            "",
+            "En este modo, todas las solicitudes se dirigirán únicamente a la URL o IP indicada, útil para pruebas dirigidas. El tráfico es completamente válido (HTTP GET), simulando navegación de usuario sin generar errores en servidores con controles básicos. Al finalizar, muestra las URLs que fueron accedidas."
+        ]
     },
     "webmonitor": {
         "name": "webmonitor",
@@ -1116,8 +1160,12 @@
     },
     "receiver": {
         "name": "receiver",
-        "short_desc": "Launches the file receiver for Linux x86-64 or macOS ARM64.",
+        "short_desc": "[en binarios-go] [goinst #20] Saves each incoming TCP connection to a numbered file. Default port 1235.",
         "detailed_desc": [
+            "Source folder receiver in binarios-go.",
+            "",
+            "The receive port, output directory and filename prefix are configurable.",
+            "",
             "Runs the matching executable from /opt/4rji/bin.",
             "",
             "Linux x86-64: receiver-amd.",
@@ -1284,8 +1332,10 @@
     },
     "systemd-persist-audit": {
         "name": "systemd-persist-audit",
-        "short_desc": "Audits systemd persistence with risk scoring, color, fzf previews, a fallback menu, and JSON output.",
+        "short_desc": "[en binarios-go] [goinst #11] Audits systemd persistence with risk scores, interactive browsing and JSON output.",
         "detailed_desc": [
+            "Source folder systemd-persist-audit in binarios-go.",
+            "",
             "Performs read-only Linux systemd persistence triage with risk scores and English color output.",
             "",
             "Scans services, timers, drop-ins, local units, permissions, ownership, symlinks, restart policies, and suspicious execution directives.",
@@ -1326,8 +1376,13 @@
     },
     "sshc": {
         "name": "sshc",
-        "short_desc": "Runs one SSH command in parallel across configured SSH hosts.",
+        "short_desc": "[en binarios-go] [goinst #4] Runs one command across SSH hosts. The bundled shell script copies files over SSH.",
         "detailed_desc": [
+            "Source folder sshc in binarios-go.",
+            "",
+            "The bundled shell script copies a file or directory to one host through a compressed tar stream.",
+            "",
+            "The Go version from goinst has the following behavior.",
             "Reads ~/.ssh/config and collects Host entries that do not contain wildcard characters.",
             "",
             "Runs the provided command on up to 10 SSH hosts in parallel.",
@@ -1660,8 +1715,12 @@
     },
     "listener": {
         "name": "listener",
-        "short_desc": "Runs the listener binary matching the operating system and architecture.",
+        "short_desc": "[en binarios-go] Go terminal listener for interactive TTY sessions.",
         "detailed_desc": [
+            "Source folder listener in binarios-go.",
+            "",
+            "The project is also documented under the name gocatty.",
+            "",
             "Uses /opt/4rji/bin/listener-amd on Linux AMD64.",
             "Uses /opt/4rji/bin/listener_mac on macOS ARM64.",
             "",
@@ -1683,6 +1742,598 @@
             "At start it scans for hidden processes: every PID from 1 to 99999 is probed with signal 0 and compared with the ps listing. -o skips the scan.",
             "Works with the bash 3.2 that macOS ships; fractional intervals need a newer bash (brew install bash).",
             "Polling cannot guarantee detection of processes that start and exit between two snapshots."
+        ]
+    },
+    "Scoring-system": {
+        "name": "Scoring-system",
+        "short_desc": "[en GitHub] Checks CCDC services and reports their availability over HTTP.",
+        "detailed_desc": [
+            "GitHub repository 4rji/Scoring-system.",
+            "",
+            "Checks web, mail, FTP and DNS services against the scoring configuration."
+        ]
+    },
+    "Windows-ccdc-app": {
+        "name": "Windows-ccdc-app",
+        "short_desc": "[en GitHub] Shows Windows tray alerts for account creation, RDP logons and Kerberos tickets.",
+        "detailed_desc": [
+            "GitHub repository 4rji/Windows-ccdc-app.",
+            "",
+            "Reads local Windows Security events on a domain controller."
+        ]
+    },
+    "firewall_with_iptables": {
+        "name": "firewall_with_iptables",
+        "short_desc": "[en GitHub] Manages Linux iptables rules and firewall profiles from an interactive menu.",
+        "detailed_desc": [
+            "GitHub repository 4rji/firewall_with_iptables.",
+            "",
+            "Lists rules by chain and applies predefined or custom host firewall policies."
+        ]
+    },
+    "artilleria-pesada": {
+        "name": "artilleria-pesada",
+        "short_desc": "[en GitHub] Artillery honeypot, host monitoring and alerting tools.",
+        "detailed_desc": [
+            "GitHub repository 4rji/artilleria-pesada.",
+            "",
+            "Includes the Artillery monitoring and configuration files for blue-team use."
+        ]
+    },
+    "forensic-diff-viewer": {
+        "name": "forensic-diff-viewer",
+        "short_desc": "[en GitHub] Compares two forensic disk images and writes an HTML report of filesystem changes.",
+        "detailed_desc": [
+            "GitHub repository 4rji/forensic-diff-viewer.",
+            "",
+            "The comparison covers file metadata and content differences between captures."
+        ]
+    },
+    "exiftool-webtool": {
+        "name": "exiftool-webtool",
+        "short_desc": "[en GitHub] Inspects and removes metadata from images, PDFs, Office documents and media files.",
+        "detailed_desc": [
+            "GitHub repository 4rji/exiftool-webtool.",
+            "",
+            "The web interface provides a cleaned download and a report of the original metadata."
+        ]
+    },
+    "4rji/NmapX": {
+        "name": "4rji/NmapX",
+        "short_desc": "[en GitHub] Interactive Nmap scan menu with a target selector and custom commands.",
+        "detailed_desc": [
+            "GitHub repository 4rji/NmapX.",
+            "",
+            "The standalone GitHub project has its own scan menu. The nmapx entry covers the CIDR reporting tool in binarios-go."
+        ]
+    },
+    "TTY-Shell-go": {
+        "name": "TTY-Shell-go",
+        "short_desc": "[en GitHub] Go examples of interactive TTY bind and reverse shells.",
+        "detailed_desc": [
+            "GitHub repository 4rji/TTY-Shell-go.",
+            "",
+            "Terminal and network session examples for security labs."
+        ]
+    },
+    "routeIM": {
+        "name": "routeIM",
+        "short_desc": "[en GitHub] Linux router setup for inspecting IoT network traffic.",
+        "detailed_desc": [
+            "GitHub repository 4rji/routeIM.",
+            "",
+            "The project combines wireless access point and bridge configuration for traffic analysis."
+        ]
+    },
+    "pico-ducky-tool": {
+        "name": "pico-ducky-tool",
+        "short_desc": "[en GitHub] Sets up Raspberry Pi Pico boards for CircuitPython and DuckyScript.",
+        "detailed_desc": [
+            "GitHub repository 4rji/pico-ducky-tool.",
+            "",
+            "The project includes board firmware setup and the picoduckytool script."
+        ]
+    },
+    "CTVault": {
+        "name": "CTVault",
+        "short_desc": "[en GitHub] Archives Certificate Transparency logs and verifies their cryptographic proofs.",
+        "detailed_desc": [
+            "GitHub repository 4rji/CTVault.",
+            "",
+            "Stores certificate data locally for research and analysis."
+        ]
+    },
+    "Web-monitor-siege": {
+        "name": "Web-monitor-siege",
+        "short_desc": "[en GitHub] Monitors web request volume and generates HTTP traffic for load testing.",
+        "detailed_desc": [
+            "GitHub repository 4rji/Web-monitor-siege.",
+            "",
+            "Includes a live dashboard and Go traffic generators."
+        ]
+    },
+    "GhostFox": {
+        "name": "GhostFox",
+        "short_desc": "[en GitHub] Runs an ephemeral Firefox browser with SearXNG in Docker.",
+        "detailed_desc": [
+            "GitHub repository 4rji/GhostFox.",
+            "",
+            "Combines a disposable browser session and a search service."
+        ]
+    },
+    "what-is-my-agent": {
+        "name": "what-is-my-agent",
+        "short_desc": "[en GitHub] Shows the visiting browser's IP, User-Agent, operating system and WebSocket support.",
+        "detailed_desc": [
+            "GitHub repository 4rji/what-is-my-agent.",
+            "",
+            "The Express app also displays an approximate location based on the client IP."
+        ]
+    },
+    "ecapture": {
+        "name": "ecapture",
+        "short_desc": "[en GitHub] Fork of eCapture for tracing TLS plaintext with eBPF.",
+        "detailed_desc": [
+            "GitHub repository 4rji/ecapture.",
+            "",
+            "Supports traffic observation on Linux and Android."
+        ]
+    },
+    "gf": {
+        "name": "gf",
+        "short_desc": "[en GitHub] Fork of the gf command for searching with named grep patterns.",
+        "detailed_desc": [
+            "GitHub repository 4rji/gf.",
+            "",
+            "Groups reusable grep options and patterns under short names."
+        ]
+    },
+    "hacks": {
+        "name": "hacks",
+        "short_desc": "[en GitHub] Fork containing one-off scripts and utilities.",
+        "detailed_desc": [
+            "GitHub repository 4rji/hacks.",
+            "",
+            "A collection of independent scripts."
+        ]
+    },
+    "httprobe": {
+        "name": "httprobe",
+        "short_desc": "[en GitHub] Fork of httprobe for checking HTTP and HTTPS availability across domain names.",
+        "detailed_desc": [
+            "GitHub repository 4rji/httprobe.",
+            "",
+            "Reports which web endpoints respond."
+        ]
+    },
+    "PANIX": {
+        "name": "PANIX",
+        "short_desc": "[en GitHub] Fork of PANIX for Linux persistence research and detection engineering.",
+        "detailed_desc": [
+            "GitHub repository 4rji/PANIX.",
+            "",
+            "Cataloged with the security research forks."
+        ]
+    },
+    "saas-enum": {
+        "name": "saas-enum",
+        "short_desc": "[en GitHub] Fork for identifying SaaS providers from DNS TXT records.",
+        "detailed_desc": [
+            "GitHub repository 4rji/saas-enum.",
+            "",
+            "Uses domain verification records as evidence of service use."
+        ]
+    },
+    "scrape-ct-log": {
+        "name": "scrape-ct-log",
+        "short_desc": "[en GitHub] Fork for downloading Certificate Transparency log entries in bulk.",
+        "detailed_desc": [
+            "GitHub repository 4rji/scrape-ct-log.",
+            "",
+            "Command-line client for collecting CT log data."
+        ]
+    },
+    "ttpoe": {
+        "name": "ttpoe",
+        "short_desc": "[en GitHub] Fork of Tesla's Transport Protocol over Ethernet implementation.",
+        "detailed_desc": [
+            "GitHub repository 4rji/ttpoe.",
+            "",
+            "Includes the TTP protocol specification and Linux kernel reference implementation."
+        ]
+    },
+    "WireGuard-Switcher": {
+        "name": "WireGuard-Switcher",
+        "short_desc": "[en GitHub] Rotates WireGuard VPN configurations and displays the current public IP.",
+        "detailed_desc": [
+            "GitHub repository 4rji/WireGuard-Switcher.",
+            "",
+            "The interface also shows city and country information."
+        ]
+    },
+    "wifi-signal-finder": {
+        "name": "wifi-signal-finder",
+        "short_desc": "[en GitHub] Displays nearby Wi-Fi networks and their signal strength in a radar view.",
+        "detailed_desc": [
+            "GitHub repository 4rji/wifi-signal-finder.",
+            "",
+            "Reads wireless scan data and exposes a web display suitable for a Raspberry Pi."
+        ]
+    },
+    "Detector": {
+        "name": "Detector",
+        "short_desc": "[en GitHub] Electron and Vue desktop project for investigating Linux connections and possible backdoors.",
+        "detailed_desc": [
+            "GitHub repository 4rji/Detector.",
+            "",
+            "Part of the author's CCDC-inspired detection project."
+        ]
+    },
+    "MQTT-power-location-Dashboard": {
+        "name": "MQTT-power-location-Dashboard",
+        "short_desc": "[en GitHub] Tracks Digi TX40 voltage and GPS location telemetry.",
+        "detailed_desc": [
+            "GitHub repository 4rji/MQTT-power-location-Dashboard.",
+            "",
+            "Supports MQTT publishing and location data in TAIP or NMEA format."
+        ]
+    },
+    "mosquitto-dash-mqtt": {
+        "name": "mosquitto-dash-mqtt",
+        "short_desc": "[en GitHub] Shows MQTT broker and device telemetry in a live web dashboard.",
+        "detailed_desc": [
+            "GitHub repository 4rji/mosquitto-dash-mqtt.",
+            "",
+            "Includes views for local Mosquitto, HiveMQ Cloud and EMQX Cloud."
+        ]
+    },
+    "mqtt-dashboards-python": {
+        "name": "mqtt-dashboards-python",
+        "short_desc": "[en GitHub] Displays MQTT broker and device metrics in Python terminal dashboards.",
+        "detailed_desc": [
+            "GitHub repository 4rji/mqtt-dashboards-python.",
+            "",
+            "Includes single-broker and multi-broker layouts with live event feeds."
+        ]
+    },
+    "macsync": {
+        "name": "macsync",
+        "short_desc": "[en GitHub] Syncs files and folders between a Mac and SSH hosts using rsync.",
+        "detailed_desc": [
+            "GitHub repository 4rji/macsync.",
+            "",
+            "Saves transfer routes and shows reachability and transfer progress."
+        ]
+    },
+    "Mac-cache-cleaner": {
+        "name": "Mac-cache-cleaner",
+        "short_desc": "[en GitHub] Inspects macOS Library storage and helps remove selected cache files.",
+        "detailed_desc": [
+            "GitHub repository 4rji/Mac-cache-cleaner.",
+            "",
+            "The native LibraryCleaner app identifies cache folders and Xcode build data."
+        ]
+    },
+    "finanzas-app": {
+        "name": "finanzas-app",
+        "short_desc": "[en GitHub] Tracks personal accounts, assets, debts and installment plans.",
+        "detailed_desc": [
+            "GitHub repository 4rji/finanzas-app.",
+            "",
+            "The native app includes balance history and amortization models."
+        ]
+    },
+    "notes-ai": {
+        "name": "notes-ai",
+        "short_desc": "[en GitHub] Searches local notes and answers questions using OpenAI or Anthropic models.",
+        "detailed_desc": [
+            "GitHub repository 4rji/notes-ai.",
+            "",
+            "Reads Markdown, plain text and JSON files in the current directory tree."
+        ]
+    },
+    "mann": {
+        "name": "mann",
+        "short_desc": "[en GitHub] [goinst #9] Searches an interactive reference of system administration and networking commands.",
+        "detailed_desc": [
+            "GitHub repository 4rji/mann.",
+            "",
+            "Uses fzf to preview a command and copy the selection.",
+            "The bundled wrapper selects mannm on macOS or mann_amd on Linux."
+        ]
+    },
+    "nvidia-smi": {
+        "name": "nvidia-smi",
+        "short_desc": "[en GitHub] Displays NVIDIA GPU utilization, memory use and power consumption.",
+        "detailed_desc": [
+            "GitHub repository 4rji/nvidia-smi.",
+            "",
+            "Includes a monitoring agent and a web interface."
+        ]
+    },
+    "blurzel": {
+        "name": "blurzel",
+        "short_desc": "[en GitHub] Dims background windows on macOS and supports pinning selected windows.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/blurzel."
+        ]
+    },
+    "deception-telemetry-lab": {
+        "name": "deception-telemetry-lab",
+        "short_desc": "[en GitHub] Replays honeypot connection logs on an offline map and telemetry dashboard.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/deception-telemetry-lab."
+        ]
+    },
+    "kasm-analyst": {
+        "name": "kasm-analyst",
+        "short_desc": "[en GitHub] Records browser activity in a Kasm sandbox for URL analysis.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/kasm-analyst."
+        ]
+    },
+    "qemu-emulator": {
+        "name": "qemu-emulator",
+        "short_desc": "[en GitHub] Emulates Opengear and Digi devices with QEMU and a web console.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/qemu-emulator."
+        ]
+    },
+    "VVP_Platform_CVE": {
+        "name": "VVP_Platform_CVE",
+        "short_desc": "[en GitHub] Matches CVE advisories to CycloneDX software inventories for vulnerability prioritization.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/VVP_Platform_CVE."
+        ]
+    },
+    "nuke-vault": {
+        "name": "nuke-vault",
+        "short_desc": "[en GitHub] [en binarios-go] NukeVault encrypted vault for digital forensics labs.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/nuke-vault.",
+            "",
+            "The standalone repository is 4rji/nuke-vault. Another source copy is under nuke-program in binarios-go."
+        ]
+    },
+    "nmap-app": {
+        "name": "nmap-app",
+        "short_desc": "[en GitHub] Private Nmap application project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/nmap-app."
+        ]
+    },
+    "NaviTransit": {
+        "name": "NaviTransit",
+        "short_desc": "[en GitHub] NaviTransit infrastructure capstone for a simulated transportation organization.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/NaviTransit."
+        ]
+    },
+    "Web4rji": {
+        "name": "Web4rji",
+        "short_desc": "[en GitHub] Private 4rji web project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/Web4rji."
+        ]
+    },
+    "navitransitapp": {
+        "name": "navitransitapp",
+        "short_desc": "[en GitHub] Private NaviTransit app project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/navitransitapp."
+        ]
+    },
+    "Tutoring": {
+        "name": "Tutoring",
+        "short_desc": "[en GitHub] Private tutoring project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/Tutoring."
+        ]
+    },
+    "labwesite": {
+        "name": "labwesite",
+        "short_desc": "[en GitHub] Private lab website project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/labwesite."
+        ]
+    },
+    "hackinglabswebsite": {
+        "name": "hackinglabswebsite",
+        "short_desc": "[en GitHub] Private security labs website project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/hackinglabswebsite."
+        ]
+    },
+    "client-test": {
+        "name": "client-test",
+        "short_desc": "[en GitHub] Private client test project.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/client-test."
+        ]
+    },
+    "surfeandoano": {
+        "name": "surfeandoano",
+        "short_desc": "[en GitHub] Private repository.",
+        "detailed_desc": [
+            "Private GitHub repository 4rji/surfeandoano."
+        ]
+    },
+    "traficoS": {
+        "name": "traficoS",
+        "short_desc": "[en binarios-go] [goinst #3] Simulates HTTPS browsing across predefined domains.",
+        "detailed_desc": [
+            "Source folder trafico in binarios-go.",
+            "",
+            "A separate command in the trafico project with a built-in list of destinations."
+        ]
+    },
+    "vulnx": {
+        "name": "vulnx",
+        "short_desc": "[goinst #5] Looks up products and versions affected by a CVE.",
+        "detailed_desc": [
+            "Upstream project ProjectDiscovery/cvemap.",
+            "",
+            "The installer uses the vulnx command from this project."
+        ]
+    },
+    "ssh_fzf": {
+        "name": "ssh_fzf",
+        "short_desc": "[en binarios-go] [goinst #6] Selects SSH hosts with fzf and previews their status and network diagnostics.",
+        "detailed_desc": [
+            "Source folder ssh_fzf in binarios-go.",
+            "",
+            "Reads SSH host aliases and opens the selected connection. The bundled wrapper selects ssh_fzf_amd on Linux AMD64 or ssh_fzfm on Apple Silicon."
+        ]
+    },
+    "sitemirror": {
+        "name": "sitemirror",
+        "short_desc": "[en binarios-go] [goinst #7] Crawls a website with Colly and saves a local copy.",
+        "detailed_desc": [
+            "Source folder sitemirror in binarios-go.",
+            "",
+            "Stores downloaded pages and assets on disk."
+        ]
+    },
+    "lanwatchgo": {
+        "name": "lanwatchgo",
+        "short_desc": "[en binarios-go] [goinst #8] Tracks LAN devices with ping and ARP, JSON history and a web dashboard.",
+        "detailed_desc": [
+            "Source folder lanwatchgo in binarios-go.",
+            "",
+            "Records arrivals, address changes and offline devices."
+        ]
+    },
+    "autoteclado": {
+        "name": "autoteclado",
+        "short_desc": "[en binarios-go] [goinst #10] Simulates typing and mouse movement with randomized delays.",
+        "detailed_desc": [
+            "Source folder autoteclado in binarios-go.",
+            "",
+            "Uses robotgo for keyboard and pointer input."
+        ]
+    },
+    "chismes": {
+        "name": "chismes",
+        "short_desc": "[en GitHub] [goinst #13] Monitors network traffic with tcpdump and tshark.",
+        "detailed_desc": [
+            "GitHub repository 4rji/chismes.",
+            "",
+            "Supports packet captures and PCAP analysis."
+        ]
+    },
+    "encriptar": {
+        "name": "encriptar",
+        "short_desc": "[en binarios-go] [goinst #15] Encrypts and decrypts files with a password or key file.",
+        "detailed_desc": [
+            "Source folder encriptar in binarios-go.",
+            "",
+            "Encrypted files use the .enc extension."
+        ]
+    },
+    "grubprotect": {
+        "name": "grubprotect",
+        "short_desc": "[en binarios-go] [goinst #16] Snapshots GRUB files, detects changes and can restore the baseline on Linux.",
+        "detailed_desc": [
+            "Source folder grubprotect in binarios-go.",
+            "",
+            "Uses file hashes to compare the current boot configuration with the saved copy."
+        ]
+    },
+    "honeypot": {
+        "name": "honeypot",
+        "short_desc": "[en binarios-go] [goinst #17] Simulates network services with the Beelzebub honeypot and its AI plugins.",
+        "detailed_desc": [
+            "Source folder honeypot in binarios-go.",
+            "",
+            "Uses service configuration files to define how the simulated services respond."
+        ]
+    },
+    "liveserver-html-hotreload": {
+        "name": "liveserver-html-hotreload",
+        "short_desc": "[en binarios-go] [goinst #18] Opens an HTML file in Chromium and reloads it when saved.",
+        "detailed_desc": [
+            "Source folder liveserver-html-hotreload in binarios-go.",
+            "",
+            "Uses Rod to control the browser and fsnotify to watch the file."
+        ]
+    },
+    "nmapx": {
+        "name": "nmapx",
+        "short_desc": "[en binarios-go] [goinst #19] Runs Nmap scans from a terminal UI and generates an HTML report for a CIDR or host.",
+        "detailed_desc": [
+            "Source folder nmap in binarios-go.",
+            "",
+            "The default executable name is nmapx."
+        ]
+    },
+    "sandfly-processdecloak": {
+        "name": "sandfly-processdecloak",
+        "short_desc": "[en binarios-go] [goinst #21] Detects Linux process IDs hidden by kernel rootkits.",
+        "detailed_desc": [
+            "Source folder sandfly-processdecloak in binarios-go.",
+            "",
+            "The Sandfly utility compares process visibility across sources."
+        ]
+    },
+    "snifferip": {
+        "name": "snifferip",
+        "short_desc": "[en binarios-go] [goinst #22] Captures ICMP packets and displays their protocol and endpoint IPs.",
+        "detailed_desc": [
+            "Source folder snifferip in binarios-go.",
+            "",
+            "The Go installer selects the ICMP sniffer. The bundled Python variant also supports IP capture on Windows."
+        ]
+    },
+    "sshendless": {
+        "name": "sshendless",
+        "short_desc": "[en binarios-go] [goinst #23] Runs an SSH tarpit that keeps bots connected with a slow, endless banner.",
+        "detailed_desc": [
+            "Source folder sshendless in binarios-go.",
+            "",
+            "Go implementation of the endlessh SSH tarpit."
+        ]
+    },
+    "tun2socks": {
+        "name": "tun2socks",
+        "short_desc": "[en binarios-go] [goinst #24] Routes traffic from a TUN interface through a SOCKS or HTTP proxy.",
+        "detailed_desc": [
+            "Source folder tun2socks in binarios-go.",
+            "",
+            "Fork of the tun2socks user-space networking project."
+        ]
+    },
+    "virus_total": {
+        "name": "virus_total",
+        "short_desc": "[en binarios-go] [goinst #25] Checks IP reputation in VirusTotal using curl and VT_API_KEY.",
+        "detailed_desc": [
+            "Source folder virus_total in binarios-go.",
+            "",
+            "The installer pins the revision containing main3.go. The current project also includes a unified client."
+        ]
+    },
+    "voice-tool": {
+        "name": "voice-tool",
+        "short_desc": "[en binarios-go] [goinst #26] Converts text to MP3 using OpenAI voices and embedded voice profiles.",
+        "detailed_desc": [
+            "Source folder voice-tool in binarios-go.",
+            "",
+            "Accepts text or a text file for narration."
+        ]
+    },
+    "zeektest": {
+        "name": "zeektest",
+        "short_desc": "[en binarios-go] [goinst #27] Queries Zeek DNS events in Elasticsearch and displays key fields.",
+        "detailed_desc": [
+            "Source folder zeektest in binarios-go.",
+            "",
+            "Shows timestamps, source and destination IPs, DNS queries, query types and response codes."
+        ]
+    },
+    "ezuri": {
+        "name": "ezuri",
+        "short_desc": "[en binarios-go] Fork of the Ezuri runtime crypter for Linux ELF files.",
+        "detailed_desc": [
+            "Source folder ezuri in binarios-go."
         ]
     }
 }

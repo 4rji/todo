@@ -125,41 +125,42 @@ https://github.com/4rji/client-test
 https://github.com/4rji/surfeandoano
 
 # binarios-go (Go CLI tools, una carpeta por herramienta)
-https://github.com/4rji/binarios-go/tree/main/amigo - Chat CLI con OpenAI, asistente corto de programación/Linux/pentesting
+
 https://github.com/4rji/binarios-go/tree/main/autoteclado - Simula tecleo y movimiento de ratón "humano" con retardos aleatorios (robotgo)
-https://github.com/4rji/binarios-go/tree/main/backd - Monitor interactivo de conexiones de red por proceso (TCP/UDP), vista de actividad y kill; variantes simple/udp/legacy
-https://github.com/4rji/binarios-go/tree/main/binarios-go - Binarios precompilados de las herramientas (macOS/Linux/Windows)
-https://github.com/4rji/binarios-go/tree/main/chismes - Menú para capturar tráfico con tcpdump y analizar .pcap (IPs, puertos, MACs, top target)
+
 https://github.com/4rji/binarios-go/tree/main/dominf - Suite interactiva de recon de dominios: DNS A/AAAA, PTR, TLS, IPs de origen tras CDN, AXFR, brute force de subdominios
 https://github.com/4rji/binarios-go/tree/main/encriptar - Cifra/descifra archivos con password o key file (-e/-d, extensión .enc)
-https://github.com/4rji/binarios-go/tree/main/estrella_muerte_animacion_go - Kit reutilizable del splash animado Estrella de la Muerte para CLIs Go/Bubble Tea
 https://github.com/4rji/binarios-go/tree/main/ezuri - Fork de guitmz/ezuri: crypter runtime de binarios ELF en Linux
 https://github.com/4rji/binarios-go/tree/main/grubprotect - Snapshot de archivos GRUB, detecta cambios y restaura baseline (labs/competencias)
 https://github.com/4rji/binarios-go/tree/main/honeypot - Fork de Beelzebub: framework honeypot low-code con IA para simular servicios de alta interacción
 https://github.com/4rji/binarios-go/tree/main/lanwatchgo - Escáner/monitor LAN sin dependencias (ping + ARP), historial JSON, CLI y dashboard web
+
 https://github.com/4rji/binarios-go/tree/main/listener - gocatty: listener de reverse shell con TTY raw y bootstrap automático de PTY; incluye receiver de archivos
 https://github.com/4rji/binarios-go/tree/main/liveserver-html-hotreload - Abre un HTML en Chromium (Rod) y lo recarga al guardar (fsnotify)
 https://github.com/4rji/binarios-go/tree/main/locip - Geolocalización de IPs desde la CLI
-https://github.com/4rji/binarios-go/tree/main/nmap - NmapX: TUI que orquesta escaneos nmap sobre un CIDR y genera reporte HTML
-https://github.com/4rji/binarios-go/tree/main/nuke-program - NukeVault: bóveda cifrada destructiva (Go + Wails 3) para labs de forense; se borra con password nuke, 3 fallos o timeout
-https://github.com/4rji/binarios-go/tree/main/openstack - OpenStack Lab Portal: web + Electron (React/Vite + Express) para lanzar labs con Heat templates
-https://github.com/4rji/binarios-go/tree/main/pingz - pingm: revisa qué hosts de ~/.ssh/config están online (TCP + latencia)
-https://github.com/4rji/binarios-go/tree/main/proxmox-lab - Proxmox Lab Portal: variante del portal de labs para Proxmox (web + Electron)
+
+este cambialo para que genere el binario con el nombre nmapx
+https://github.com/4rji/binarios-go/tree/main/nmap - NmapX: TUI que orquesta escaneos nmap sobre un CIDR y genera reporte HTML  
+
+
+
 https://github.com/4rji/binarios-go/tree/main/receiver - Receptor TCP de archivos: guarda cada conexión como archivo secuencial (puerto 1235 por defecto)
 https://github.com/4rji/binarios-go/tree/main/sandfly-processdecloak - Fork de Sandfly: detecta PIDs ocultos por rootkits LKM (Diamorphine, Reptile)
-https://github.com/4rji/binarios-go/tree/main/screenshots_swift - MacOCR (Swift): OCR local de pantalla en macOS con Vision, copia texto al portapapeles
+
+
 https://github.com/4rji/binarios-go/tree/main/sitemirror - Crawler (colly) que descarga un sitio web y crea copia local
 https://github.com/4rji/binarios-go/tree/main/snifferip - Sniffer raw socket mínimo: protocolo, IP origen y destino (ICMP)
 https://github.com/4rji/binarios-go/tree/main/ssh_fzf - Selector de hosts SSH con fzf, estado online/offline y diagnósticos de red en preview (dig, gping, mtr, trip, traceroute)
-https://github.com/4rji/binarios-go/tree/main/sshc - Ejecuta el mismo comando en paralelo en todos los hosts de ~/.ssh/config
+
 https://github.com/4rji/binarios-go/tree/main/sshendless - endlessh-go: tarpit SSH que retiene bots con banner infinito
-https://github.com/4rji/binarios-go/tree/main/sshhost - Conector a hosts SSH (descontinuado, reemplazado por ssh_fzf)
+
 https://github.com/4rji/binarios-go/tree/main/systemd-persist-audit - Triage read-only de persistencia systemd en Linux con risk scoring, JSON y modo interactivo
-https://github.com/4rji/binarios-go/tree/main/todo - TUI (Bubble Tea) para buscar, previsualizar y ejecutar scripts de /opt/4rji/bin
+
 https://github.com/4rji/binarios-go/tree/main/trafico - Simuladores de tráfico HTTP/HTTPS (trafico configurable, traficoS con dominios predefinidos)
-https://github.com/4rji/binarios-go/tree/main/tty - Reverse shell y bind shell con PTY, más listener simple (rev, bind, ttyrecibe)
+
+
 https://github.com/4rji/binarios-go/tree/main/tun2socks - Fork de xjasonlyu/tun2socks: túnel de interfaz TUN hacia proxy SOCKS/HTTP
 https://github.com/4rji/binarios-go/tree/main/virus_total - Consulta reputación de IPs en VirusTotal API (usar main3.go)
 https://github.com/4rji/binarios-go/tree/main/voice-tool - CLI voces: texto a MP3 con OpenAI TTS + módulos TTS para presentaciones
-https://github.com/4rji/binarios-go/tree/main/wifito - Deadnet en Go: ARP poisoning IPv4 + RA spoofing IPv6 (pruebas de lab)
+
 https://github.com/4rji/binarios-go/tree/main/zeektest - Consulta logs Zeek en Elasticsearch (_search) y muestra campos clave
