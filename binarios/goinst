@@ -33,6 +33,64 @@ install_ssh_fzf() (
     fi
 )
 
+# backd vive en github.com/4rji/backd y no trae go.mod en la raíz;
+# clonar, inicializar el módulo si falta y compilar.
+install_backd() (
+    set -euo pipefail
+    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
+    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
+
+    temporal=$(mktemp -d)
+    trap 'rm -rf -- "$temporal"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    git clone --depth 1 https://github.com/4rji/backd.git "$temporal/repo"
+    destino=$(go env GOBIN)
+    if [ -z "$destino" ]; then
+        gopath=$(go env GOPATH)
+        destino="${gopath%%:*}/bin"
+    fi
+    cd "$temporal/repo"
+    if [ ! -f go.mod ]; then
+        go mod init github.com/4rji/backd
+        go mod tidy
+    fi
+    go build -o "$temporal/backd" .
+    mkdir -p "$destino"
+    install -m 755 "$temporal/backd" "$destino/backd"
+    printf 'Instalado: %s/backd\n' "$destino"
+)
+
+# chismes: compilar desde el repo clonado (no depende del path del módulo).
+install_chismes() (
+    set -euo pipefail
+    command -v go >/dev/null 2>&1 || { echo "Falta Go en PATH." >&2; exit 1; }
+    command -v git >/dev/null 2>&1 || { echo "Falta git en PATH." >&2; exit 1; }
+
+    temporal=$(mktemp -d)
+    trap 'rm -rf -- "$temporal"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    git clone --depth 1 https://github.com/4rji/chismes.git "$temporal/repo"
+    destino=$(go env GOBIN)
+    if [ -z "$destino" ]; then
+        gopath=$(go env GOPATH)
+        destino="${gopath%%:*}/bin"
+    fi
+    cd "$temporal/repo"
+    go build -o "$temporal/chismes" .
+    mkdir -p "$destino"
+    install -m 755 "$temporal/chismes" "$destino/chismes"
+    printf 'Instalado: %s/chismes\n' "$destino"
+    for herramienta in tcpdump tshark; do
+        if ! command -v "$herramienta" >/dev/null 2>&1; then
+            echo "Para usar chismes necesitas instalar $herramienta."
+        fi
+    done
+)
+
 OPTIONS=(
   "locip — Locate IPs from the CLI"
   "trafico — Configurable traffic simulator for a specific target"
@@ -45,6 +103,8 @@ OPTIONS=(
   "mann — Install github.com/4rji/mann"
   "autoteclado — Install github.com/4rji/binarios-go/autoteclado"
   "systemd-persist-audit — Audit systemd persistence with risk-sorted views"
+  "backd — Show processes with active network connections (github.com/4rji/backd)"
+  "chismes — Watch the network with tcpdump/tshark (github.com/4rji/chismes)"
   "Quit"
 )
 
@@ -60,6 +120,8 @@ commands=(
   "go install github.com/4rji/mann@latest"
   "go install github.com/4rji/binarios-go/autoteclado@latest"
   "go install github.com/4rji/binarios-go/systemd-persist-audit@latest && if ! command -v fzf >/dev/null 2>&1; then go install github.com/junegunn/fzf@latest; fi"
+  "install_backd"
+  "install_chismes"
 )
 
 bins=(
@@ -74,6 +136,8 @@ bins=(
   "mann"
   "autoteclado"
   "systemd-persist-audit"
+  "backd"
+  "chismes"
 )
 
 echo ""
@@ -129,6 +193,8 @@ case $idx in
   8) echo -e "  \033[36mInstall mann from github.com/4rji/mann.\033[0m" ;;
   9) echo -e "  \033[36mInstall autoteclado from github.com/4rji/binarios-go/autoteclado.\033[0m" ;;
   10) echo -e "  \033[36mRead-only systemd persistence audit with color, fzf, and a built-in menu.\033[0m" ;;
+  11) echo -e "  \033[36mLive list of processes with network connections; drill in, watch I/O, kill.\033[0m" ;;
+  12) echo -e "  \033[36mNetwork watcher using tcpdump and tshark; needs both installed.\033[0m" ;;
 esac
 
 echo ""
